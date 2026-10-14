@@ -1,0 +1,303 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AddressInfo } from 'node:net';
+
+const store = vi.hoisted(() => ({
+  devices: [] as Array<Record<string, any>>,
+  encounters: [] as Array<Record<string, any>>,
+  deviceFindError: undefined as unknown,
+}));
+
+vi.mock('./models/Device', () => {
+  class FakeDevice {
+    [key: string]: any;
+
+    constructor(values: Record<string, any>) {
+      Object.assign(this, values);
+    }
+
+    async save() {
+      const index = store.devices.findIndex(device => device.deviceId === this.deviceId);
+      if (index < 0) store.devices.push(this);
+      else store.devices[index] = this;
+      return this;
+    }
+
+    toObject() {
+      return { ...this };
+    }
+
+    static find(filter: Record<string, any>) {
+      const rows = store.devices.filter(device => Object.entries(filter).every(([key, value]) => device[key] === value));
+      return {
+        sort: async () => {
+          if (store.deviceFindError) throw store.deviceFindError;
+          return rows;
+        },
+      };
+    }
+
+    static async findOne(filter: Record<string, any>) {
+      const found = store.devices.find(device => Object.entries(filter).every(([key, value]) => device[key] === value));
+      return found ? Object.assign(Object.create(FakeDevice.prototype), found) : null;
+    }
+  }
+
+  return { default: FakeDevice };
+});
+
+vi.mock('./models/RecoveryEncounter', () => {
+  class FakeEncounter {
+    [key: string]: any;
+
+    constructor(values: Record<string, any>) {
+      Object.assign(this, values);
+    }
+
+    async save() {
+      if (this.deduplicationKey && store.encounters.some(encounter =>
+        encounter.ownerId === this.ownerId &&
+        encounter.deviceId === this.deviceId &&
+        encounter.deduplicationKey === this.deduplicationKey
+      )) {
+        throw Object.assign(new Error('Duplicate encounter key.'), { code: 11000 });
+      }
+      this.createdAt = new Date();
+      store.encounters.push(this);
+      return this;
+    }
+
+    toObject() {
+      return { ...this };
+    }
+
+    static find(filter: Record<string, any>) {
+      const rows = store.encounters.filter(encounter => Object.entries(filter).every(([key, value]) => encounter[key] === value));
+      const query = {
+        sort: () => query,
+        limit: async (count: number) => rows.slice(0, count),
+      };
+      return query;
+    }
+
+    static async findOne(filter: Record<string, any>) {
+      const found = store.encounters.find(encounter => Object.entries(filter).every(([key, value]) => encounter[key] === value));
+      return found ? Object.assign(Object.create(FakeEncounter.prototype), found) : null;
+    }
+  }
+
+  return { default: FakeEncounter };
+});
+
+import app from './app';
+
+describe('recovery API integration', () => {
+  let origin: string;
+  let server: ReturnType<typeof app.listen>;
+
+  beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
+    process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
+    process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = 'blueguardian-participant-token';
+    process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+    server = app.listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    const address = server.address() as AddressInfo;
+    origin = `http://127.0.0.1:${address.port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+  });
+
+  beforeEach(() => {
+    store.devices.length = 0;
+    store.encounters.length = 0;
+    store.deviceFindError = undefined;
+  });
+
+  const ownerHeaders = { Authorization: 'Bearer blueguardian-owner-token' };
+  it('persists registrations, ignores client owner IDs, and returns owner-authorized records', async () => {
+    const registration = await fetch(`${origin}/api/recovery/devices`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'browser-device-1',
+        deviceIdentifier: 'browser-device-1',
+        deviceName: 'Owner earbuds',
+        ownerId: 'untrusted-client-owner',
+        discoverySource: 'REAL',
+        recoveryState: 'lost',
+      }),
+    });
+
+    expect(registration.status).toBe(201);
+    expect(store.devices[0].ownerId).toBe('test-owner');
+    expect(store.devices[0].ownerId).not.toBe('untrusted-client-owner');
+
+    const list = await fetch(`${origin}/api/recovery/devices`, { headers: ownerHeaders });
+    expect(list.status).toBe(200);
+    expect(await list.json()).toMatchObject([{ deviceId: 'browser-device-1', recoveryState: 'lost' }]);
+
+    store.devices.push({ ...store.devices[0], deviceId: 'another-owner-device', ownerId: 'different-owner' });
+    const unauthorizedRead = await fetch(`${origin}/api/recovery/devices/another-owner-device`, { headers: ownerHeaders });
+    expect(unauthorizedRead.status).toBe(404);
+    const unauthorizedEncounter = await fetch(`${origin}/api/recovery/devices/another-owner-device/encounters`, { headers: ownerHeaders });
+    expect(unauthorizedEncounter.status).toBe(404);
+  });
+
+  it('rejects unauthenticated registration and invalid encounter payloads', async () => {
+    const denied = await fetch(`${origin}/api/recovery/devices`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceName: 'Not authorized', deviceIdentifier: 'device-x' }),
+    });
+    expect(denied.status).toBe(401);
+
+    store.devices.push({
+      deviceId: 'device-x',
+      deviceIdentifier: 'device-x',
+      ownerId: 'test-owner',
+      name: 'Test device',
+      discoverySource: 'REAL',
+      recoveryState: 'lost',
+    });
+    const participantDenied = await fetch(`${origin}/api/recovery/devices/device-x/encounters`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'REAL' }),
+    });
+    expect(participantDenied.status).toBe(401);
+
+    const invalid = await fetch(`${origin}/api/recovery/devices/device-x/encounters`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'UNKNOWN' }),
+    });
+    expect(invalid.status).toBe(400);
+  });
+
+  it('rejects missing and invalid owner bearer tokens without logging token values', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const missing = await fetch(`${origin}/api/recovery/devices`);
+      const invalid = await fetch(`${origin}/api/recovery/devices`, {
+        headers: { Authorization: 'Bearer invalid-owner-token' },
+      });
+
+      expect(missing.status).toBe(401);
+      expect(invalid.status).toBe(401);
+      expect(missing.headers.get('cache-control')).toContain('no-store');
+      expect(invalid.headers.get('cache-control')).toContain('no-store');
+      expect(warn).toHaveBeenCalledWith('[auth] rejected protected request category=missing_bearer_token role=owner');
+      expect(warn).toHaveBeenCalledWith('[auth] rejected protected request category=invalid_owner_token role=owner');
+      expect(warn.mock.calls.flat().join(' ')).not.toContain('invalid-owner-token');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('returns an uncached response body for conditional authenticated device-list requests', async () => {
+    const first = await fetch(`${origin}/api/recovery/devices`, { headers: ownerHeaders });
+    expect(first.status).toBe(200);
+    expect(first.headers.get('cache-control')).toContain('no-store');
+    expect(await first.json()).toEqual([]);
+
+    const etag = first.headers.get('etag');
+    expect(etag).toBeTruthy();
+    const conditional = await fetch(`${origin}/api/recovery/devices`, {
+      headers: { ...ownerHeaders, 'If-None-Match': etag! },
+    });
+
+    expect(conditional.status).toBe(200);
+    expect(conditional.headers.get('cache-control')).toContain('no-store');
+    expect(await conditional.json()).toEqual([]);
+  });
+
+  it('returns a safe service-unavailable response and logs recovery storage failure category', async () => {
+    store.deviceFindError = Object.assign(new Error('server selection timed out'), {
+      name: 'MongoServerSelectionError',
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const response = await fetch(`${origin}/api/recovery/devices`, { headers: ownerHeaders });
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: 'Recovery storage is unavailable. Retry after the database connection is restored.',
+      });
+      expect(error).toHaveBeenCalledWith(expect.stringMatching(
+        /^\[api\] request failed category=database_unavailable method=GET route=\/devices dbState=\d errorName=MongoServerSelectionError$/,
+      ));
+      expect(error.mock.calls.flat().join(' ')).not.toContain('server selection timed out');
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it('stores an actual owner browser observation, returns sightings, and persists recovered state', async () => {
+    store.devices.push({
+      deviceId: 'device-y',
+      deviceIdentifier: 'device-y',
+      ownerId: 'test-owner',
+      name: 'Test device',
+      discoverySource: 'REAL',
+      recoveryState: 'lost',
+    });
+
+    const submitted = await fetch(`${origin}/api/recovery/devices/device-y/encounters`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'REAL',
+        simulated: false,
+        isTestFixture: false,
+        description: 'Selected in the Web Bluetooth device picker.',
+      }),
+    });
+    expect(submitted.status).toBe(201);
+    expect(await submitted.json()).not.toHaveProperty('ownerId');
+    expect(store.encounters).toHaveLength(1);
+    expect(store.encounters[0].location).toBeUndefined();
+    expect(store.encounters[0].confidence).toBeUndefined();
+
+    const duplicate = await fetch(`${origin}/api/recovery/devices/device-y/encounters`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source: 'REAL',
+        simulated: false,
+        isTestFixture: false,
+        description: 'Selected in the Web Bluetooth device picker.',
+      }),
+    });
+    expect(duplicate.status).toBe(200);
+    expect(await duplicate.json()).toMatchObject({ duplicate: true });
+    expect(store.encounters).toHaveLength(1);
+
+    const sightings = await fetch(`${origin}/api/recovery/devices/device-y/encounters`, { headers: ownerHeaders });
+    expect(sightings.status).toBe(200);
+    expect(await sightings.json()).toMatchObject([{ source: 'REAL', simulated: false }]);
+
+    const stateUpdate = await fetch(`${origin}/api/recovery/devices/device-y`, {
+      method: 'PATCH',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'recovered' }),
+    });
+    expect(stateUpdate.status).toBe(200);
+
+    const invalidState = await fetch(`${origin}/api/recovery/devices/device-y`, {
+      method: 'PATCH',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'archived' }),
+    });
+    expect(invalidState.status).toBe(400);
+
+    const summary = await fetch(`${origin}/api/recovery/devices/device-y`, { headers: ownerHeaders });
+    expect(await summary.json()).toMatchObject({
+      recoveryState: 'recovered',
+      encounterCount: 1,
+      lastKnownLocation: null,
+    });
+  });
+});
