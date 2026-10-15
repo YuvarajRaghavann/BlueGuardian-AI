@@ -9,6 +9,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   Clock3,
+  Bluetooth,
+  MapPin,
 } from 'lucide-react';
 
 const typeIcons = {
@@ -18,6 +20,10 @@ const typeIcons = {
   pair: ShieldCheck,
   unpair: Unlink,
   alert: AlertTriangle,
+  device: Bluetooth,
+  security_action: ShieldCheck,
+  threat: AlertTriangle,
+  recovery: MapPin,
 } as const;
 
 const severityStyles = {

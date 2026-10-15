@@ -24,9 +24,11 @@ import { useSecurity } from '../context/SecurityContext';
 import type { BluetoothDevice } from '../types';
 import { needsManualApproval } from '../utils/connectionPolicy';
 import { visibleEvents } from '../utils/visibleEvents';
+import { useWorkflowEvents } from '../hooks/useWorkflowEvents';
 
 export function Dashboard() {
   const { state, scanDevices } = useBluetoothDevices();
+  const workflowEvents = useWorkflowEvents();
   const { state: threatState } = useThreats();
   const { state: securityState, executeAction } = useSecurity();
   const [pendingApproval, setPendingApproval] = useState<BluetoothDevice | null>(null);
@@ -98,7 +100,9 @@ export function Dashboard() {
     timestamp: t.detectedAt,
     simulated: t.discoverySource === 'SIMULATED',
   }));
-  const timelineEvents = visibleEvents(threatEvents, securityState.policy.showSimulatedEvents);
+  const visibleWorkflowEvents = visibleEvents(workflowEvents, securityState.policy.showSimulatedEvents);
+  const timelineSource = visibleWorkflowEvents.length > 0 ? visibleWorkflowEvents : threatEvents;
+  const timelineEvents = visibleEvents(timelineSource, securityState.policy.showSimulatedEvents).slice(0, 5);
 
   const scanActive = state.scan.state === 'scanning';
 
