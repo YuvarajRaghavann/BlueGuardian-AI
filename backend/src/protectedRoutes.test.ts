@@ -59,6 +59,7 @@ describe('protected API routes', () => {
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+    delete process.env.BLUEGUARDIAN_CORS_ORIGINS;
   });
 
   it('allows only explicitly configured browser origins', async () => {
