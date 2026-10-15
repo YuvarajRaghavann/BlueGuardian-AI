@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { X, ShieldCheck, AlertTriangle, Ban, Clock, Target, Brain } from 'lucide-react';
 import type { Threat } from '../types';
 import { StatusBadge } from './StatusBadge';
@@ -5,6 +6,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { useThreats } from '../context/ThreatContext';
 import { useSecurity } from '../context/SecurityContext';
 import { recordWorkflowEvent } from '../services/workflowEventService';
+import { api, hasOwnerSessionToken } from '../services/api';
 
 interface ThreatDetailModalProps {
   threat: Threat | null;
@@ -14,6 +16,8 @@ interface ThreatDetailModalProps {
 export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
   const { dispatch } = useThreats();
   const { state: securityState } = useSecurity();
+  const [savingStatus, setSavingStatus] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
   if (!threat) return null;
 
   const severityColors = {
@@ -23,12 +27,41 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
     critical: 'bg-red-900/30 text-red-400',
   };
 
-  const updateStatus = (status: 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED', message: string) => {
+  const updateStatus = async (status: 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED', message: string) => {
+    setStatusError(null);
     const actionType = {
       INVESTIGATING: 'INVESTIGATE_THREAT',
       RESOLVED: 'RESOLVE_THREAT',
       DISMISSED: 'DISMISS_THREAT',
     } as const;
+    if (hasOwnerSessionToken()) {
+      // Server-side status changes require the persisted Mongo threat id, not a local UI id.
+      if (!/^[a-f\\d]{24}$/i.test(threat.id)) {
+        setStatusError('This is a browser-local threat, not a persisted backend assessment. Refresh the backend assessment before changing its cloud status.');
+        return;
+      }
+      setSavingStatus(true);
+      try {
+        const backendAction = status === 'INVESTIGATING'
+          ? 'INVESTIGATE'
+          : status === 'RESOLVED' ? 'RESOLVE_THREAT' : 'DISMISS_THREAT';
+        await api.actions.create({
+          deviceId: threat.deviceId,
+          deviceName: threat.deviceName,
+          action: backendAction,
+          source: 'USER',
+          simulated: threat.discoverySource === 'SIMULATED',
+          reason: message,
+          threatId: threat.id,
+        });
+      } catch (caught) {
+        setStatusError(caught instanceof Error ? caught.message : 'The backend did not save this threat status.');
+        return;
+      } finally {
+        setSavingStatus(false);
+      }
+    }
+
     dispatch({ type: actionType[status], payload: threat.id });
     recordWorkflowEvent({
       type: 'threat',
@@ -131,24 +164,30 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
             <p className="text-sm text-white">{threat.recommendedAction}</p>
           </section>
 
+          {statusError && (
+            <p role="alert" className="rounded-lg border border-red-800 bg-red-950/40 px-3 py-2 text-sm text-red-300">
+              {statusError}
+            </p>
+          )}
+
           {/* Actions */}
           <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-800">
             {threat.status !== 'RESOLVED' && threat.status !== 'DISMISSED' && (
               <>
                 <button
-                  onClick={() => updateStatus('INVESTIGATING', 'marked for investigation')}
+                  disabled={savingStatus} onClick={() => void updateStatus('INVESTIGATING', 'marked for investigation')}
                   className="px-4 py-2 bg-yellow-900/30 text-yellow-400 rounded-lg hover:bg-yellow-900/50 transition-colors flex items-center gap-2"
                 >
                   <Target className="w-4 h-4" /> Mark Investigating
                 </button>
                 <button
-                  onClick={() => updateStatus('RESOLVED', 'marked resolved')}
+                  disabled={savingStatus} onClick={() => void updateStatus('RESOLVED', 'marked resolved')}
                   className="px-4 py-2 bg-green-900/30 text-green-400 rounded-lg hover:bg-green-900/50 transition-colors flex items-center gap-2"
                 >
                   <ShieldCheck className="w-4 h-4" /> Resolve
                 </button>
                 <button
-                  onClick={() => updateStatus('DISMISSED', 'dismissed by the user')}
+                  disabled={savingStatus} onClick={() => void updateStatus('DISMISSED', 'dismissed by the user')}
                   className="px-4 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors flex items-center gap-2"
                 >
                   <Ban className="w-4 h-4" /> Dismiss
@@ -157,7 +196,7 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
             )}
             {(threat.status === 'RESOLVED' || threat.status === 'DISMISSED') && (
               <button
-                onClick={() => updateStatus('INVESTIGATING', 'reopened for investigation')}
+                disabled={savingStatus} onClick={() => void updateStatus('INVESTIGATING', 'reopened for investigation')}
                 className="px-4 py-2 bg-accent/20 text-accent rounded-lg hover:bg-accent/30 transition-colors flex items-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" /> Reopen
