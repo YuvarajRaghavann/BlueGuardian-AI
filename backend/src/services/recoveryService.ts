@@ -29,6 +29,25 @@ export class RecoveryValidationError extends Error {
   readonly status = 400;
 }
 
+export class RecoveryTransitionError extends Error {
+  readonly status = 409;
+}
+
+const ALLOWED_RECOVERY_TRANSITIONS: Record<RecoveryStatus, RecoveryStatus[]> = {
+  lost: ['searching', 'found', 'recovered'],
+  searching: ['lost', 'found', 'recovered'],
+  found: ['lost', 'searching', 'recovered'],
+  recovered: ['lost'],
+};
+
+export function assertRecoveryTransition(currentValue: string | undefined, nextValue: RecoveryStatus): void {
+  const current = normalizeRecoveryState(currentValue);
+  if (current === nextValue) return;
+  if (!ALLOWED_RECOVERY_TRANSITIONS[current].includes(nextValue)) {
+    throw new RecoveryTransitionError(`Recovery case cannot move from ${current} to ${nextValue}. Reopen a recovered case as lost first.`);
+  }
+}
+
 export function normalizeRecoveryState(value?: string): RecoveryStatus {
   if (value === 'lost' || value === 'searching' || value === 'found' || value === 'recovered') {
     return value;

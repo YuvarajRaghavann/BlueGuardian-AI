@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { requireAuth } from './auth';
 import {
+  assertRecoveryTransition,
   buildAuthorizedRecoveryRecord,
   normalizeRecoveryState,
   validateEncounterInput,
@@ -8,6 +9,34 @@ import {
 } from './services/recoveryService';
 
 const originalEnv = { ...process.env };
+
+describe('recovery state transitions', () => {
+  it.each([
+    ['lost', 'searching'],
+    ['lost', 'found'],
+    ['lost', 'recovered'],
+    ['searching', 'lost'],
+    ['searching', 'found'],
+    ['searching', 'recovered'],
+    ['found', 'lost'],
+    ['found', 'searching'],
+    ['found', 'recovered'],
+    ['recovered', 'lost'],
+  ] as const)('allows %s -> %s', (current, next) => {
+    expect(() => assertRecoveryTransition(current, next)).not.toThrow();
+  });
+
+  it.each([
+    ['recovered', 'searching'],
+    ['recovered', 'found'],
+  ] as const)('rejects %s -> %s until the case is reopened', (current, next) => {
+    expect(() => assertRecoveryTransition(current, next)).toThrow(/cannot move from/);
+  });
+
+  it('allows idempotent retries of the current state', () => {
+    expect(() => assertRecoveryTransition('searching', 'searching')).not.toThrow();
+  });
+});
 
 describe('recovery auth and validation', () => {
   beforeEach(() => {

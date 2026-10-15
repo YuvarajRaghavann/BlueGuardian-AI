@@ -7,6 +7,7 @@ import {
   buildAuthorizedRecoveryRecord,
   normalizeRecoveryState,
   RecoveryValidationError,
+  assertRecoveryTransition,
   validateEncounterInput,
   validateRegistrationInput,
 } from '../services/recoveryService';
@@ -130,6 +131,7 @@ router.patch('/devices/:deviceId', requireAuth('owner'), async (req, res, next) 
       return res.status(404).json({ error: 'Recovery device not found for this owner.' });
     }
 
+    assertRecoveryTransition(device.recoveryState, nextState);
     device.recoveryState = nextState;
     await device.save();
     return res.json(device);
