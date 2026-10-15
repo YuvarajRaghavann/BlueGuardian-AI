@@ -148,7 +148,7 @@ export async function startOidcLogin(): Promise<void> {
 
 function clearCallbackUrl(): void {
   const cleanUrl = `${window.location.pathname}${window.location.hash}`;
-  window.history.replaceState(window.history.state, document.title, cleanUrl);
+  window.history.replaceState(window.history.state, typeof document === 'undefined' ? '' : document.title, cleanUrl);
 }
 
 export async function completeOidcCallback(): Promise<OidcLoginResult | null> {
