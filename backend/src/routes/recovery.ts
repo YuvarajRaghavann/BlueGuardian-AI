@@ -156,11 +156,9 @@ router.get('/devices/:deviceId/encounters', requireAuth('owner'), async (req, re
 router.post('/devices/:deviceId/encounters', requireAuth('owner'), rateLimit, async (req, res, next) => {
   try {
     const ownerId = getOwnerIdFromRequest(req);
-    const device = await Device.findOne({ deviceId: req.params.deviceId });
+    const device = await Device.findOne({ ownerId, deviceId: req.params.deviceId });
     if (!device) {
-      return res.status(404).json({ error: 'Recovery device not found.' });
-    }
-    if (device.ownerId !== ownerId) {
+      // Use the same response for missing and non-owned devices to avoid leaking existence.
       return res.status(404).json({ error: 'Recovery device not found.' });
     }
 
