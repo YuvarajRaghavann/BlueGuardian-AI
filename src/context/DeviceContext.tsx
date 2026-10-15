@@ -109,7 +109,7 @@ function toLocalDevice(record: BackendDeviceRecord): BluetoothDevice {
   };
 }
 
-function toBackendDevicePayload(device: BluetoothDevice): Record<string, unknown> {
+export function toBackendDevicePayload(device: BluetoothDevice): Record<string, unknown> {
   return {
     deviceId: device.id,
     deviceIdentifier: device.id,
