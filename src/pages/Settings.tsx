@@ -14,6 +14,7 @@ import { getModelStatus, availableModels } from '../ml/mlService';
 import { useSecurity } from '../context/SecurityContext';
 import { api } from '../services/api';
 import { localDatabase } from '../services/localDatabase';
+import { useBackendSession } from '../context/BackendSessionContext';
 
 export function SettingsPage() {
   const modelStatus = getModelStatus();
@@ -21,6 +22,9 @@ export function SettingsPage() {
   const [backendHealth, setBackendHealth] = useState<{ status: string; database: string } | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [localStorageAvailable, setLocalStorageAvailable] = useState<boolean | null>(null);
+  const { ownerToken } = useBackendSession();
+  const [ownerApiStatus, setOwnerApiStatus] = useState<'idle' | 'checking' | 'connected' | 'error'>('idle');
+  const [ownerApiError, setOwnerApiError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,6 +55,25 @@ export function SettingsPage() {
       });
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    setOwnerApiStatus('idle');
+    setOwnerApiError(null);
+  }, [ownerToken]);
+
+  const verifyOwnerApiAccess = async () => {
+    setOwnerApiStatus('checking');
+    setOwnerApiError(null);
+    try {
+      // This protected request validates the session against the configured owner API,
+      // unlike the public health endpoint above.
+      await api.devices.list();
+      setOwnerApiStatus('connected');
+    } catch (caught) {
+      setOwnerApiStatus('error');
+      setOwnerApiError(caught instanceof Error ? caught.message : 'Could not verify owner API access.');
+    }
+  };
 
   const { state: securityState, dispatch } = useSecurity();
   const policy = securityState.policy;
@@ -177,6 +200,44 @@ export function SettingsPage() {
             variant={localStorageAvailable === null ? 'warning' : localStorageAvailable ? 'success' : 'danger'}
           />
         </div>
+      </section>
+
+
+
+      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
+              <Lock className="h-5 w-5 text-[var(--accent)]" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--text)]">Protected API access</h2>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--text-muted)]">
+                Device, threat, action and audit endpoints require an owner token. Sign in on Device Recovery to share the token with the rest of this app. The token stays in memory and is cleared when you sign out or reload.
+              </p>
+              <p className="mt-2 text-xs text-[var(--text-secondary)]">
+                {ownerToken.trim()
+                  ? 'An owner session is available in this browser tab.'
+                  : 'No owner session is active. Use the development token only for local development, or configure the identity provider for production.'}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-col items-start gap-2 sm:items-end">
+            <StatusBadge
+              label={ownerApiStatus === 'checking' ? 'CHECKING' : ownerApiStatus === 'connected' ? 'AUTHORIZED' : ownerApiStatus === 'error' ? 'DENIED' : ownerToken.trim() ? 'SESSION READY' : 'NOT SIGNED IN'}
+              variant={ownerApiStatus === 'connected' ? 'success' : ownerApiStatus === 'error' ? 'danger' : 'warning'}
+            />
+            <button
+              type="button"
+              onClick={verifyOwnerApiAccess}
+              disabled={!ownerToken.trim() || ownerApiStatus === 'checking'}
+              className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {ownerApiStatus === 'checking' ? 'Verifying…' : 'Test protected API'}
+            </button>
+          </div>
+        </div>
+        {ownerApiError && <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{ownerApiError}</p>}
       </section>
 
       {/* Model configuration */}
