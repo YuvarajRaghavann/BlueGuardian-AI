@@ -138,7 +138,7 @@ export interface Threat {
 
 export interface SecurityEvent {
   id: string;
-  type: 'scan' | 'connect' | 'disconnect' | 'pair' | 'unpair' | 'alert';
+  type: 'scan' | 'connect' | 'disconnect' | 'pair' | 'unpair' | 'alert' | 'device' | 'security_action' | 'threat' | 'recovery';
   message: string;
   deviceId?: string;
   severity: 'info' | 'warning' | 'error';

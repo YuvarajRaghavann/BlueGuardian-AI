@@ -3,12 +3,13 @@ import type {
   DiscoverySource,
   SecurityAction,
   SecurityAssessment,
+  SecurityEvent,
   Threat,
 } from '../types';
 import { needsManualApproval } from '../utils/connectionPolicy';
 
 export const LOCAL_DATABASE_NAME = 'blueguardian-local';
-const LOCAL_DATABASE_VERSION = 1;
+const LOCAL_DATABASE_VERSION = 2;
 
 export interface StoredAssessment {
   deviceId: string;
@@ -65,6 +66,7 @@ function openDatabase(): Promise<IDBDatabase> {
       createStore(database, upgradeTransaction, 'actions', 'id', ['deviceId', 'timestamp']);
       createStore(database, upgradeTransaction, 'threats', 'id', ['deviceId', 'status']);
       createStore(database, upgradeTransaction, 'assessments', 'deviceId');
+      createStore(database, upgradeTransaction, 'events', 'id', ['deviceId', 'timestamp']);
     };
 
     request.onsuccess = () => {
@@ -207,6 +209,17 @@ export const localDatabase = {
       threats.forEach(threat => store.put(threat));
       return undefined;
     });
+  },
+
+  async listEvents(): Promise<SecurityEvent[]> {
+    const events = (await transaction<SecurityEvent[]>(['events'], 'readonly', tx =>
+      tx.objectStore('events').getAll(),
+    )) ?? [];
+    return events.sort((left, right) => right.timestamp.getTime() - left.timestamp.getTime());
+  },
+
+  async recordEvent(event: SecurityEvent): Promise<void> {
+    await transaction(['events'], 'readwrite', tx => tx.objectStore('events').put(event));
   },
 
   async listAssessments(): Promise<StoredAssessment[]> {

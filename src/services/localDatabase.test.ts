@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { BluetoothDevice, SecurityAction, SecurityAssessment, Threat } from '../types';
+import type { BluetoothDevice, SecurityAction, SecurityAssessment, SecurityEvent, Threat } from '../types';
 import { deviceReducer, type DeviceState } from '../context/DeviceContext';
 import { createSecurityAction } from './securityActionService';
 import { LOCAL_DATABASE_NAME, localDatabase } from './localDatabase';
@@ -33,6 +33,16 @@ const assessment: SecurityAssessment = {
   confidence: 0.7,
   reasons: [],
   recommendedAction: 'Monitor the device.',
+};
+
+const event: SecurityEvent = {
+  id: 'local-event-1',
+  type: 'scan',
+  message: 'Local scan completed.',
+  severity: 'info',
+  timestamp: new Date('2026-01-01T00:07:00.000Z'),
+  simulated: false,
+  deviceId: device.id,
 };
 
 const threat: Threat = {
@@ -105,6 +115,7 @@ describe('local IndexedDB persistence', () => {
     const blockAction = actionRecord('BLOCK', trusted, '2026-01-01T00:02:00.000Z');
     await localDatabase.recordSecurityAction(blockAction, blocked);
     await localDatabase.replaceThreats([threat]);
+    await localDatabase.recordEvent(event);
     await localDatabase.saveAssessments([{
       deviceId: device.id,
       assessment,
@@ -119,6 +130,7 @@ describe('local IndexedDB persistence', () => {
     expect(restoredDevices[0]).toMatchObject({ ...blocked, connectionStatus: 'unknown' });
     await expect(localDatabase.listActions()).resolves.toEqual([blockAction, trustAction]);
     await expect(localDatabase.listThreats()).resolves.toEqual([threat]);
+    await expect(localDatabase.listEvents()).resolves.toEqual([event]);
     await expect(localDatabase.listAssessments()).resolves.toEqual([{
       deviceId: device.id,
       assessment,
