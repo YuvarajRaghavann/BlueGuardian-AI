@@ -52,7 +52,7 @@ export function requireAuth(role: AuthRole = 'owner') {
         return res.status(401).json({ error: 'Authorization header with Bearer access token is required.' });
       }
 
-      void import('./oidc').then(({ verifyOidcAccessToken }) => verifyOidcAccessToken(token)).then(identity => {
+      void import('./oidc.js').then(({ verifyOidcAccessToken }) => verifyOidcAccessToken(token)).then(identity => {
         if (role === 'participant' && !identity.scopes.includes(
           process.env.BLUEGUARDIAN_OIDC_PARTICIPANT_SCOPE?.trim() || 'blueguardian:recovery:participant'
         )) {
