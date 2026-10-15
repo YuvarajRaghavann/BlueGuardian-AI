@@ -1,13 +1,14 @@
 import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import type { BluetoothDevice, SecurityAction, SecurityActionType, DeviceProtectionStatus, SecurityPolicy } from '../types';
 import { validateAction, createSecurityAction, getAllowedActions, applySecurityActionToDevice } from '../services/securityActionService';
-import { useBluetoothDevices } from './DeviceContext';
+import { useBluetoothDevices, toBackendDevicePayload } from './DeviceContext';
 import { useThreats } from './ThreatContext';
 import { localDatabase } from '../services/localDatabase';
 import { loadSecurityPolicy, saveSecurityPolicy } from '../services/localSettings';
 import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { recordWorkflowEvent } from '../services/workflowEventService';
+import { api, hasOwnerSessionToken } from '../services/api';
 
 interface SecurityState {
   actions: SecurityAction[];
@@ -162,6 +163,43 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
     void localDatabase.recordSecurityAction(actionRecord, updatedDeviceForStorage).catch((error: unknown) => {
       console.warn('Security action remains active for this session but could not be saved locally.', error);
     });
+
+    // Persist the same action to the authenticated owner backend when a session is active.
+    // Browser state is still updated locally so the UI remains usable during an outage.
+    if (hasOwnerSessionToken()) {
+      const deviceForBackend = updatedDevice ?? device;
+      void api.devices.upsert(toBackendDevicePayload(deviceForBackend))
+        .then(() => api.actions.create({
+          deviceId: device.id,
+          deviceName: device.name,
+          action: type,
+          source: 'USER',
+          simulated,
+          reason,
+          previousState,
+          newState,
+        }))
+        .then(() => {
+          recordWorkflowEvent({
+            type: 'security_action',
+            message: `Backend audit saved: ${type.toLowerCase().replace(/_/g, ' ')} on ${device.name}.`,
+            severity: 'info',
+            simulated,
+            deviceId: device.id,
+          });
+        })
+        .catch((error: unknown) => {
+          const detail = error instanceof Error ? error.message : 'Protected API request failed.';
+          console.warn('Security action was kept locally but could not be persisted to the backend.', error);
+          recordWorkflowEvent({
+            type: 'security_action',
+            message: `Cloud audit sync failed for ${type.toLowerCase().replace(/_/g, ' ')} on ${device.name}: ${detail}. Browser state may differ from the server.`,
+            severity: 'warning',
+            simulated,
+            deviceId: device.id,
+          });
+        });
+    }
 
     // Apply state changes to device via DeviceContext
     switch (type) {
