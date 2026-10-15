@@ -8,7 +8,8 @@ import { loadSecurityPolicy, saveSecurityPolicy } from '../services/localSetting
 import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { recordWorkflowEvent } from '../services/workflowEventService';
-import { api, hasOwnerSessionToken } from '../services/api';
+import { api, hasOwnerSessionToken, type BackendActionRecord } from '../services/api';
+import { useBackendSession } from './BackendSessionContext';
 
 interface SecurityState {
   actions: SecurityAction[];
@@ -22,6 +23,29 @@ type Action =
   | { type: 'SET_POLICY'; payload: Partial<SecurityPolicy> }
   | { type: 'RECALCULATE_PROTECTION'; payload: { deviceId: string; status: DeviceProtectionStatus } }
   | { type: 'CLEAR_HISTORY' };
+
+
+const securityActionTypes: SecurityActionType[] = [
+  'TRUST', 'MARK_UNKNOWN', 'BLOCK', 'UNBLOCK', 'FORGET',
+  'INVESTIGATE', 'RESOLVE_THREAT', 'DISMISS_THREAT', 'IGNORE_DEVICE',
+];
+
+function mapBackendAction(record: BackendActionRecord): SecurityAction | null {
+  if (!securityActionTypes.includes(record.action as SecurityActionType)) return null;
+  const timestamp = record.timestamp ? new Date(record.timestamp) : new Date();
+  return {
+    id: record._id ?? `remote-${record.deviceId}-${record.action}-${timestamp.getTime()}`,
+    type: record.action as SecurityActionType,
+    deviceId: record.deviceId,
+    deviceName: record.deviceName ?? record.deviceId,
+    reason: record.reason ?? 'Recorded by the owner backend.',
+    source: record.source === 'SYSTEM' ? 'SYSTEM' : 'USER',
+    timestamp: Number.isNaN(timestamp.getTime()) ? new Date() : timestamp,
+    simulated: Boolean(record.simulated),
+    previousState: record.previousState as Partial<BluetoothDevice> | undefined,
+    newState: record.newState as Partial<BluetoothDevice> | undefined,
+  };
+}
 
 const initialPolicy: SecurityPolicy = {
   confirmBlock: true,
@@ -85,6 +109,26 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
   const { state: deviceState, dispatch: deviceDispatch } = useBluetoothDevices();
   const { state: threatState } = useThreats();
   const [state, dispatch] = useReducer(securityReducer, initialState, createInitialState);
+  const { ownerToken } = useBackendSession();
+
+  useEffect(() => {
+    if (!ownerToken.trim()) return;
+    let cancelled = false;
+    api.actions.list()
+      .then(records => {
+        if (cancelled) return;
+        dispatch({
+          type: 'SET_ACTIONS',
+          payload: records.map(mapBackendAction).filter((item): item is SecurityAction => item !== null),
+        });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          console.warn('Could not load cloud security-action history; local records remain available.', error);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [ownerToken]);
 
   useEffect(() => {
     let cancelled = false;
