@@ -7,6 +7,8 @@ import { evaluateSecureBluetoothProfile, needsManualApproval } from '../utils/co
 import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
 import { recordWorkflowEvent } from '../services/workflowEventService';
+import { api, hasOwnerSessionToken, type BackendDeviceRecord } from '../services/api';
+import { useBackendSession } from './BackendSessionContext';
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -19,6 +21,7 @@ export interface DeviceState {
 
 type Action =
   | { type: 'SET_DEVICES'; payload: BluetoothDevice[] }
+  | { type: 'MERGE_REMOTE_DEVICES'; payload: BluetoothDevice[] }
   | { type: 'ADD_DEVICE'; payload: BluetoothDevice }
   | { type: 'UPDATE_DEVICE'; payload: BluetoothDevice }
   | { type: 'MARK_DISCONNECTED'; payload: string }
@@ -68,6 +71,91 @@ function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
   return { ...device, approvalRequired: needsManualApproval(device) };
 }
 
+
+const knownDeviceTypes: BluetoothDevice['type'][] = [
+  'smartphone', 'earbuds', 'headphones', 'smartwatch', 'laptop', 'iot', 'unknown',
+];
+const knownRiskLevels: BluetoothDevice['riskLevel'][] = ['trusted', 'low', 'medium', 'high'];
+const knownConnectionStatuses: BluetoothDevice['connectionStatus'][] = ['connected', 'disconnected', 'connecting', 'unknown'];
+
+function toLocalDevice(record: BackendDeviceRecord): BluetoothDevice {
+  const type = record.type?.toLowerCase() as BluetoothDevice['type'] | undefined;
+  const riskLevel = record.riskLevel as BluetoothDevice['riskLevel'] | undefined;
+  const connectionStatus = record.connectionStatus as BluetoothDevice['connectionStatus'] | undefined;
+  return {
+    id: record.deviceId,
+    name: record.name || record.deviceId,
+    type: type && knownDeviceTypes.includes(type) ? type : 'unknown',
+    address: record.address,
+    rssi: record.rssi,
+    trusted: Boolean(record.trusted),
+    blocked: Boolean(record.blocked),
+    trustScore: typeof record.trustScore === 'number' ? record.trustScore : 0,
+    riskLevel: riskLevel && knownRiskLevels.includes(riskLevel) ? riskLevel : 'high',
+    connectionStatus: connectionStatus && knownConnectionStatuses.includes(connectionStatus)
+      ? connectionStatus : 'unknown',
+    firstSeen: record.firstSeen ? new Date(record.firstSeen) : new Date(),
+    lastSeen: record.lastSeen ? new Date(record.lastSeen) : new Date(),
+    isKnown: Boolean(record.isKnown),
+    manufacturer: record.manufacturer,
+    services: (record.services ?? []).map(service => ({
+      uuid: service.uuid,
+      name: service.name,
+      characteristics: [],
+    })),
+    discoverySource: record.discoverySource === 'SIMULATED' ? 'SIMULATED' : 'REAL',
+    gattConnected: record.gattConnected,
+    connectionHealth: record.connectionHealth as BluetoothDevice['connectionHealth'],
+  };
+}
+
+function toBackendDevicePayload(device: BluetoothDevice): Record<string, unknown> {
+  return {
+    deviceId: device.id,
+    deviceIdentifier: device.id,
+    name: device.name,
+    type: device.type,
+    discoverySource: device.discoverySource,
+    address: device.address,
+    rssi: device.rssi,
+    connectionStatus: device.connectionStatus,
+    gattConnected: device.gattConnected,
+    services: device.services.map(service => ({ uuid: service.uuid, name: service.name })),
+    trustScore: device.trustScore,
+    riskLevel: device.riskLevel,
+    trusted: device.trusted,
+    blocked: Boolean(device.blocked),
+    isKnown: device.isKnown,
+    manufacturer: device.manufacturer,
+    connectionHealth: device.connectionHealth,
+  };
+}
+
+async function syncDeviceToBackend(device: BluetoothDevice): Promise<void> {
+  if (!hasOwnerSessionToken()) return;
+  try {
+    await api.devices.upsert(toBackendDevicePayload(device));
+    await api.devices.assess(device.id);
+    recordWorkflowEvent({
+      type: 'device',
+      message: `${device.name} was saved to the owner backend and assessed by the development classifier.`,
+      severity: 'info',
+      simulated: device.discoverySource === 'SIMULATED',
+      deviceId: device.id,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Protected API request failed.';
+    console.warn('Device remains available locally; backend sync did not complete.', error);
+    recordWorkflowEvent({
+      type: 'device',
+      message: `${device.name} remains available locally; backend sync failed: ${detail}`,
+      severity: 'warning',
+      simulated: device.discoverySource === 'SIMULATED',
+      deviceId: device.id,
+    });
+  }
+}
+
 export function deviceReducer(state: DeviceState, action: Action): DeviceState {
   switch (action.type) {
     case 'SET_DEVICES':
@@ -77,6 +165,16 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
           new Map([...action.payload.map(applySecurityPolicy), ...state.devices].map(device => [device.id, device])).values(),
         ),
       };
+    case 'MERGE_REMOTE_DEVICES': {
+      // Cloud records win on duplicate IDs; local-only devices are retained.
+      return {
+        ...state,
+        devices: Array.from(
+          new Map([...state.devices.map(applySecurityPolicy), ...action.payload.map(applySecurityPolicy)]
+            .map(device => [device.id, device])).values(),
+        ),
+      };
+    }
     case 'ADD_DEVICE': {
       const exists = state.devices.some((d) => d.id === action.payload.id);
       if (exists) return state;
@@ -162,6 +260,7 @@ const DeviceContext = createContext<{
 
 export function DeviceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(deviceReducer, initialState);
+  const { ownerToken } = useBackendSession();
 
   // Load local observations; storage errors leave the current session usable.
   useEffect(() => {
@@ -176,6 +275,22 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!ownerToken.trim()) return;
+    let cancelled = false;
+    api.devices.list()
+      .then(records => {
+        if (!cancelled) dispatch({
+          type: 'MERGE_REMOTE_DEVICES',
+          payload: records.map(toLocalDevice),
+        });
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) console.warn('Could not load cloud devices; browser-local records remain available.', error);
+      });
+    return () => { cancelled = true; };
+  }, [ownerToken]);
 
   useEffect(() => {
     if (state.devices.length === 0) return;
@@ -206,6 +321,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         const newDevices = generateSimulatedDevices(6);
         newDevices.forEach((d) => {
           dispatch({ type: 'ADD_DEVICE', payload: d });
+          void syncDeviceToBackend(d);
           const assessment = assessDeviceSecurity(d);
           if (assessment.finalThreatScore >= 20) {
             recordWorkflowEvent({
@@ -298,6 +414,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           deviceId: dev.id,
         });
 
+        void syncDeviceToBackend(guardedDevice);
         void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
           console.warn('Device is available for this session but was not saved locally.', error);
         });
@@ -313,7 +430,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
   const addMockDevices = () => {
     const mocks = generateSimulatedDevices(4);
-    mocks.forEach((d) => dispatch({ type: 'ADD_DEVICE', payload: d }));
+    mocks.forEach((d) => {
+      dispatch({ type: 'ADD_DEVICE', payload: d });
+      void syncDeviceToBackend(d);
+    });
     void localDatabase.saveDevices(mocks).catch((error: unknown) => {
       console.warn('Simulated devices are available for this session but were not saved locally.', error);
     });
