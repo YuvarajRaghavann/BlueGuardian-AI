@@ -38,3 +38,15 @@ Build an intelligent Bluetooth and IoT security framework that combines device t
 - [ ] Production routes and CORS are verified against a staging deployment, never by changing production settings in this milestone.
 - [ ] Android scanning is validated on actual supported hardware.
 - [ ] Merge/deployment only after explicit review and approval.
+
+
+## Current branch progress (2026-10-15)
+
+- Backup ref `backup/pre-original-vision-2026-10-15` was created at the original `main` commit `fad8eea87437339e636fac47da2f2cbe47f993c9`. GitHub comparison confirms that backup and `main` are identical.
+- Work branch `research/community-recovery-phase-1` was created from that same base. It is 10 commits ahead of `main`; `main` has not been modified.
+- The recovery encounter POST now queries by both authenticated `ownerId` and `deviceId`. A regression test checks cross-owner reporting is rejected and the owner filter is part of the database lookup.
+- The legacy unscoped `/api/devices`, `/api/threats`, `/api/actions`, and `/api/events` routers are unmounted in the work branch, matching the intended fail-closed baseline. Tests assert those paths return 404.
+- Browser CORS now requires an exact `BLUEGUARDIAN_CORS_ORIGINS` allowlist; `backend/.env.example` documents the setting, and a regression test checks both allowed and rejected origins.
+- The branch tests have been authored/updated but have **not yet been executed** in this environment. Do not count them as passing until `npm test` and `npm run build` complete successfully in the backend's isolated working copy.
+- No participant submission endpoint, production OIDC/JWKS verifier, Android community scanner, server-side match pipeline, or notification service has been added yet. Those require the subsequent gated phases above.
+- No Render configuration, production environment variables, running service, production database, or `main` branch was changed by this work.
