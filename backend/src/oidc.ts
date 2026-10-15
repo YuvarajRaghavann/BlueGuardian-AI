@@ -84,7 +84,7 @@ function requiredConfig() {
     throw new OidcConfigurationError('OIDC issuer and JWKS URI must use HTTPS in production.');
   }
 
-  return { issuer: issuerUrl.toString().replace(/\/$/, ''), audience, jwksUri: jwksUrl.toString() };
+  return { issuer, audience, jwksUri: jwksUrl.toString() };
 }
 
 async function fetchJwks(uri: string, forceRefresh = false): Promise<Jwk[]> {
@@ -143,7 +143,7 @@ function verifySignatureWithJwk(
   signingInput: Buffer,
   signature: Buffer,
 ): boolean {
-  const publicKey = createPublicKey({ key: jwk as JsonWebKey, format: 'jwk' });
+  const publicKey = createPublicKey({ key: jwk as any, format: 'jwk' });
 
   if (header.alg === 'RS256') {
     return verifySignature('RSA-SHA256', signingInput, publicKey, signature);
@@ -157,7 +157,7 @@ function verifySignatureWithJwk(
 }
 
 function validateClaims(claims: JwtClaims, issuer: string, audience: string): VerifiedOidcIdentity {
-  const issuerMatches = typeof claims.iss === 'string' && claims.iss.replace(/\/$/, '') === issuer;
+  const issuerMatches = typeof claims.iss === 'string' && claims.iss === issuer;
   const aud = typeof claims.aud === 'string'
     ? [claims.aud]
     : Array.isArray(claims.aud) ? claims.aud.filter((entry): entry is string => typeof entry === 'string') : [];
