@@ -16,6 +16,7 @@ const authEnvironmentKeys = [
   'BLUEGUARDIAN_AUTH_MODE',
   'BLUEGUARDIAN_OWNER_TOKEN',
   'BLUEGUARDIAN_OWNER_ID',
+  'BLUEGUARDIAN_CORS_ORIGINS',
 ] as const;
 
 const originalAuthEnvironment = Object.fromEntries(
@@ -58,6 +59,20 @@ describe('protected API routes', () => {
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+  });
+
+  it('allows only explicitly configured browser origins', async () => {
+    process.env.BLUEGUARDIAN_CORS_ORIGINS = 'https://blueguardian.example, https://admin.blueguardian.example';
+
+    const allowed = await fetch(`${origin}/api/health`, {
+      headers: { Origin: 'https://blueguardian.example' },
+    });
+    const rejected = await fetch(`${origin}/api/health`, {
+      headers: { Origin: 'https://untrusted.example' },
+    });
+
+    expect(allowed.headers.get('access-control-allow-origin')).toBe('https://blueguardian.example');
+    expect(rejected.headers.get('access-control-allow-origin')).toBeNull();
   });
 
   it('keeps legacy unscoped APIs unmounted and protects recovery APIs', async () => {
