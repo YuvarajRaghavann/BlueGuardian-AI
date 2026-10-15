@@ -6,6 +6,7 @@ import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { evaluateSecureBluetoothProfile, needsManualApproval } from '../utils/connectionPolicy';
 import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
+import { recordWorkflowEvent } from '../services/workflowEventService';
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -184,6 +185,13 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   }, [state.devices]);
 
   const scanDevices = async () => {
+    const scanIsSimulated = state.simulationMode;
+    recordWorkflowEvent({
+      type: 'scan',
+      message: scanIsSimulated ? 'Simulation scan started.' : 'Bluetooth device selection requested through the browser picker.',
+      severity: 'info',
+      simulated: scanIsSimulated,
+    });
     dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'scanning', elapsedMs: 0, devicesFound: 0, error: undefined } });
     const start = Date.now();
     let interval: ReturnType<typeof setInterval>;
@@ -196,7 +204,19 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     try {
       if (state.simulationMode) {
         const newDevices = generateSimulatedDevices(6);
-        newDevices.forEach((d) => dispatch({ type: 'ADD_DEVICE', payload: d }));
+        newDevices.forEach((d) => {
+          dispatch({ type: 'ADD_DEVICE', payload: d });
+          const assessment = assessDeviceSecurity(d);
+          if (assessment.finalThreatScore >= 20) {
+            recordWorkflowEvent({
+              type: 'alert',
+              message: `Simulated development assessment for ${d.name}: ${assessment.finalSeverity} (${assessment.finalThreatScore}/100).`,
+              severity: assessment.finalSeverity === 'critical' || assessment.finalSeverity === 'high' ? 'error' : 'warning',
+              simulated: true,
+              deviceId: d.id,
+            });
+          }
+        });
         void localDatabase.saveDevices(newDevices).catch((error: unknown) => {
           console.warn('Simulated devices are available for this session but were not saved locally.', error);
         });
@@ -204,20 +224,29 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           type: 'SET_SCAN_STATE',
           payload: { state: 'complete', devicesFound: newDevices.length },
         });
+        recordWorkflowEvent({
+          type: 'scan',
+          message: `Simulation scan completed: ${newDevices.length} demo devices were prepared for local assessment.`,
+          severity: 'info',
+          simulated: true,
+        });
       } else {
         const support = await isBluetoothSupported();
         if (!support.supported) {
           dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'unsupported', error: support.reason } });
+          recordWorkflowEvent({ type: 'scan', message: `Bluetooth is unavailable: ${support.reason ?? 'unsupported browser'}.`, severity: 'warning', simulated: false });
           return;
         }
         const request = await requestBluetoothDevice();
         if (!request.ok) {
           dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'permission-denied', error: request.error } });
+          recordWorkflowEvent({ type: 'scan', message: `Bluetooth selection was not completed: ${request.error}.`, severity: 'warning', simulated: false });
           return;
         }
         const conn = await connectAndDiscover(request.device);
         if (!conn.ok) {
           dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', error: conn.error } });
+          recordWorkflowEvent({ type: 'connect', message: `Could not inspect the selected Bluetooth device: ${conn.error}.`, severity: 'warning', simulated: false });
           return;
         }
         const std = await readStandardCharacteristics(conn.gatt);
@@ -254,13 +283,29 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
         dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
         dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'complete', devicesFound: 1 } });
+        recordWorkflowEvent({
+          type: 'connect',
+          message: `Selected ${dev.name}; inspected ${conn.services.length} available GATT service(s).`,
+          severity: 'info',
+          simulated: false,
+          deviceId: dev.id,
+        });
+        recordWorkflowEvent({
+          type: 'alert',
+          message: `Development assessment for ${dev.name}: ${assessment.finalSeverity} (${assessment.finalThreatScore}/100).`,
+          severity: assessment.finalSeverity === 'critical' || assessment.finalSeverity === 'high' ? 'error' : assessment.finalSeverity === 'medium' ? 'warning' : 'info',
+          simulated: false,
+          deviceId: dev.id,
+        });
 
         void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
           console.warn('Device is available for this session but was not saved locally.', error);
         });
       }
     } catch (e: any) {
-      dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', error: e?.message ?? 'Scan failed' } });
+      const message = e?.message ?? 'Scan failed';
+      dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', error: message } });
+      recordWorkflowEvent({ type: 'scan', message: `Bluetooth workflow failed: ${message}.`, severity: 'warning', simulated: scanIsSimulated });
     } finally {
       clearInterval(interval);
     }

@@ -4,6 +4,7 @@ import { StatusBadge } from './StatusBadge';
 import { formatDistanceToNow } from 'date-fns';
 import { useThreats } from '../context/ThreatContext';
 import { useSecurity } from '../context/SecurityContext';
+import { recordWorkflowEvent } from '../services/workflowEventService';
 
 interface ThreatDetailModalProps {
   threat: Threat | null;
@@ -20,6 +21,23 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
     medium: 'bg-yellow-900/30 text-yellow-400',
     high: 'bg-orange-900/30 text-orange-400',
     critical: 'bg-red-900/30 text-red-400',
+  };
+
+  const updateStatus = (status: 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED', message: string) => {
+    const actionType = {
+      INVESTIGATING: 'INVESTIGATE_THREAT',
+      RESOLVED: 'RESOLVE_THREAT',
+      DISMISSED: 'DISMISS_THREAT',
+    } as const;
+    dispatch({ type: actionType[status], payload: threat.id });
+    recordWorkflowEvent({
+      type: 'threat',
+      message: `${threat.title} for ${threat.deviceName}: ${message}.`,
+      severity: status === 'RESOLVED' ? 'info' : status === 'DISMISSED' ? 'warning' : (threat.severity === 'critical' || threat.severity === 'high' ? 'error' : 'warning'),
+      simulated: threat.discoverySource === 'SIMULATED',
+      deviceId: threat.deviceId,
+    });
+    onClose();
   };
 
   const confidenceLabel = (c: number) => {
@@ -118,19 +136,19 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
             {threat.status !== 'RESOLVED' && threat.status !== 'DISMISSED' && (
               <>
                 <button
-                  onClick={() => dispatch({ type: 'INVESTIGATE_THREAT', payload: threat.id })}
+                  onClick={() => updateStatus('INVESTIGATING', 'marked for investigation')}
                   className="px-4 py-2 bg-yellow-900/30 text-yellow-400 rounded-lg hover:bg-yellow-900/50 transition-colors flex items-center gap-2"
                 >
                   <Target className="w-4 h-4" /> Mark Investigating
                 </button>
                 <button
-                  onClick={() => dispatch({ type: 'RESOLVE_THREAT', payload: threat.id })}
+                  onClick={() => updateStatus('RESOLVED', 'marked resolved')}
                   className="px-4 py-2 bg-green-900/30 text-green-400 rounded-lg hover:bg-green-900/50 transition-colors flex items-center gap-2"
                 >
                   <ShieldCheck className="w-4 h-4" /> Resolve
                 </button>
                 <button
-                  onClick={() => dispatch({ type: 'DISMISS_THREAT', payload: threat.id })}
+                  onClick={() => updateStatus('DISMISSED', 'dismissed by the user')}
                   className="px-4 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition-colors flex items-center gap-2"
                 >
                   <Ban className="w-4 h-4" /> Dismiss
@@ -139,7 +157,7 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
             )}
             {(threat.status === 'RESOLVED' || threat.status === 'DISMISSED') && (
               <button
-                onClick={() => dispatch({ type: 'INVESTIGATE_THREAT', payload: threat.id })} // reopen sets to INVESTIGATING
+                onClick={() => updateStatus('INVESTIGATING', 'reopened for investigation')}
                 className="px-4 py-2 bg-accent/20 text-accent rounded-lg hover:bg-accent/30 transition-colors flex items-center gap-2"
               >
                 <ShieldCheck className="w-4 h-4" /> Reopen

@@ -7,6 +7,7 @@ import { localDatabase } from '../services/localDatabase';
 import { loadSecurityPolicy, saveSecurityPolicy } from '../services/localSettings';
 import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
+import { recordWorkflowEvent } from '../services/workflowEventService';
 
 interface SecurityState {
   actions: SecurityAction[];
@@ -144,6 +145,14 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
       : undefined;
     const actionRecord = createSecurityAction(type, device, reason, 'USER', simulated, previousState, newState);
     dispatch({ type: 'ADD_ACTION', payload: actionRecord });
+    recordWorkflowEvent({
+      id: `action:${actionRecord.id}`,
+      type: 'security_action',
+      message: `User action: ${type.toLowerCase().replace(/_/g, ' ')} on ${device.name}. This updates BlueGuardian's browser-local state; it does not enforce an operating-system Bluetooth block.`,
+      severity: type === 'BLOCK' ? 'error' : type === 'MARK_UNKNOWN' ? 'warning' : 'info',
+      simulated,
+      deviceId: device.id,
+    });
 
     const updatedDeviceForStorage = type === 'FORGET'
       ? null
