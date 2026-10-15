@@ -102,7 +102,7 @@ export function Devices() {
           </h1>
 
           <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-            Discover, monitor and evaluate nearby Bluetooth devices.
+            Real mode opens the browser's Bluetooth picker for one supported device. Simulation mode creates demo records; this page does not passively scan every nearby device.
           </p>
         </div>
 
@@ -133,7 +133,7 @@ export function Devices() {
             )}
           >
             <Bluetooth className={cn('h-4 w-4', isScanning && 'animate-spin')} />
-            {isScanning ? 'Scanning…' : 'Scan devices'}
+            {isScanning ? (state.simulationMode ? 'Preparing simulation…' : 'Waiting for device selection…') : state.simulationMode ? 'Run simulation scan' : 'Select Bluetooth device'}
           </button>
         </div>
       </header>
@@ -171,10 +171,12 @@ export function Devices() {
 
             <div>
               <p className="text-sm font-medium text-[var(--text)]">
-                {state.scan.state === 'scanning' &&
-                  `Scanning for Bluetooth devices… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`}
-                {state.scan.state === 'complete' &&
-                  `Scan complete · ${state.scan.devicesFound} device(s) found`}
+                {state.scan.state === 'scanning' && (state.simulationMode
+                  ? `Preparing simulated devices… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
+                  : `Waiting for the browser's Bluetooth picker… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`)}
+                {state.scan.state === 'complete' && (state.simulationMode
+                  ? `Simulation complete · ${state.scan.devicesFound} demo device(s) prepared`
+                  : `Device selection complete · ${state.scan.devicesFound} device(s) inspected`)}
                 {state.scan.state === 'unsupported' &&
                   `Web Bluetooth not supported: ${state.scan.error}`}
                 {state.scan.state === 'permission-denied' &&

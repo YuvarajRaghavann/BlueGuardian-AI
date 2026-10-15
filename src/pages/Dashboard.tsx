@@ -187,7 +187,7 @@ export function Dashboard() {
 
           <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
             Review browser-selected device observations, inspect development risk assessments,
-            and manage owner recovery cases.
+            and manage owner recovery cases. Real mode opens the browser picker for one device; simulation mode creates demo records.
           </p>
         </div>
 
@@ -198,7 +198,7 @@ export function Dashboard() {
           className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(59,156,255,0.16)] transition-all hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
         >
           <ScanLine className={`h-4 w-4 ${scanActive ? 'animate-pulse' : ''}`} />
-          {scanActive ? 'Scanning...' : 'Run Bluetooth scan'}
+          {scanActive ? (state.simulationMode ? 'Preparing simulation…' : 'Waiting for device selection…') : state.simulationMode ? 'Run simulation scan' : 'Select Bluetooth device'}
         </button>
       </section>
 
