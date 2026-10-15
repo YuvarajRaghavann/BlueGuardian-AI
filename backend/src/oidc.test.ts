@@ -99,6 +99,17 @@ describe('OIDC access-token verification', () => {
     await expect(verifyOidcAccessToken(makeToken({}, { alg: 'none' }))).rejects.toMatchObject({ status: 401 });
   });
 
+  it('throttles repeated signing-key refreshes for unknown key IDs', async () => {
+    const token = makeToken({}, { kid: 'unknown-signing-key' });
+    const fetchMock = vi.mocked(fetch);
+
+    await expect(verifyOidcAccessToken(token)).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    await expect(verifyOidcAccessToken(token)).rejects.toMatchObject({ status: 401 });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('fails closed when the OIDC verifier is not configured', async () => {
     delete process.env.BLUEGUARDIAN_OIDC_ISSUER;
     await expect(verifyOidcAccessToken(makeToken())).rejects.toMatchObject({ status: 503 });

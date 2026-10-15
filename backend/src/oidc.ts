@@ -51,7 +51,10 @@ interface CachedJwks {
 }
 
 const jwksCache = new Map<string, CachedJwks>();
+const jwksForcedRefreshAt = new Map<string, number>();
 const JWKS_CACHE_TTL_MS = 5 * 60 * 1000;
+const JWKS_FORCED_REFRESH_COOLDOWN_MS = 30 * 1000;
+const MAX_BEARER_TOKEN_LENGTH = 16 * 1024;
 const CLOCK_SKEW_SECONDS = 30;
 
 function readJsonPart<T>(segment: string): T {
@@ -88,8 +91,14 @@ function requiredConfig() {
 }
 
 async function fetchJwks(uri: string, forceRefresh = false): Promise<Jwk[]> {
+  const now = Date.now();
   const cached = jwksCache.get(uri);
-  if (!forceRefresh && cached && cached.expiresAt > Date.now()) return cached.keys;
+  if (forceRefresh) {
+    const lastForcedRefresh = jwksForcedRefreshAt.get(uri) ?? 0;
+    if (cached && now - lastForcedRefresh < JWKS_FORCED_REFRESH_COOLDOWN_MS) return cached.keys;
+    jwksForcedRefreshAt.set(uri, now);
+  }
+  if (!forceRefresh && cached && cached.expiresAt > now) return cached.keys;
 
   let response: Response;
   try {
@@ -185,6 +194,7 @@ function validateClaims(claims: JwtClaims, issuer: string, audience: string): Ve
 
 export async function verifyOidcAccessToken(token: string): Promise<VerifiedOidcIdentity> {
   const { issuer, audience, jwksUri } = requiredConfig();
+  if (token.length > MAX_BEARER_TOKEN_LENGTH) throw new OidcTokenError('Bearer token is too large.');
   const segments = token.split('.');
   if (segments.length !== 3 || segments.some(segment => !segment)) throw new OidcTokenError('Malformed bearer token.');
 

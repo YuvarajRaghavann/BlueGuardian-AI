@@ -33,6 +33,12 @@ export function requireAuth(role: AuthRole = 'owner') {
       console.warn(`[auth] rejected protected request category=${category} role=${role}`);
     };
 
+    if (mode === 'disabled') {
+      return res.status(503).json({
+        error: 'Protected API access is disabled. Configure owner authentication before enabling these routes.',
+      });
+    }
+
     const oidcConfigured = Boolean(
       process.env.BLUEGUARDIAN_OIDC_ISSUER?.trim() &&
       process.env.BLUEGUARDIAN_OIDC_AUDIENCE?.trim() &&
@@ -75,12 +81,6 @@ export function requireAuth(role: AuthRole = 'owner') {
         });
       });
       return;
-    }
-
-    if (mode === 'disabled') {
-      return res.status(503).json({
-        error: 'Protected API access is disabled. Configure owner authentication before enabling these routes.',
-      });
     }
 
     if ((role === 'owner' && (!ownerToken || !ownerId)) || (role === 'participant' && !ownerToken && !participantToken)) {
