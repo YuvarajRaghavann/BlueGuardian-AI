@@ -111,13 +111,14 @@ export function Devices() {
             <input
               type="checkbox"
               checked={state.simulationMode}
+              disabled={isScanning}
               onChange={e =>
                 dispatch({
                   type: 'TOGGLE_SIMULATION',
                   payload: e.target.checked,
                 })
               }
-              className="h-4 w-4 accent-[var(--accent)]"
+              className="h-4 w-4 accent-[var(--accent)] disabled:opacity-50"
             />
             Simulation mode
           </label>
@@ -174,9 +175,7 @@ export function Devices() {
                 {state.scan.state === 'scanning' && (state.simulationMode
                   ? `Preparing simulated devices… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
                   : `Waiting for the browser's Bluetooth picker… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`)}
-                {state.scan.state === 'complete' && (state.simulationMode
-                  ? `Simulation complete · ${state.scan.devicesFound} demo device(s) prepared`
-                  : `Device selection complete · ${state.scan.devicesFound} device(s) inspected`)}
+                {state.scan.state === 'complete' && `Workflow complete · ${state.scan.devicesFound} device(s) processed`}
                 {state.scan.state === 'unsupported' &&
                   `Web Bluetooth not supported: ${state.scan.error}`}
                 {state.scan.state === 'permission-denied' &&
