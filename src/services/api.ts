@@ -167,6 +167,7 @@ export const api = {
 
   devices: {
     list: () => ownerFetch(\`\${BASE}/devices\`).then(json<BackendDeviceRecord[]>),
+    get: (deviceId: string) => ownerFetch(`\${BASE}/devices/\${encodeURIComponent(deviceId)}`).then(json<BackendDeviceRecord>),
     upsert: (payload: Record<string, unknown>) => ownerFetch(\`\${BASE}/devices\`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
