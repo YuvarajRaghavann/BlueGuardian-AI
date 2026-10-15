@@ -1,0 +1,58 @@
+name: BlueGuardian validation
+
+on:
+  push:
+    branches:
+      - "research/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    name: Frontend tests and build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run frontend tests
+        run: npm test
+      - name: Build frontend
+        run: npm run build
+
+  backend:
+    name: Backend tests and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run backend unit and route tests
+        run: npm test
+      - name: Build backend
+        run: npm run build
+
+# Deliberately no deployment step and no production secrets.
+# The destructive/live-MongoDB integration suite is not run in CI because it requires
+# a dedicated disposable database and explicit configuration.
