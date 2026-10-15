@@ -75,13 +75,24 @@ describe('OIDC access-token verification', () => {
       .rejects.toMatchObject({ status: 401 });
   });
 
-  it.each([
-    [{ iss: 'https://attacker.example/' }, 'issuer'],
-    [{ aud: 'another-api' }, 'audience'],
-    [{ exp: Math.floor(Date.now() / 1000) - 60 }, 'expired'],
-    [{ sub: '' }, 'subject'],
-  ])('rejects invalid token claims: %s', async (claims) => {
-    await expect(verifyOidcAccessToken(makeToken(claims))).rejects.toMatchObject({ status: 401 });
+  it('rejects a token from the wrong issuer', async () => {
+    await expect(verifyOidcAccessToken(makeToken({ iss: 'https://attacker.example/' })))
+      .rejects.toMatchObject({ status: 401 });
+  });
+
+  it('rejects a token for another API audience', async () => {
+    await expect(verifyOidcAccessToken(makeToken({ aud: 'another-api' })))
+      .rejects.toMatchObject({ status: 401 });
+  });
+
+  it('rejects an expired token', async () => {
+    await expect(verifyOidcAccessToken(makeToken({ exp: Math.floor(Date.now() / 1000) - 60 })))
+      .rejects.toMatchObject({ status: 401 });
+  });
+
+  it('rejects a token without a subject', async () => {
+    await expect(verifyOidcAccessToken(makeToken({ sub: '' })))
+      .rejects.toMatchObject({ status: 401 });
   });
 
   it('rejects algorithms that are not explicitly supported', async () => {
