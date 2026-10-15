@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { recordWorkflowEvent } from '../services/workflowEventService';
+import { completeOidcCallback, isOidcConfigured, startOidcLogin } from '../services/oidcClient';
 
 const recoveryTransitions: Record<RecoveryDeviceRecord['recoveryState'], Array<{ status: RecoveryDeviceRecord['recoveryState']; label: string }>> = {
   lost: [
@@ -30,6 +31,8 @@ function formatDate(value?: string | null) {
 }
 
 export function Recovery() {
+  const identityProviderConfigured = isOidcConfigured();
+  const productionBuild = import.meta.env.PROD;
   const [ownerToken, setOwnerToken] = useState('');
   const [deviceName, setDeviceName] = useState('');
   const [selectedBluetoothDevice, setSelectedBluetoothDevice] = useState<BluetoothDeviceInfo | null>(null);
@@ -42,9 +45,54 @@ export function Recovery() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!identityProviderConfigured) return;
+    let cancelled = false;
+    void completeOidcCallback()
+      .then(result => {
+        if (cancelled || !result) return;
+        setOwnerToken(result.accessToken);
+        setError(null);
+        setNotice('Identity-provider sign-in succeeded. Your access token is held in page memory only.');
+      })
+      .catch((caught: unknown) => {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : 'Identity-provider sign-in failed.');
+      });
+    return () => { cancelled = true; };
+  }, [identityProviderConfigured]);
+
+  const signInWithIdentityProvider = async () => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await startOidcLogin();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Unable to start secure sign-in.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signOut = () => {
+    setOwnerToken('');
+    setDevices([]);
+    setDevicesLoaded(false);
+    setSelectedDevice(null);
+    setRecoveryInfo(null);
+    setEncounters([]);
+    setSelectedBluetoothDevice(null);
+    setError(null);
+    setNotice('Signed out of the recovery session. No access token was saved by this page.');
+  };
+
   const requireToken = () => {
     if (!ownerToken.trim()) {
-      setError('Enter the owner bearer token configured on the backend.');
+      setError(identityProviderConfigured
+        ? 'Sign in with your configured identity provider before using recovery.'
+        : productionBuild
+          ? 'Production recovery sign-in is not configured. Set the Vite OIDC variables and backend OIDC settings before enabling this feature.'
+          : 'Enter the development owner token configured on your local backend.');
       return false;
     }
     return true;
@@ -241,40 +289,70 @@ export function Recovery() {
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
         <div className="mb-4 flex items-center gap-2">
           <LockKeyhole className="h-4 w-4 text-[var(--accent)]" />
-          <h2 className="text-sm font-semibold text-[var(--text)]">Backend owner access</h2>
+          <h2 className="text-sm font-semibold text-[var(--text)]">
+            {identityProviderConfigured ? 'Secure owner sign-in' : productionBuild ? 'Recovery sign-in unavailable' : 'Local development access'}
+          </h2>
         </div>
-        <label className="block text-sm text-[var(--text-secondary)]">
-          Owner bearer token
-          <input
-            type="password"
-            autoComplete="off"
-            value={ownerToken}
-            disabled={busy}
-            onChange={event => {
-              setOwnerToken(event.target.value);
-              setDevices([]);
-              setDevicesLoaded(false);
-              setSelectedDevice(null);
-              setRecoveryInfo(null);
-              setEncounters([]);
-              setError(null);
-              setNotice(null);
-            }}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            aria-describedby="recovery-auth-note"
-          />
-        </label>
-        <p id="recovery-auth-note" className="mt-2 text-xs text-[var(--text-muted)]">
-          The token is held only in this page's memory and is never written to browser storage. The current backend token is a development integration, not production identity management.
-        </p>
-        <button
-          type="button"
-          onClick={loadDevices}
-          disabled={busy}
-          className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50"
-        >
-          {busy ? 'Working…' : 'Load my registered devices'}
-        </button>
+
+        {identityProviderConfigured ? (
+          <>
+            <p className="text-sm text-[var(--text-secondary)]">
+              Sign in through the configured identity provider. The backend validates the signed access token before returning owner records.
+            </p>
+            {ownerToken.trim() ? (
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <span className="text-sm text-[var(--success)]">Signed in for this page session</span>
+                <button type="button" onClick={loadDevices} disabled={busy} className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50">
+                  {busy ? 'Working…' : 'Load my registered devices'}
+                </button>
+                <button type="button" onClick={signOut} disabled={busy} className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50">
+                  Sign out
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={signInWithIdentityProvider} disabled={busy} className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50">
+                {busy ? 'Connecting…' : 'Sign in to manage recovery'}
+              </button>
+            )}
+            <p className="mt-3 text-xs text-[var(--text-muted)]">
+              Access tokens stay in page memory and are not persisted to local storage. A page reload may require signing in again.
+            </p>
+          </>
+        ) : productionBuild ? (
+          <p className="text-sm text-[var(--warning)]">
+            Cloud recovery is deliberately disabled for this build until the frontend OIDC settings and the backend issuer, audience, and JWKS URI are configured. Do not use a static owner token in production.
+          </p>
+        ) : (
+          <>
+            <label className="block text-sm text-[var(--text-secondary)]">
+              Development owner token
+              <input
+                type="password"
+                autoComplete="off"
+                value={ownerToken}
+                disabled={busy}
+                onChange={event => {
+                  setOwnerToken(event.target.value);
+                  setDevices([]);
+                  setDevicesLoaded(false);
+                  setSelectedDevice(null);
+                  setRecoveryInfo(null);
+                  setEncounters([]);
+                  setError(null);
+                  setNotice(null);
+                }}
+                className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                aria-describedby="recovery-auth-note"
+              />
+            </label>
+            <p id="recovery-auth-note" className="mt-2 text-xs text-[var(--text-muted)]">
+              Development only. The token is held only in page memory and is never written to browser storage.
+            </p>
+            <button type="button" onClick={loadDevices} disabled={busy} className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50">
+              {busy ? 'Working…' : 'Load my registered devices'}
+            </button>
+          </>
+        )}
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
