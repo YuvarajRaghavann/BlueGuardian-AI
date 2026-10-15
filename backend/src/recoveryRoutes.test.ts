@@ -5,6 +5,7 @@ const store = vi.hoisted(() => ({
   devices: [] as Array<Record<string, any>>,
   encounters: [] as Array<Record<string, any>>,
   deviceFindError: undefined as unknown,
+  deviceFindOneFilters: [] as Array<Record<string, any>>,
 }));
 
 vi.mock('./models/Device', () => {
@@ -37,6 +38,7 @@ vi.mock('./models/Device', () => {
     }
 
     static async findOne(filter: Record<string, any>) {
+      store.deviceFindOneFilters.push({ ...filter });
       const found = store.devices.find(device => Object.entries(filter).every(([key, value]) => device[key] === value));
       return found ? Object.assign(Object.create(FakeDevice.prototype), found) : null;
     }
@@ -114,6 +116,7 @@ describe('recovery API integration', () => {
     store.devices.length = 0;
     store.encounters.length = 0;
     store.deviceFindError = undefined;
+    store.deviceFindOneFilters.length = 0;
   });
 
   const ownerHeaders = { Authorization: 'Bearer blueguardian-owner-token' };
@@ -175,6 +178,31 @@ describe('recovery API integration', () => {
       body: JSON.stringify({ source: 'UNKNOWN' }),
     });
     expect(invalid.status).toBe(400);
+  });
+
+  it('scopes submitted observations to the authenticated owner in the database query', async () => {
+    store.devices.push({
+      deviceId: 'private-device-of-another-owner',
+      deviceIdentifier: 'private-device-of-another-owner',
+      ownerId: 'different-owner',
+      name: 'Another owner device',
+      discoverySource: 'REAL',
+      recoveryState: 'lost',
+    });
+
+    const response = await fetch(`${origin}/api/recovery/devices/private-device-of-another-owner/encounters`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'REAL', simulated: false, isTestFixture: false }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Recovery device not found.' });
+    expect(store.deviceFindOneFilters).toContainEqual({
+      ownerId: 'test-owner',
+      deviceId: 'private-device-of-another-owner',
+    });
+    expect(store.encounters).toHaveLength(0);
   });
 
   it('rejects missing and invalid owner bearer tokens without logging token values', async () => {
