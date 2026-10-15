@@ -92,6 +92,30 @@ vi.mock('./models/RecoveryEncounter', () => {
 
 import app from './app';
 
+const originalOidcEnvironment = {
+  issuer: process.env.BLUEGUARDIAN_OIDC_ISSUER,
+  audience: process.env.BLUEGUARDIAN_OIDC_AUDIENCE,
+  jwksUri: process.env.BLUEGUARDIAN_OIDC_JWKS_URI,
+};
+
+function clearOidcTestEnvironment() {
+  delete process.env.BLUEGUARDIAN_OIDC_ISSUER;
+  delete process.env.BLUEGUARDIAN_OIDC_AUDIENCE;
+  delete process.env.BLUEGUARDIAN_OIDC_JWKS_URI;
+}
+
+function restoreOidcTestEnvironment() {
+  const entries = [
+    ['BLUEGUARDIAN_OIDC_ISSUER', originalOidcEnvironment.issuer],
+    ['BLUEGUARDIAN_OIDC_AUDIENCE', originalOidcEnvironment.audience],
+    ['BLUEGUARDIAN_OIDC_JWKS_URI', originalOidcEnvironment.jwksUri],
+  ] as const;
+  for (const [key, value] of entries) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
+
 describe('recovery API integration', () => {
   let origin: string;
   let server: ReturnType<typeof app.listen>;
@@ -102,6 +126,7 @@ describe('recovery API integration', () => {
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = 'blueguardian-participant-token';
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+    clearOidcTestEnvironment();
     server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     const address = server.address() as AddressInfo;
@@ -110,6 +135,7 @@ describe('recovery API integration', () => {
 
   afterAll(async () => {
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    restoreOidcTestEnvironment();
   });
 
   beforeEach(() => {

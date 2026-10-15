@@ -45,6 +45,9 @@ describe('recovery auth and validation', () => {
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = 'blueguardian-participant-token';
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+    delete process.env.BLUEGUARDIAN_OIDC_ISSUER;
+    delete process.env.BLUEGUARDIAN_OIDC_AUDIENCE;
+    delete process.env.BLUEGUARDIAN_OIDC_JWKS_URI;
   });
 
   afterEach(() => {
@@ -53,6 +56,11 @@ describe('recovery auth and validation', () => {
     process.env.BLUEGUARDIAN_OWNER_TOKEN = originalEnv.BLUEGUARDIAN_OWNER_TOKEN;
     process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = originalEnv.BLUEGUARDIAN_PARTICIPANT_TOKEN;
     process.env.BLUEGUARDIAN_OWNER_ID = originalEnv.BLUEGUARDIAN_OWNER_ID;
+    for (const key of ['BLUEGUARDIAN_OIDC_ISSUER', 'BLUEGUARDIAN_OIDC_AUDIENCE', 'BLUEGUARDIAN_OIDC_JWKS_URI'] as const) {
+      const value = originalEnv[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 
   it('allows owner authentication when the bearer token matches the configured owner token', () => {

@@ -15,6 +15,9 @@ const authEnvironmentKeys = [
   'BLUEGUARDIAN_OWNER_TOKEN',
   'BLUEGUARDIAN_OWNER_ID',
   'BLUEGUARDIAN_CORS_ORIGINS',
+  'BLUEGUARDIAN_OIDC_ISSUER',
+  'BLUEGUARDIAN_OIDC_AUDIENCE',
+  'BLUEGUARDIAN_OIDC_JWKS_URI',
 ] as const;
 
 const originalAuthEnvironment = Object.fromEntries(
@@ -38,6 +41,9 @@ describe('protected API routes', () => {
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+    delete process.env.BLUEGUARDIAN_OIDC_ISSUER;
+    delete process.env.BLUEGUARDIAN_OIDC_AUDIENCE;
+    delete process.env.BLUEGUARDIAN_OIDC_JWKS_URI;
 
     server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
@@ -57,6 +63,9 @@ describe('protected API routes', () => {
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+    delete process.env.BLUEGUARDIAN_OIDC_ISSUER;
+    delete process.env.BLUEGUARDIAN_OIDC_AUDIENCE;
+    delete process.env.BLUEGUARDIAN_OIDC_JWKS_URI;
     delete process.env.BLUEGUARDIAN_CORS_ORIGINS;
   });
 
