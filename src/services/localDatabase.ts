@@ -158,6 +158,9 @@ export const localDatabase = {
   },
 
   async saveDevice(device: BluetoothDevice): Promise<void> {
+    // Demo records are deliberately session-only so they cannot be mistaken for
+    // physical hardware after a reload or during troubleshooting.
+    if (device.discoverySource === 'SIMULATED') return;
     const normalized = normalizePersistedDevice(device);
     await transaction(['devices'], 'readwrite', tx => {
       tx.objectStore('devices').put(normalized);
@@ -166,12 +169,56 @@ export const localDatabase = {
   },
 
   async saveDevices(devices: BluetoothDevice[]): Promise<void> {
-    if (devices.length === 0) return;
-    const normalized = devices.map(normalizePersistedDevice);
+    const physicalDevices = devices.filter(device => device.discoverySource !== 'SIMULATED');
+    if (physicalDevices.length === 0) return;
+    const normalized = physicalDevices.map(normalizePersistedDevice);
     await transaction(['devices'], 'readwrite', tx => {
       const store = tx.objectStore('devices');
       normalized.forEach(device => store.put(device));
       return undefined;
+    });
+  },
+
+  /**
+   * One-time migration for simulated records saved by older app versions.
+   * Real device records and all other stores remain untouched.
+   */
+  async removeSimulatedDevices(): Promise<number> {
+    const database = await openDatabase();
+    return new Promise<number>((resolve, reject) => {
+      let removed = 0;
+      let settled = false;
+      const fail = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        reject(error instanceof Error ? error : new Error('Could not remove old simulated device records.'));
+      };
+
+      let tx: IDBTransaction;
+      try {
+        tx = database.transaction(['devices'], 'readwrite');
+        const request = tx.objectStore('devices').openCursor();
+        request.onsuccess = () => {
+          const cursor = request.result;
+          if (!cursor) return;
+          const stored = cursor.value as Partial<BluetoothDevice>;
+          if (stored.discoverySource === 'SIMULATED') {
+            cursor.delete();
+            removed += 1;
+          }
+          cursor.continue();
+        };
+        request.onerror = () => fail(new Error('Could not inspect stored device records for simulation data.'));
+        tx.oncomplete = () => {
+          if (settled) return;
+          settled = true;
+          resolve(removed);
+        };
+        tx.onerror = () => fail(new Error('Could not remove old simulated device records.'));
+        tx.onabort = () => fail(new Error('Removal of old simulated device records was aborted.'));
+      } catch (error) {
+        fail(error);
+      }
     });
   },
 
@@ -189,7 +236,9 @@ export const localDatabase = {
     await transaction(['actions', 'devices'], 'readwrite', tx => {
       tx.objectStore('actions').put(action);
       if (device === null) tx.objectStore('devices').delete(action.deviceId);
-      else if (device) tx.objectStore('devices').put(device);
+      else if (device && device.discoverySource !== 'SIMULATED') {
+        tx.objectStore('devices').put(normalizePersistedDevice(device));
+      }
       return undefined;
     });
   },

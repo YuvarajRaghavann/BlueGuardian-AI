@@ -1,4 +1,5 @@
-// Pure TS implementations copied from frontend utils (trustScore, threatDetection, ml)
+// Pure TS implementations copied from frontend utils (trustScore, threatDetection, ml).
+// The current classifier is a deterministic development classifier, not a trained/validated model.
 import type { BluetoothDevice, ConnectionStatus, DeviceType, RiskLevel } from '../../../src/types';
 import { calculateTrustScore } from '../../../src/utils/trustScore';
 import { analyzeDeviceThreat } from '../../../src/utils/threatDetection';
@@ -11,7 +12,7 @@ function toBluetoothDevice(record: Record<string, any>): BluetoothDevice {
   const connectionStatuses: ConnectionStatus[] = ['connected', 'disconnected', 'connecting', 'unknown'];
 
   return {
-    id: record.deviceId,
+    id: String(record.deviceId),
     name: record.name ?? record.deviceId,
     type: deviceTypes.includes(record.type) ? record.type : 'unknown',
     address: record.address,
@@ -38,12 +39,13 @@ function toBluetoothDevice(record: Record<string, any>): BluetoothDevice {
   };
 }
 
-export async function assessDevice(record: Record<string, any>) {
+export async function assessDevice(record: Record<string, any>, ownerId?: string) {
   const device = toBluetoothDevice(record);
   const trust = calculateTrustScore(device);
   const rule = analyzeDeviceThreat(device);
   const ml = classifyDevice(device);
 
+  // Retained existing ensemble weights for backwards compatibility. They are not empirically calibrated.
   const RULE_WEIGHT = 0.6;
   const ML_WEIGHT = 0.4;
   const mlRiskScore = (() => {
@@ -68,6 +70,7 @@ export async function assessDevice(record: Record<string, any>) {
 
   const assessment = {
     deviceId: device.id,
+    ...(ownerId ? { ownerId } : {}),
     trustScore: trust.score,
     trustRiskLevel: trust.riskLevel,
     ruleBasedThreatScore: rule.threatScore,
@@ -75,16 +78,18 @@ export async function assessDevice(record: Record<string, any>) {
     finalThreatScore: finalScore,
     severity: finalSeverity,
     primaryCategory: finalClassification,
-    reasons: [...rule.reasons, { code: 'ML_CLASSIFICATION', message: `ML ${ml.label} (${Math.round(ml.confidence*100)}%) – ${ml.explanation}` }],
+    reasons: [...rule.reasons, { code: 'ML_CLASSIFICATION', message: `Development classifier ${ml.label} (${Math.round(ml.confidence * 100)}%) – ${ml.explanation}` }],
     mlClassification: ml.label,
     mlConfidence: ml.confidence,
     modelName: ml.modelName,
     modelVersion: ml.modelVersion,
+    modelValidationStatus: 'development-not-validated',
+    status: 'active' as const,
     timestamp: new Date(),
   };
 
-  // Persist
+  // Persist every assessment within the authenticated owner's data scope when provided by an API route.
   await new ThreatAssessment(assessment).save();
 
-  return assessment;
+  return { ...assessment, overallConfidence };
 }

@@ -5,7 +5,22 @@ const store = vi.hoisted(() => ({
   devices: [] as Array<Record<string, any>>,
   encounters: [] as Array<Record<string, any>>,
   deviceFindError: undefined as unknown,
+  deviceFindOneFilters: [] as Array<Record<string, any>>,
 }));
+
+function matchesFilter(record: Record<string, any>, filter: Record<string, any>): boolean {
+  return Object.entries(filter).every(([key, expected]) => {
+    if (key === '$or') {
+      return Array.isArray(expected) && expected.some((part) => matchesFilter(record, part));
+    }
+    if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+      if ('$exists' in expected) return Boolean(expected.$exists) === (record[key] !== undefined);
+      if ('$in' in expected) return Array.isArray(expected.$in) && expected.$in.includes(record[key]);
+      if ('$ne' in expected) return record[key] !== expected.$ne;
+    }
+    return record[key] === expected;
+  });
+}
 
 vi.mock('./models/Device', () => {
   class FakeDevice {
@@ -27,17 +42,20 @@ vi.mock('./models/Device', () => {
     }
 
     static find(filter: Record<string, any>) {
-      const rows = store.devices.filter(device => Object.entries(filter).every(([key, value]) => device[key] === value));
-      return {
-        sort: async () => {
+      const rows = store.devices.filter(device => matchesFilter(device, filter));
+      const query = {
+        sort: () => query,
+        limit: async (count: number) => {
           if (store.deviceFindError) throw store.deviceFindError;
-          return rows;
+          return rows.slice(0, count);
         },
       };
+      return query;
     }
 
     static async findOne(filter: Record<string, any>) {
-      const found = store.devices.find(device => Object.entries(filter).every(([key, value]) => device[key] === value));
+      store.deviceFindOneFilters.push({ ...filter });
+      const found = store.devices.find(device => matchesFilter(device, filter));
       return found ? Object.assign(Object.create(FakeDevice.prototype), found) : null;
     }
   }
@@ -71,7 +89,7 @@ vi.mock('./models/RecoveryEncounter', () => {
     }
 
     static find(filter: Record<string, any>) {
-      const rows = store.encounters.filter(encounter => Object.entries(filter).every(([key, value]) => encounter[key] === value));
+      const rows = store.encounters.filter(encounter => matchesFilter(encounter, filter));
       const query = {
         sort: () => query,
         limit: async (count: number) => rows.slice(0, count),
@@ -80,7 +98,7 @@ vi.mock('./models/RecoveryEncounter', () => {
     }
 
     static async findOne(filter: Record<string, any>) {
-      const found = store.encounters.find(encounter => Object.entries(filter).every(([key, value]) => encounter[key] === value));
+      const found = store.encounters.find(encounter => matchesFilter(encounter, filter));
       return found ? Object.assign(Object.create(FakeEncounter.prototype), found) : null;
     }
   }
@@ -114,6 +132,7 @@ describe('recovery API integration', () => {
     store.devices.length = 0;
     store.encounters.length = 0;
     store.deviceFindError = undefined;
+    store.deviceFindOneFilters.length = 0;
   });
 
   const ownerHeaders = { Authorization: 'Bearer blueguardian-owner-token' };
@@ -144,6 +163,31 @@ describe('recovery API integration', () => {
     expect(unauthorizedRead.status).toBe(404);
     const unauthorizedEncounter = await fetch(`${origin}/api/recovery/devices/another-owner-device/encounters`, { headers: ownerHeaders });
     expect(unauthorizedEncounter.status).toBe(404);
+  });
+
+  it('queries by owner and device together when submitting an observation', async () => {
+    store.devices.push({
+      deviceId: 'another-owner-device',
+      deviceIdentifier: 'another-owner-device',
+      ownerId: 'different-owner',
+      name: 'Private device',
+      discoverySource: 'REAL',
+      recoveryState: 'lost',
+    });
+
+    const response = await fetch(`${origin}/api/recovery/devices/another-owner-device/encounters`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'REAL', simulated: false, isTestFixture: false }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(store.deviceFindOneFilters).toContainEqual({
+      ownerId: 'test-owner',
+      deviceId: 'another-owner-device',
+      $or: [{ recoveryEnabled: true }, { recoveryEnabled: { $exists: false } }],
+    });
+    expect(store.encounters).toHaveLength(0);
   });
 
   it('rejects unauthenticated registration and invalid encounter payloads', async () => {

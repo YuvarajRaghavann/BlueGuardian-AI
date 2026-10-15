@@ -1,10 +1,12 @@
-import type { NextFunction, Request, Response } from 'express';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import type { Request, NextFunction, Response } from 'express';
 
 export type AuthRole = 'owner' | 'participant';
 
 export interface AuthContext {
   role: AuthRole;
   ownerId?: string;
+  /** Kept for compatibility with existing middleware consumers. Never log or return it. */
   token: string;
 }
 
@@ -19,10 +21,28 @@ export function getAuthConfig() {
 
 export function parseBearerToken(headerValue?: string): string | null {
   if (!headerValue) return null;
-  const value = headerValue.trim();
-  if (!value.startsWith('Bearer ')) return null;
-  const token = value.slice('Bearer '.length).trim();
-  return token.length > 0 ? token : null;
+  const match = /^Bearer\s+(.+)$/i.exec(headerValue.trim());
+  const token = match?.[1]?.trim();
+  return token ? token : null;
+}
+
+/**
+ * Hash both values before comparing so timingSafeEqual always compares fixed-length buffers.
+ * This hardens the existing development-token mechanism; it is NOT a replacement for OIDC/JWKS.
+ */
+function tokenMatches(candidate: string, expected: string | undefined): boolean {
+  if (!expected) return false;
+  const candidateHash = createHash('sha256').update(candidate, 'utf8').digest();
+  const expectedHash = createHash('sha256').update(expected, 'utf8').digest();
+  return timingSafeEqual(candidateHash, expectedHash);
+}
+
+export function getOwnerIdFromRequest(req: Request): string {
+  const request = req as Request & { auth?: AuthContext };
+  if (request.auth?.role !== 'owner' || !request.auth.ownerId) {
+    throw Object.assign(new Error('Verified owner identity is required for this operation.'), { status: 403 });
+  }
+  return request.auth.ownerId;
 }
 
 export function requireAuth(role: AuthRole = 'owner') {
@@ -30,9 +50,11 @@ export function requireAuth(role: AuthRole = 'owner') {
     const { mode, ownerToken, participantToken, ownerId } = getAuthConfig();
     const request = req as Request & { auth?: AuthContext };
     const logRejection = (category: 'missing_bearer_token' | 'invalid_owner_token' | 'invalid_participant_token') => {
+      // Deliberately do not log the Authorization header or token value.
       console.warn(`[auth] rejected protected request category=${category} role=${role}`);
     };
 
+    // Production remains fail-closed until a real issuer/audience/signature/expiry verifier is configured.
     if (process.env.NODE_ENV === 'production') {
       return res.status(503).json({
         error: 'Production identity verification is not configured. Configure an OIDC verifier before enabling protected APIs.',
@@ -55,8 +77,8 @@ export function requireAuth(role: AuthRole = 'owner') {
       return res.status(401).json({ error: 'Authorization header with Bearer token is required.' });
     }
 
-    const isOwnerToken = ownerToken !== undefined && token === ownerToken;
-    const isParticipantToken = (participantToken !== undefined && token === participantToken) || isOwnerToken;
+    const isOwnerToken = tokenMatches(token, ownerToken);
+    const isParticipantToken = tokenMatches(token, participantToken) || isOwnerToken;
 
     if (role === 'owner' && !isOwnerToken) {
       logRejection('invalid_owner_token');

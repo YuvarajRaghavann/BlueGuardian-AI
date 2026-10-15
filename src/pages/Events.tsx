@@ -26,8 +26,8 @@ export function Events() {
   const systemEvents = visibleEvents(availableEvents, securityState.policy.showSimulatedEvents);
 
   return (
-    <div className="space-y-6">
-      <header>
+    <div className="relative space-y-6 sm:space-y-7">
+      <header className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] sm:p-6">
         <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--accent)]">
           <Activity className="h-3.5 w-3.5" />
           Browser activity

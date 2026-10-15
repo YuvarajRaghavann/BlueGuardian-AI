@@ -5,12 +5,42 @@ import app from './app.js';
 import Device from './models/Device.js';
 import RecoveryEncounter from './models/RecoveryEncounter.js';
 
-const mongoIntegrationEnabled = process.env.RUN_MONGO_INTEGRATION === '1' && Boolean(process.env.MONGODB_TEST_URI);
-process.env.NODE_ENV = 'test';
-process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
-process.env.BLUEGUARDIAN_OWNER_ID = 'mongo-test-owner-a';
-process.env.BLUEGUARDIAN_OWNER_TOKEN = 'mongo-test-owner-token-a';
-process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = '';
+function isSafeDisposableMongoUri(value: string | undefined): boolean {
+  if (!value || !value.startsWith('mongodb://')) return false;
+  try {
+    const parsed = new URL(value);
+    const hostname = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    const database = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
+    const localHosts = new Set(['localhost', '127.0.0.1', '::1']);
+    return localHosts.has(hostname) &&
+      !parsed.host.includes(',') &&
+      database === 'blueguardian_test';
+  } catch {
+    return false;
+  }
+}
+
+const mongoIntegrationRequested = process.env.RUN_MONGO_INTEGRATION === '1';
+const mongoTestUri = process.env.MONGODB_TEST_URI?.trim();
+if (mongoIntegrationRequested && !isSafeDisposableMongoUri(mongoTestUri)) {
+  throw new Error('Refusing live-Mongo integration run: MONGODB_TEST_URI must point to a local MongoDB instance and database exactly named blueguardian_test. No database was modified.');
+}
+const mongoIntegrationEnabled = mongoIntegrationRequested && isSafeDisposableMongoUri(mongoTestUri);
+const originalEnvironment = {
+  NODE_ENV: process.env.NODE_ENV,
+  BLUEGUARDIAN_AUTH_MODE: process.env.BLUEGUARDIAN_AUTH_MODE,
+  BLUEGUARDIAN_OWNER_ID: process.env.BLUEGUARDIAN_OWNER_ID,
+  BLUEGUARDIAN_OWNER_TOKEN: process.env.BLUEGUARDIAN_OWNER_TOKEN,
+  BLUEGUARDIAN_PARTICIPANT_TOKEN: process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN,
+  MONGODB_URI: process.env.MONGODB_URI,
+};
+
+function restoreEnvironment() {
+  for (const [key, value] of Object.entries(originalEnvironment)) {
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 
 const ownerA = { Authorization: 'Bearer mongo-test-owner-token-a' };
 const ownerB = { Authorization: 'Bearer mongo-test-owner-token-b' };
@@ -32,6 +62,11 @@ async function stopServer() {
 
 describe.skipIf(!mongoIntegrationEnabled)('recovery persistence against MongoDB', () => {
   beforeAll(async () => {
+    process.env.NODE_ENV = 'test';
+    process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
+    process.env.BLUEGUARDIAN_OWNER_ID = 'mongo-test-owner-a';
+    process.env.BLUEGUARDIAN_OWNER_TOKEN = 'mongo-test-owner-token-a';
+    process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = '';
     mongoose.set('bufferCommands', false);
     Device.schema.set('bufferCommands', false);
     RecoveryEncounter.schema.set('bufferCommands', false);
@@ -48,6 +83,7 @@ describe.skipIf(!mongoIntegrationEnabled)('recovery persistence against MongoDB'
   afterAll(async () => {
     await stopServer();
     await mongoose.disconnect();
+    restoreEnvironment();
   }, 30_000);
 
   it('persists owner registrations, case state, and sightings across an API service restart', async () => {

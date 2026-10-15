@@ -43,5 +43,6 @@ RecoveryEncounterSchema.index(
   { ownerId: 1, deviceId: 1, deduplicationKey: 1 },
   { unique: true, partialFilterExpression: { deduplicationKey: { $type: 'string' } } },
 );
+RecoveryEncounterSchema.index({ ownerId: 1, deviceId: 1, observedAt: -1 });
 
 export default mongoose.model<IRecoveryEncounter>('RecoveryEncounter', RecoveryEncounterSchema);

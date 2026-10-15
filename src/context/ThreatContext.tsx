@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useReducer, useEffect, useState, type ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { BluetoothDevice, Threat, ThreatSeverity, ThreatStatus, ThreatReason } from '../types';
 import { deduplicateThreats } from '../services/threatService';
 import { useBluetoothDevices } from './DeviceContext';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { localDatabase, type StoredAssessment } from '../services/localDatabase';
+import { api } from '../services/api';
+import { useOwnerToken } from '../services/ownerSession';
 
 interface ThreatState {
   threats: Threat[];
@@ -15,6 +17,7 @@ interface ThreatState {
 
 type Action =
   | { type: 'SET_THREATS'; payload: Threat[] }
+  | { type: 'MERGE_SERVER_THREATS'; payload: Threat[] }
   | { type: 'ADD_THREAT'; payload: Threat }
   | { type: 'UPDATE_THREAT'; payload: Threat }
   | { type: 'REMOVE_THREAT'; payload: string }
@@ -32,6 +35,13 @@ function threatReducer(state: ThreatState, action: Action): ThreatState {
   switch (action.type) {
     case 'SET_THREATS':
       return { ...state, threats: action.payload };
+    case 'MERGE_SERVER_THREATS': {
+      // Server assessments take precedence for the same device/category. Local-only records
+      // remain available as a fallback, preserving browser-only use and older local history.
+      const serverDeviceIds = new Set(action.payload.map(threat => threat.deviceId));
+      const localOnly = state.threats.filter(threat => !serverDeviceIds.has(threat.deviceId));
+      return { ...state, threats: deduplicateThreats([...localOnly, ...action.payload]) };
+    }
     case 'ADD_THREAT': {
       const exists = state.threats.some(t => t.id === action.payload.id);
       if (exists) return state;
@@ -127,6 +137,17 @@ function refreshThreats(
   });
 }
 
+function deviceAssessmentSignature(device: BluetoothDevice): string {
+  return JSON.stringify({
+    id: device.id, name: device.name, type: device.type, trusted: device.trusted,
+    blocked: device.blocked, trustScore: device.trustScore, riskLevel: device.riskLevel,
+    isKnown: device.isKnown, manufacturer: device.manufacturer, rssi: device.rssi,
+    connectionStatus: device.connectionStatus, services: device.services,
+    gattConnected: device.gattConnected, connectionHealth: device.connectionHealth,
+    discoverySource: device.discoverySource,
+  });
+}
+
 function assessmentToThreat(device: BluetoothDevice, a: ReturnType<typeof assessDeviceSecurity>): Threat {
   const id = `thr-${device.id}-${Date.now()}`;
   return {
@@ -166,12 +187,23 @@ const ThreatContext = createContext<{
   state: ThreatState;
   dispatch: React.Dispatch<Action>;
   refreshThreatAnalysis: (devices: BluetoothDevice[]) => void;
+  updateThreatStatus: (threatId: string, status: 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED') => void;
 }>({} as any);
 
 export function ThreatProvider({ children }: { children: ReactNode }) {
-  const { state: deviceState } = useBluetoothDevices();
+  const { state: deviceState, backendReady } = useBluetoothDevices();
   const [state, dispatch] = useReducer(threatReducer, initialState);
   const [storedThreats, setStoredThreats] = useState<Threat[] | null>(null);
+  const ownerToken = useOwnerToken();
+  const assessedSignatures = useRef(new Map<string, string>());
+  const backendAssessedDeviceIds = useRef(new Set<string>());
+  const [serverThreatsReadyToken, setServerThreatsReadyToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    assessedSignatures.current.clear();
+    backendAssessedDeviceIds.current.clear();
+    setServerThreatsReadyToken(null);
+  }, [ownerToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -196,17 +228,127 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
     });
   }, [state.threats, storedThreats]);
 
+  // When authenticated, store devices and run the backend assessment endpoint. The
+  // browser-side development analysis remains active when no owner token is configured.
   useEffect(() => {
     if (storedThreats === null || deviceState.devices.length === 0) return;
-    refreshThreats(deviceState.devices, dispatch);
-  }, [deviceState.devices, storedThreats]);
+    if (!ownerToken) {
+      refreshThreats(deviceState.devices, dispatch);
+      return;
+    }
+    if (!backendReady || serverThreatsReadyToken !== ownerToken) return;
+
+    let cancelled = false;
+    const syncAndAssess = async () => {
+      let changed = false;
+      for (const device of deviceState.devices) {
+        const signature = deviceAssessmentSignature(device);
+        const previousSignature = assessedSignatures.current.get(device.id);
+        if (previousSignature === signature) continue;
+        if (!previousSignature && backendAssessedDeviceIds.current.has(device.id)) {
+          assessedSignatures.current.set(device.id, signature);
+          continue;
+        }
+        try {
+          // The assessment endpoint needs a persisted, owner-scoped device record first.
+          await api.createDevice(ownerToken, device);
+          await api.assessDevice(ownerToken, device.id);
+          if (cancelled) return;
+          assessedSignatures.current.set(device.id, signature);
+          backendAssessedDeviceIds.current.add(device.id);
+          changed = true;
+        } catch (error) {
+          if (!cancelled) console.warn(`Backend assessment failed for ${device.name}; local mode is still available.`, error);
+        }
+      }
+      if (changed && !cancelled) {
+        try {
+          const serverThreats = await api.listThreats(ownerToken, deviceState.devices);
+          if (!cancelled) dispatch({ type: 'MERGE_SERVER_THREATS', payload: serverThreats });
+        } catch (error) {
+          if (!cancelled) console.warn('Backend threats could not be refreshed.', error);
+        }
+      }
+    };
+    void syncAndAssess();
+    return () => { cancelled = true; };
+  }, [deviceState.devices, storedThreats, ownerToken, backendReady, serverThreatsReadyToken]);
+
+  useEffect(() => {
+    if (!ownerToken || !backendReady) return;
+    let cancelled = false;
+    api.listThreats(ownerToken, deviceState.devices)
+      .then(serverThreats => {
+        if (cancelled) return;
+        backendAssessedDeviceIds.current = new Set(serverThreats.map(threat => threat.deviceId));
+        for (const device of deviceState.devices) {
+          if (backendAssessedDeviceIds.current.has(device.id)) {
+            assessedSignatures.current.set(device.id, deviceAssessmentSignature(device));
+          }
+        }
+        dispatch({ type: 'MERGE_SERVER_THREATS', payload: serverThreats });
+        setServerThreatsReadyToken(ownerToken);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) console.warn('Could not load owner-scoped backend threats; automatic backend assessment is paused until the owner data can be loaded.', error);
+      });
+    return () => { cancelled = true; };
+  }, [ownerToken, backendReady]);
 
   const refreshThreatAnalysis = (devices: BluetoothDevice[]) => {
-    refreshThreats(devices, dispatch);
+    if (!ownerToken) {
+      refreshThreats(devices, dispatch);
+      return;
+    }
+    if (!backendReady) return;
+    const refreshBackend = async () => {
+      for (const device of devices) {
+        await api.createDevice(ownerToken, device);
+        await api.assessDevice(ownerToken, device.id);
+        assessedSignatures.current.set(device.id, deviceAssessmentSignature(device));
+        backendAssessedDeviceIds.current.add(device.id);
+      }
+      const serverThreats = await api.listThreats(ownerToken, devices);
+      dispatch({ type: 'MERGE_SERVER_THREATS', payload: serverThreats });
+    };
+    void refreshBackend().catch((error: unknown) => console.warn('Could not refresh backend threat analysis.', error));
+  };
+
+  const updateThreatStatus = (threatId: string, status: 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED') => {
+    const threat = state.threats.find(item => item.id === threatId);
+    const actionType = status === 'RESOLVED' ? 'RESOLVE_THREAT' : status === 'DISMISSED' ? 'DISMISS_THREAT' : 'INVESTIGATE_THREAT';
+    dispatch({ type: actionType, payload: threatId });
+    if (!ownerToken || !backendReady || !threat) return;
+
+    const persistStatus = async () => {
+      const device = deviceState.devices.find(item => item.id === threat.deviceId);
+      if (device) await api.createDevice(ownerToken, device);
+      let backendThreatId = /^[a-f0-9]{24}$/i.test(threat.id) ? threat.id : undefined;
+      if (!backendThreatId) {
+        if (device) await api.assessDevice(ownerToken, device.id);
+        const available = await api.listThreats(ownerToken, deviceState.devices);
+        backendThreatId = available.find(item => item.deviceId === threat.deviceId)?.id;
+        if (backendThreatId) backendAssessedDeviceIds.current.add(threat.deviceId);
+      }
+      if (!backendThreatId) throw new Error('No backend assessment ID is available for this threat yet.');
+      const action = status === 'RESOLVED' ? 'RESOLVE_THREAT' : status === 'DISMISSED' ? 'DISMISS_THREAT' : 'INVESTIGATE';
+      await api.postAction(ownerToken, {
+        deviceId: threat.deviceId,
+        deviceName: threat.deviceName,
+        action,
+        source: 'USER',
+        simulated: threat.discoverySource === 'SIMULATED',
+        reason: `Threat status changed to ${status.toLowerCase()} from the security dashboard.`,
+        threatId: backendThreatId,
+      });
+      const refreshed = await api.listThreats(ownerToken, deviceState.devices);
+      dispatch({ type: 'MERGE_SERVER_THREATS', payload: refreshed });
+    };
+    void persistStatus().catch((error: unknown) => console.warn('Threat status changed locally, but backend persistence failed.', error));
   };
 
   return (
-    <ThreatContext.Provider value={{ state, dispatch, refreshThreatAnalysis }}>
+    <ThreatContext.Provider value={{ state, dispatch, refreshThreatAnalysis, updateThreatStatus }}>
       {children}
     </ThreatContext.Provider>
   );

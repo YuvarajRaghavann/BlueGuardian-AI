@@ -81,9 +81,9 @@ export function Analytics() {
     Math.max(...Object.values(severityCounts), 1);
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6 sm:space-y-7">
       {/* Header */}
-      <header>
+      <header className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] sm:p-6">
         <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--accent)]">
           <Activity className="h-3.5 w-3.5" />
           Security intelligence
@@ -142,7 +142,7 @@ export function Analytics() {
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         {/* Classification */}
-        <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
               <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
@@ -213,7 +213,7 @@ export function Analytics() {
         </section>
 
         {/* Severity */}
-        <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
           <div className="mb-6 flex items-start justify-between gap-4">
             <div>
               <div className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
@@ -277,7 +277,7 @@ export function Analytics() {
       </div>
 
       {/* Methodology note */}
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--warning)]/10">
             <Cpu className="h-4 w-4 text-[var(--warning)]" />

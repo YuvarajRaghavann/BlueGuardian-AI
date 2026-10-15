@@ -28,6 +28,32 @@ function stateWithDevice(currentDevice: BluetoothDevice): DeviceState {
   };
 }
 
+describe('device discovery source handling', () => {
+  it('does not load persisted simulated records into the real-device state', () => {
+    const simulated: BluetoothDevice = {
+      ...device,
+      id: 'simulated-device-1',
+      discoverySource: 'SIMULATED',
+    };
+    const emptyState: DeviceState = {
+      devices: [],
+      scan: { state: 'idle', elapsedMs: 0, devicesFound: 0 },
+      simulationMode: false,
+      filter: 'all',
+      sort: 'trust',
+      search: '',
+    };
+
+    const loaded = deviceReducer(emptyState, { type: 'SET_DEVICES', payload: [simulated] });
+    expect(loaded.devices).toEqual([]);
+
+    // Explicit demo generation is still allowed within the current UI session.
+    const generated = deviceReducer(loaded, { type: 'ADD_DEVICE', payload: simulated });
+    expect(generated.devices).toHaveLength(1);
+    expect(generated.devices[0].discoverySource).toBe('SIMULATED');
+  });
+});
+
 describe('security action device transitions', () => {
   it('blocks a device without changing trust or risk values', () => {
     const next = deviceReducer(stateWithDevice(device), {

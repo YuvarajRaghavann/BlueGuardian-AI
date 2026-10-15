@@ -109,9 +109,9 @@ export function Threats() {
   ).length;
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6 sm:space-y-7">
       {/* Header */}
-      <header>
+      <header className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] sm:p-6">
         <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--danger)]">
           <ShieldAlert className="h-3.5 w-3.5" />
           Security intelligence
@@ -167,7 +167,7 @@ export function Threats() {
       </section>
 
       {/* Controls */}
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
+      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-4">
         <div className="flex flex-col gap-3 lg:flex-row">
           <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
@@ -177,7 +177,7 @@ export function Threats() {
               placeholder="Search threats, devices or categories…"
               value={localSearch}
               onChange={e => setLocalSearch(e.target.value)}
-              className="h-11 w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] pl-10 pr-4 text-sm text-[var(--text)] outline-none transition-colors placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/60"
+              className="h-11 w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] pl-10 pr-4 text-sm text-[var(--text)] outline-none transition-all duration-200 placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/60 focus:ring-2 focus:ring-[var(--accent)]/15"
             />
           </div>
 
@@ -192,7 +192,7 @@ export function Threats() {
               onChange={e =>
                 setLocalSeverity(e.target.value as ThreatSeverity | 'all')
               }
-              className="h-11 min-w-40 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/60"
+              className="h-11 min-w-40 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-all duration-200 focus:border-[var(--accent)]/60 focus:ring-2 focus:ring-[var(--accent)]/15"
             >
               <option value="all">All severities</option>
               <option value="critical">Critical</option>
@@ -206,7 +206,7 @@ export function Threats() {
               onChange={e =>
                 setLocalStatus(e.target.value as ThreatStatus | 'all')
               }
-              className="h-11 min-w-40 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/60"
+              className="h-11 min-w-40 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-all duration-200 focus:border-[var(--accent)]/60 focus:ring-2 focus:ring-[var(--accent)]/15"
             >
               <option value="all">All statuses</option>
               <option value="ACTIVE">Active</option>
@@ -218,7 +218,7 @@ export function Threats() {
             <select
               value={localSort}
               onChange={e => setLocalSort(e.target.value as any)}
-              className="h-11 min-w-36 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/60"
+              className="h-11 min-w-36 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-all duration-200 focus:border-[var(--accent)]/60 focus:ring-2 focus:ring-[var(--accent)]/15"
             >
               <option value="severity">Severity ↓</option>
               <option value="score">Score ↓</option>

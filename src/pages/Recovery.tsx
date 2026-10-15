@@ -61,7 +61,7 @@ export function Recovery() {
     setError(null);
     setNotice(null);
     const result = await requestBluetoothDevice();
-    if (!result.ok) {
+    if (result.ok === false) {
       setError(result.error);
       return;
     }
@@ -171,7 +171,7 @@ export function Recovery() {
     setNotice(null);
     try {
       const result = await requestBluetoothDevice();
-      if (!result.ok) {
+      if (result.ok === false) {
         setError(result.error);
         return;
       }

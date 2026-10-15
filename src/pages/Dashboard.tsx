@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   Brain,
   Bluetooth,
+  FlaskConical,
   Cpu,
   ScanLine,
   ShieldCheck,
@@ -26,7 +27,7 @@ import { needsManualApproval } from '../utils/connectionPolicy';
 import { visibleEvents } from '../utils/visibleEvents';
 
 export function Dashboard() {
-  const { state, scanDevices } = useBluetoothDevices();
+  const { state, dispatch: deviceDispatch, scanRealDevices, scanSimulatedDevices } = useBluetoothDevices();
   const { state: threatState } = useThreats();
   const { state: securityState, executeAction } = useSecurity();
   const [pendingApproval, setPendingApproval] = useState<BluetoothDevice | null>(null);
@@ -168,9 +169,9 @@ export function Dashboard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6 sm:space-y-7">
       {/* Page heading */}
-      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] sm:p-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
             <Activity className="h-3.5 w-3.5 text-[var(--accent)]" />
@@ -187,16 +188,51 @@ export function Dashboard() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={scanDevices}
-          disabled={scanActive}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(59,156,255,0.16)] transition-all hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <ScanLine className={`h-4 w-4 ${scanActive ? 'animate-pulse' : ''}`} />
-          {scanActive ? 'Scanning...' : 'Run Bluetooth scan'}
-        </button>
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={() => void scanRealDevices()}
+            disabled={scanActive}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(59,156,255,0.16)] transition-all hover:-translate-y-0.5 hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ScanLine className={`h-4 w-4 ${scanActive ? 'animate-pulse' : ''}`} />
+            {scanActive ? 'Searching...' : 'Find nearby BLE devices'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void scanSimulatedDevices()}
+            disabled={scanActive}
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--success)]/30 bg-[var(--success)]/10 px-4 text-sm font-semibold text-[var(--success)] transition-all hover:bg-[var(--success)]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--success)]/40 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <FlaskConical className="h-4 w-4" />
+            Generate simulated data
+          </button>
+        </div>
       </section>
+
+      {(state.scan.state === 'permission-denied' || state.scan.state === 'unsupported' || state.scan.state === 'error') && (
+        <div
+          role="status"
+          className="flex flex-col gap-2 rounded-xl border border-[var(--warning)]/25 bg-[var(--warning)]/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-sm text-[var(--text-secondary)]">
+            {state.scan.state === 'permission-denied' &&
+              (/cancel|abort|dismiss/i.test(state.scan.error ?? '')
+                ? 'Bluetooth device picker cancelled. No device was added. Use Generate simulated data to test without Bluetooth.'
+                : `Bluetooth permission was not granted: ${state.scan.error ?? 'permission unavailable'}`)}
+            {state.scan.state === 'unsupported' &&
+              `Real Bluetooth scanning is unavailable in this browser or page context: ${state.scan.error ?? 'Web Bluetooth is unsupported'}`}
+            {state.scan.state === 'error' && `Bluetooth scan failed: ${state.scan.error ?? 'Unknown error'}`}
+          </p>
+          <button
+            type="button"
+            onClick={() => deviceDispatch({ type: 'SET_SCAN_STATE', payload: { state: 'idle', error: undefined } })}
+            className="text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text)]"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {approvalTargets.length > 0 && (
         <section className="rounded-2xl border border-[var(--warning)]/25 bg-[var(--warning)]/10 p-4 sm:p-5">
@@ -274,7 +310,7 @@ export function Dashboard() {
 
       {/* Primary posture */}
       <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr_1fr]">
-        <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
           <div className="absolute right-0 top-0 h-40 w-40 translate-x-1/3 -translate-y-1/3 rounded-full bg-[rgba(59,156,255,0.08)] blur-3xl" />
 
           <div className="relative">
@@ -332,7 +368,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
           <div className="flex items-center justify-between">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-soft)]">
               <Bluetooth className="h-5 w-5 text-[var(--accent)]" />
@@ -368,7 +404,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
+        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
           <div className="flex items-center justify-between">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(239,98,98,0.08)]">
               <AlertTriangle className="h-5 w-5 text-[var(--danger)]" />
@@ -465,7 +501,7 @@ export function Dashboard() {
 
       {/* Main monitoring grid */}
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.75fr)]">
-        <div className="space-y-6">
+        <div className="relative space-y-6 sm:space-y-7">
           {/* Device monitoring */}
           <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
             <div className="flex flex-col gap-3 border-b border-[var(--border)] p-5 sm:flex-row sm:items-center sm:justify-between">
@@ -485,7 +521,9 @@ export function Dashboard() {
               <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
                 {state.scan.state === 'complete'
-                  ? `Scan completed in ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
+                  ? state.scan.error
+                    ? `Device selected; GATT details unavailable`
+                    : `Scan completed in ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
                   : state.scan.state === 'error'
                     ? 'Last scan failed'
                     : state.devices.length > 0
@@ -506,7 +544,7 @@ export function Dashboard() {
                     No Bluetooth devices detected yet.
                   </p>
                   <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    Run a scan to begin monitoring.
+                    Find nearby BLE devices to select a real peripheral, or generate simulated data to test without Bluetooth.
                   </p>
                 </div>
               )}
@@ -562,8 +600,8 @@ export function Dashboard() {
         </div>
 
         {/* Right rail */}
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="relative space-y-6 sm:space-y-7">
+          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Device recovery</p>
             <p className="mt-2 text-sm text-[var(--text-secondary)]">
               Recovery records and owner-authorized sightings are shown in the Recovery workspace. No sample sighting is presented here as live data.

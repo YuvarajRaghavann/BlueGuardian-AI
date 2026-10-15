@@ -1,4 +1,5 @@
-import type { BluetoothDevice, ConnectionStatus, DeviceType, RiskLevel, SecurityAction, SecurityActionType } from '../types';
+import type { BluetoothDevice, ConnectionStatus, DeviceType, RiskLevel, SecurityAction, SecurityActionType, Threat, ThreatCategory, ThreatSeverity, ThreatStatus, ThreatReason, MLThreatClass } from '../types';
+import { resolveBluetoothDisplayName } from './bluetoothService';
 
 const BASE = (import.meta.env.VITE_API_BASE?.trim() || '/api').replace(/\/+$/, '') || '/api';
 
@@ -77,7 +78,7 @@ function fromApiDevice(record: Record<string, any>): BluetoothDevice {
 
   return {
     id: record.deviceId ?? record.id,
-    name: record.name ?? record.deviceId ?? 'Unknown Bluetooth device',
+    name: resolveBluetoothDisplayName(record.name, record.deviceName, record.manufacturer),
     type: validTypes.includes(record.type) ? record.type : 'unknown',
     address: record.address ?? undefined,
     rssi: typeof record.rssi === 'number' ? record.rssi : undefined,
@@ -106,6 +107,7 @@ function fromApiDevice(record: Record<string, any>): BluetoothDevice {
 function toApiDevice(device: BluetoothDevice) {
   return {
     deviceId: device.id,
+    deviceIdentifier: device.id,
     name: device.name,
     type: device.type,
     address: device.address,
@@ -139,17 +141,98 @@ function fromApiAction(record: Record<string, any>): SecurityAction {
   };
 }
 
+function fromApiThreat(record: Record<string, any>, devices: BluetoothDevice[] = []): Threat {
+  const deviceId = String(record.deviceId ?? 'unknown-device');
+  const linkedDevice = devices.find(device => device.id === deviceId);
+  const timestampValue = record.timestamp ?? record.detectedAt ?? Date.now();
+  const timestamp = new Date(timestampValue);
+  const safeTimestamp = Number.isNaN(timestamp.getTime()) ? new Date() : timestamp;
+  const severityValue = String(record.severity ?? 'low').toLowerCase();
+  const severity: ThreatSeverity = ['low', 'medium', 'high', 'critical'].includes(severityValue)
+    ? severityValue as ThreatSeverity
+    : 'low';
+  const statusValue = String(record.status ?? 'active').toUpperCase();
+  const status: ThreatStatus = ['ACTIVE', 'INVESTIGATING', 'RESOLVED', 'DISMISSED'].includes(statusValue)
+    ? statusValue as ThreatStatus
+    : 'ACTIVE';
+  const rawCategory = String(record.primaryCategory ?? record.category ?? record.mlClassification ?? 'OTHER');
+  const category = rawCategory as ThreatCategory;
+  const reasons: ThreatReason[] = Array.isArray(record.reasons)
+    ? record.reasons.map((reason: Record<string, unknown>) => ({
+        code: String(reason.code ?? 'BACKEND_ASSESSMENT'),
+        message: String(reason.message ?? 'Backend assessment reported a risk factor.'),
+      }))
+    : [];
+  const mlLabel = String(record.mlClassification ?? record.primaryCategory ?? 'SUSPICIOUS') as MLThreatClass;
+  const confidence = typeof record.mlConfidence === 'number'
+    ? record.mlConfidence
+    : typeof record.overallConfidence === 'number' ? record.overallConfidence : 0;
+  const prediction = record.mlClassification || record.mlConfidence !== undefined ? {
+    label: mlLabel,
+    confidence,
+    modelName: String(record.modelName ?? 'BlueGuardian Development Classifier'),
+    modelVersion: String(record.modelVersion ?? '0.1.0-demo'),
+    predictedAt: safeTimestamp,
+    featuresUsed: [] as string[],
+    explanation: reasons.find(reason => reason.code === 'ML_CLASSIFICATION')?.message ?? 'Development classifier output from the backend assessment service.',
+  } : undefined;
+
+  return {
+    id: String(record._id ?? record.id ?? `${deviceId}-${safeTimestamp.getTime()}`),
+    deviceId,
+    deviceName: linkedDevice?.name ?? String(record.deviceName ?? deviceId),
+    category,
+    severity,
+    score: Number.isFinite(Number(record.finalThreatScore)) ? Number(record.finalThreatScore) : 0,
+    title: `${rawCategory.replace(/_/g, ' ')} Detected`,
+    description: reasons.map(reason => reason.message).join(' ') || 'Backend security assessment recorded for this device.',
+    reasons,
+    recommendedAction: 'Review this assessment and decide whether to investigate, resolve, or dismiss the threat.',
+    status,
+    detectedAt: safeTimestamp,
+    updatedAt: safeTimestamp,
+    discoverySource: linkedDevice?.discoverySource ?? 'REAL',
+    mlPrediction: prediction,
+    finalClassification: String(record.mlClassification ?? record.primaryCategory ?? rawCategory),
+    confidence,
+    modelName: record.modelName ?? prediction?.modelName,
+    modelVersion: record.modelVersion ?? prediction?.modelVersion,
+    resolved: status === 'RESOLVED',
+  };
+}
+
+export interface PostSecurityActionPayload {
+  deviceId: string;
+  deviceName?: string;
+  action: SecurityActionType;
+  source: 'USER' | 'SYSTEM';
+  simulated: boolean;
+  reason?: string;
+  previousState?: Partial<BluetoothDevice>;
+  newState?: Partial<BluetoothDevice>;
+  threatId?: string;
+}
+
 export const api = {
   health: () => fetch(`${BASE}/health`).then(json<{ status: string; database: string }>),
   listDevices: (token: string) => fetch(`${BASE}/devices`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => records.map(fromApiDevice)),
   getDevice: (token: string, id: string) => fetch(`${BASE}/devices/${encodeURIComponent(id)}`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>>).then(fromApiDevice),
   createDevice: (token: string, device: BluetoothDevice) => fetch(`${BASE}/devices`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(toApiDevice(device)) }).then(json<Record<string, any>>).then(fromApiDevice),
   updateDevice: (token: string, id: string, patch: Partial<BluetoothDevice>) => fetch(`${BASE}/devices/${encodeURIComponent(id)}`, { method: 'PATCH', headers: recoveryHeaders(token, true), body: JSON.stringify(patch) }).then(json<Record<string, any>>).then(fromApiDevice),
-  assessDevice: (token: string, id: string) => fetch(`${BASE}/devices/${encodeURIComponent(id)}/assess`, { method: 'POST', headers: recoveryHeaders(token) }).then(json<any>),
-  listThreats: (token: string) => fetch(`${BASE}/threats`, { headers: recoveryHeaders(token) }).then(json<any[]>),
+  assessDevice: (token: string, id: string) => fetch(`${BASE}/devices/${encodeURIComponent(id)}/assess`, { method: 'POST', headers: recoveryHeaders(token) }).then(json<Record<string, any>>),
+  listThreats: (token: string, devices: BluetoothDevice[] = []) => fetch(`${BASE}/threats`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => {
+    const latestByDeviceCategory = new Map<string, Threat>();
+    for (const record of records) {
+      const mapped = fromApiThreat(record, devices);
+      const key = `${mapped.deviceId}|${mapped.category}`;
+      const existing = latestByDeviceCategory.get(key);
+      if (!existing || mapped.detectedAt.getTime() > existing.detectedAt.getTime()) latestByDeviceCategory.set(key, mapped);
+    }
+    return Array.from(latestByDeviceCategory.values()).sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
+  }),
   listActions: (token: string) => fetch(`${BASE}/actions`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => records.map(fromApiAction)),
-  postAction: (token: string, payload: Omit<SecurityAction, 'id' | 'timestamp' | 'type'> & { action: SecurityActionType }) => fetch(`${BASE}/actions`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(payload) }).then(json<any>),
-  listEvents: (token: string) => fetch(`${BASE}/events`, { headers: recoveryHeaders(token) }).then(json<any[]>),
+  postAction: (token: string, payload: PostSecurityActionPayload) => fetch(`${BASE}/actions`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(payload) }).then(json<{ action: Record<string, any> }>).then(result => fromApiAction(result.action)),
+  listEvents: (token: string) => fetch(`${BASE}/events`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>),
   postEvent: (token: string, ev: any) => fetch(`${BASE}/events`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(ev) }).then(json<any>),
   recovery: {
     listDevices: (token: string) => recoveryFetch(`${BASE}/recovery/devices`, { headers: recoveryHeaders(token) }).then(json<RecoveryDeviceRecord[]>),

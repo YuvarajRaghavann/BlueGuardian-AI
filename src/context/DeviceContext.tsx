@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-import type { BluetoothDevice, BluetoothScanState } from '../types';
+import type { BluetoothDevice, BluetoothScanState, DeviceType } from '../types';
 import { generateSimulatedDevices } from '../services/bluetoothSimulator';
-import { isBluetoothSupported, requestBluetoothDevice, connectAndDiscover, readStandardCharacteristics } from '../services/bluetoothService';
+import { isBluetoothSupported, requestBluetoothDevice, connectAndDiscover, readStandardCharacteristics, normalizeBluetoothName, resolveBluetoothDisplayName, getPreviouslyGrantedBluetoothDevices, watchBluetoothAdvertisements, type BluetoothPickerMode, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { evaluateSecureBluetoothProfile, needsManualApproval } from '../utils/connectionPolicy';
 import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
+import { api } from '../services/api';
+import { useOwnerToken } from '../services/ownerSession';
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -18,6 +20,7 @@ export interface DeviceState {
 
 type Action =
   | { type: 'SET_DEVICES'; payload: BluetoothDevice[] }
+  | { type: 'MERGE_SERVER_DEVICES'; payload: BluetoothDevice[] }
   | { type: 'ADD_DEVICE'; payload: BluetoothDevice }
   | { type: 'UPDATE_DEVICE'; payload: BluetoothDevice }
   | { type: 'MARK_DISCONNECTED'; payload: string }
@@ -31,22 +34,28 @@ type Action =
   | { type: 'MARK_UNKNOWN'; payload: string }
   | { type: 'BLOCK_DEVICE'; payload: string }
   | { type: 'UNBLOCK_DEVICE'; payload: string }
-  | { type: 'FORGET_DEVICE'; payload: string };
+  | { type: 'FORGET_DEVICE'; payload: string }
+  | { type: 'CLEAR_SIMULATED_DEVICES' };
 
 function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
-  const profile = evaluateSecureBluetoothProfile(device, {
-    rssi: device.rssi,
-    fileName: device.name,
-    deviceType: device.type,
+  const normalizedDevice: BluetoothDevice = {
+    ...device,
+    // Repair legacy placeholder names in IndexedDB/API records whenever they are loaded.
+    name: resolveBluetoothDisplayName(device.name, undefined, device.manufacturer),
+  };
+  const profile = evaluateSecureBluetoothProfile(normalizedDevice, {
+    rssi: normalizedDevice.rssi,
+    fileName: normalizedDevice.name,
+    deviceType: normalizedDevice.type,
   });
 
   if (profile.connectionDecision === 'BLOCK') {
-    return { ...device, blocked: true, approvalRequired: false, riskLevel: 'high', trustScore: Math.min(device.trustScore, 25) };
+    return { ...normalizedDevice, blocked: true, approvalRequired: false, riskLevel: 'high', trustScore: Math.min(device.trustScore, 25) };
   }
 
   if (profile.connectionDecision === 'REQUIRE_APPROVAL') {
     return {
-      ...device,
+      ...normalizedDevice,
       trusted: false,
       isKnown: false,
       approvalRequired: true,
@@ -57,14 +66,14 @@ function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
 
   if (profile.wearableMode === 'RESTRICTED') {
     return {
-      ...device,
-      approvalRequired: needsManualApproval(device),
+      ...normalizedDevice,
+      approvalRequired: needsManualApproval(normalizedDevice),
       riskLevel: 'medium',
       trustScore: Math.min(device.trustScore, 55),
     };
   }
 
-  return { ...device, approvalRequired: needsManualApproval(device) };
+  return { ...normalizedDevice, approvalRequired: needsManualApproval(normalizedDevice) };
 }
 
 export function deviceReducer(state: DeviceState, action: Action): DeviceState {
@@ -73,13 +82,58 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
       return {
         ...state,
         devices: Array.from(
-          new Map([...action.payload.map(applySecurityPolicy), ...state.devices].map(device => [device.id, device])).values(),
+          new Map([
+            ...action.payload.filter(device => device.discoverySource !== 'SIMULATED').map(applySecurityPolicy),
+            ...state.devices,
+          ].map(device => [device.id, device])).values(),
         ),
       };
+    case 'MERGE_SERVER_DEVICES': {
+      // Backend settings win for matching IDs, but a generic server placeholder must
+      // not erase a meaningful name already learned from the local GATT session.
+      const merged = new Map(state.devices.map(device => [device.id, applySecurityPolicy(device)]));
+      for (const rawServerDevice of action.payload.filter(device => device.discoverySource !== 'SIMULATED')) {
+        const serverDevice = applySecurityPolicy(rawServerDevice);
+        const localDevice = merged.get(serverDevice.id);
+        const serverName = normalizeBluetoothName(serverDevice.name);
+        const localName = localDevice ? normalizeBluetoothName(localDevice.name) : undefined;
+        merged.set(serverDevice.id, localDevice && !serverName && localName
+          ? { ...serverDevice, name: localDevice.name }
+          : serverDevice);
+      }
+      return { ...state, devices: Array.from(merged.values()) };
+    }
     case 'ADD_DEVICE': {
-      const exists = state.devices.some((d) => d.id === action.payload.id);
-      if (exists) return state;
-      return { ...state, devices: [...state.devices, applySecurityPolicy(action.payload)] };
+      const incoming = applySecurityPolicy(action.payload);
+      const existing = state.devices.find((device) => device.id === incoming.id);
+      if (!existing) return { ...state, devices: [...state.devices, incoming] };
+
+      // Keep owner decisions/trust scores intact for an already-known ID while
+      // refreshing the name and facts that were unavailable in its earlier scan.
+      const existingName = normalizeBluetoothName(existing.name);
+      const incomingName = normalizeBluetoothName(incoming.name);
+      const shouldUpgradeName = !existingName && Boolean(incomingName);
+      const shouldRefreshConnection = incoming.discoverySource === 'REAL';
+      if (!shouldUpgradeName && !shouldRefreshConnection) return state;
+
+      const refreshed = applySecurityPolicy({
+        ...existing,
+        ...(shouldUpgradeName ? { name: incoming.name } : {}),
+        ...(existing.type === 'unknown' && incoming.type !== 'unknown' ? { type: incoming.type } : {}),
+        manufacturer: existing.manufacturer ?? incoming.manufacturer,
+        services: incoming.services.length > 0 ? incoming.services : existing.services,
+        rssi: typeof incoming.rssi === 'number' ? incoming.rssi : existing.rssi,
+        lastSeen: incoming.lastSeen,
+        ...(shouldRefreshConnection ? {
+          connectionStatus: incoming.connectionStatus,
+          gattConnected: incoming.gattConnected,
+          connectionHealth: incoming.connectionHealth,
+        } : {}),
+      });
+      return {
+        ...state,
+        devices: state.devices.map((device) => device.id === incoming.id ? refreshed : device),
+      };
     }
     case 'UPDATE_DEVICE':
       return {
@@ -126,6 +180,8 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
     }
     case 'FORGET_DEVICE':
       return { ...state, devices: state.devices.filter((d) => d.id !== action.payload) };
+    case 'CLEAR_SIMULATED_DEVICES':
+      return { ...state, devices: state.devices.filter(device => device.discoverySource !== 'SIMULATED') };
     default:
       return state;
   }
@@ -155,127 +211,379 @@ const initialState: DeviceState = {
 const DeviceContext = createContext<{
   state: DeviceState;
   dispatch: React.Dispatch<Action>;
+  /** Uses the selected default mode for backwards compatibility. */
   scanDevices: () => Promise<void>;
+  /** Explicitly generates demo data and never opens the Bluetooth picker. */
+  scanSimulatedDevices: () => Promise<void>;
+  /** Explicitly scans a real Bluetooth device and may open the browser picker. */
+  scanRealDevices: (pickerMode?: BluetoothPickerMode) => Promise<void>;
   addMockDevices: () => void;
+  /** Remove only in-memory simulated/demo records; physical observations are untouched. */
+  clearSimulatedDevices: () => void;
+  /** Listen for advertisements from previously authorized BLE devices only. */
+  startWatchingPermittedBleDevices: () => Promise<{ ok: boolean; message: string; watchedCount: number }>;
+  stopWatchingPermittedBleDevices: () => void;
+  backendReady: boolean;
 }>({} as any);
+
+/** Conservative display classification from the visible name/manufacturer.
+ * Web Bluetooth does not offer a reliable generic device type, so unknown is
+ * retained whenever there is not enough evidence to make a useful guess.
+ */
+function inferDeviceType(
+  name: string,
+  manufacturer?: string,
+  services: Array<{ uuid: string; name?: string }> = [],
+): DeviceType {
+  const text = [name, manufacturer ?? '', ...services.map(service => service.name ?? '')]
+    .join(' ')
+    .toLowerCase();
+
+  if (/\b(buds?|earbuds?|earphones?|airpods?|galaxy buds|pixel buds|nothing ear|oneplus nord buds)\b/.test(text)) {
+    return 'earbuds';
+  }
+  if (/\b(headphone|headphones|headset|headsets|over[- ]?ear)\b/.test(text)) {
+    return 'headphones';
+  }
+  if (/\b(smartwatch|smart watch|apple watch|galaxy watch|pixel watch|fitbit|garmin watch|watch)\b/.test(text)) {
+    return 'smartwatch';
+  }
+  if (/\b(laptop|notebook|macbook|thinkpad|chromebook|surface pro)\b/.test(text)) {
+    return 'laptop';
+  }
+  if (/\b(iphone|android phone|smartphone|galaxy s\d+|galaxy note|pixel \d+|redmi|oneplus|oppo|vivo|realme|motorola|nothing phone|phone)\b/.test(text)) {
+    return 'smartphone';
+  }
+  if (/\b(esp32|esp8266|smart bulb|smart plug|sensor|iot|thermostat|smart lock|raspberry pi)\b/.test(text)) {
+    return 'iot';
+  }
+
+  return 'unknown';
+}
 
 export function DeviceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(deviceReducer, initialState);
+  const advertisementWatchRef = React.useRef<(() => void) | null>(null);
+  const authorizedDeviceRefs = React.useRef<Map<string, BluetoothDeviceInfo>>(new Map());
+  const lastAdvertisementUiUpdateRef = React.useRef<Map<string, number>>(new Map());
+  const ownerToken = useOwnerToken();
+  const [registryReadyToken, setRegistryReadyToken] = React.useState<string | null>(null);
+  const backendReady = Boolean(ownerToken && registryReadyToken === ownerToken);
 
-  // Load local observations; storage errors leave the current session usable.
+  useEffect(() => () => {
+    advertisementWatchRef.current?.();
+    advertisementWatchRef.current = null;
+  }, []);
+
+  // Load only physical device observations. Older versions persisted simulated
+  // examples, making them look like discoveries after reload; migrate those out
+  // of the device store without touching genuine records, actions, threats or settings.
   useEffect(() => {
     let cancelled = false;
-    localDatabase.listDevices()
-      .then((devices) => {
-        if (!cancelled) dispatch({ type: 'SET_DEVICES', payload: devices });
-      })
-      .catch((error: unknown) => {
-        console.warn('Could not load local devices; continuing for this session.', error);
-      });
+    const loadPhysicalDevices = async () => {
+      try {
+        const removed = await localDatabase.removeSimulatedDevices();
+        if (removed > 0) {
+          console.info(`[BlueGuardian][BLE] Removed ${removed} old simulated device record(s) from local device storage.`);
+        }
+      } catch (error: unknown) {
+        console.warn('[BlueGuardian][BLE] Legacy demo-record cleanup could not complete; records will still be filtered from the device list.', error);
+      }
 
+      try {
+        const devices = await localDatabase.listDevices();
+        if (!cancelled) dispatch({
+          type: 'SET_DEVICES',
+          payload: devices.filter(device => device.discoverySource !== 'SIMULATED'),
+        });
+      } catch (error: unknown) {
+        console.warn('Could not load local devices; continuing for this session.', error);
+      }
+    };
+    void loadPhysicalDevices();
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-    if (state.devices.length === 0) return;
-    void localDatabase.saveDevices(state.devices).catch((error: unknown) => {
-      console.warn('Device state could not be persisted locally; the in-memory session remains active.', error);
+    const physicalDevices = state.devices.filter(device => device.discoverySource !== 'SIMULATED');
+    if (physicalDevices.length === 0) return;
+    void localDatabase.saveDevices(physicalDevices).catch((error: unknown) => {
+      console.warn('Physical device state could not be persisted locally; the in-memory session remains active.', error);
     });
   }, [state.devices]);
 
-  const scanDevices = async () => {
-    dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'scanning', elapsedMs: 0, devicesFound: 0, error: undefined } });
-    const start = Date.now();
-    let interval: ReturnType<typeof setInterval>;
+  // Load the owner's MongoDB device registry when an owner token is configured.
+  // A backend failure is non-fatal: existing browser-local mode remains usable.
+  useEffect(() => {
+    setRegistryReadyToken(null);
+    if (!ownerToken) return;
+    let cancelled = false;
+    api.listDevices(ownerToken)
+      .then(devices => {
+        if (cancelled) return;
+        dispatch({ type: 'MERGE_SERVER_DEVICES', payload: devices });
+        // Do not push local cached records until the server records have been merged;
+        // this avoids overwriting a saved owner decision during initial synchronization.
+        setRegistryReadyToken(ownerToken);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) console.warn('Backend device registry is unavailable; using browser-local records without remote writes.', error);
+      });
+    return () => { cancelled = true; };
+  }, [ownerToken]);
 
-    const updateElapsed = () => {
+  /**
+   * Run one scan mode explicitly. Keeping simulation and real scans separate
+   * prevents a demo workflow from accidentally opening the browser Bluetooth
+   * picker. All existing persistence and security-assessment behavior is kept.
+   */
+  const runScan = async (mode: 'simulated' | 'real', pickerMode: BluetoothPickerMode = 'all'): Promise<void> => {
+    dispatch({
+      type: 'SET_SCAN_STATE',
+      payload: {
+        state: 'scanning',
+        elapsedMs: 0,
+        devicesFound: 0,
+        source: mode === 'simulated' ? 'SIMULATED' : 'REAL',
+        error: undefined,
+      },
+    });
+
+    const start = Date.now();
+    const interval: ReturnType<typeof setInterval> = setInterval(() => {
       dispatch({ type: 'SET_SCAN_STATE', payload: { elapsedMs: Date.now() - start } });
-    };
-    interval = setInterval(updateElapsed, 200);
+    }, 200);
+    let diagnosticStage = mode === 'simulated' ? 'simulated sample generation' : 'browser BLE support check';
 
     try {
-      if (state.simulationMode) {
+      if (mode === 'simulated') {
+        // This code path deliberately makes no Web Bluetooth calls.
         const newDevices = generateSimulatedDevices(6);
-        newDevices.forEach((d) => dispatch({ type: 'ADD_DEVICE', payload: d }));
-        void localDatabase.saveDevices(newDevices).catch((error: unknown) => {
-          console.warn('Simulated devices are available for this session but were not saved locally.', error);
+        newDevices.forEach(device => dispatch({ type: 'ADD_DEVICE', payload: device }));
+        // Demo records stay in memory only and are never persisted as physical hardware.
+        console.info('[BlueGuardian][BLE] Generated simulated records; no hardware scan was performed.', {
+          simulatedCount: newDevices.length,
         });
+
         dispatch({
           type: 'SET_SCAN_STATE',
-          payload: { state: 'complete', devicesFound: newDevices.length },
+          payload: { state: 'complete', devicesFound: newDevices.length, error: undefined },
         });
-      } else {
-        const support = await isBluetoothSupported();
-        if (!support.supported) {
-          dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'unsupported', error: support.reason } });
-          return;
-        }
-        const request = await requestBluetoothDevice();
-        if (!request.ok) {
-          dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'permission-denied', error: request.error } });
-          return;
-        }
-        const conn = await connectAndDiscover(request.device);
-        if (!conn.ok) {
-          dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', error: conn.error } });
-          return;
-        }
-        const std = await readStandardCharacteristics(conn.gatt);
+        return;
+      }
 
-        // Build real device object
-        const dev: BluetoothDevice = {
-          id: request.device.id,
-          name: request.device.name ?? `Device ${request.device.id.slice(-4)}`,
-          type: 'unknown',
-          address: undefined,
-          rssi: undefined,
-          trusted: false,
-          trustScore: 0,
-          riskLevel: 'high',
-          connectionStatus: conn.ok ? 'connected' : 'unknown',
-          firstSeen: new Date(),
-          lastSeen: new Date(),
-          isKnown: false,
-          manufacturer: std.manufacturer,
-          services: conn.services,
-          discoverySource: 'REAL',
-          gattConnected: conn.ok,
-          connectionHealth: conn.ok ? 'GOOD' : 'UNSTABLE',
-        };
+      diagnosticStage = 'browser BLE support check';
+      console.info('[BlueGuardian][BLE] Starting a real hardware selection. Simulation mode is bypassed.', { pickerMode });
+      const support = await isBluetoothSupported();
+      if (!support.supported) {
+        console.warn('[BlueGuardian][BLE] Hardware selection stopped at browser support check.', support.reason);
+        dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'unsupported', error: support.reason } });
+        return;
+      }
 
-        // Local assessment
-        const assessment = assessDeviceSecurity(dev);
-        dev.trustScore = assessment.trustScore;
-        dev.riskLevel = assessment.trustRiskLevel;
-        const guardedDevice = applySecurityPolicy(dev);
+      diagnosticStage = 'Chrome BLE device chooser';
+      const request = await requestBluetoothDevice(pickerMode);
+      if (request.ok === false) {
+        // The browser commonly reports an intentionally closed picker as a
+        // cancelled selection. Keep the legacy state but make the UI message
+        // distinguish cancellation from an actual permission denial.
+        const isPermissionFailure = /permission|denied|notallowed/i.test(request.error);
+        dispatch({
+          type: 'SET_SCAN_STATE',
+          payload: { state: isPermissionFailure ? 'permission-denied' : 'error', error: request.error },
+        });
+        return;
+      }
+
+      // Keep the native handle in memory for optional advertisement watching after
+      // the user explicitly authorizes this device. Never put it in IndexedDB/API data.
+      authorizedDeviceRefs.current.set(request.device.id, request.device);
+      console.info('[BlueGuardian][BLE] User selected a physical BLE peripheral.', {
+        nameReportedByChooser: request.device.name ?? '(name not advertised)',
+        gattReferenceAvailable: Boolean(request.device.gatt),
+      });
+
+      // Keep the selected observation even if GATT connection/service access fails.
+      // A selectable BLE advertisement is still useful information to the owner.
+      diagnosticStage = 'GATT connection and service discovery';
+      const conn = await connectAndDiscover(request.device);
+      const std = conn.ok
+        ? await readStandardCharacteristics(conn.gatt)
+        : {};
+      const services = conn.ok ? conn.services : [];
+      const deviceName = resolveBluetoothDisplayName(
+        request.device.name,
+        std.deviceName,
+        std.manufacturer,
+      );
+      const inferredType = inferDeviceType(deviceName, std.manufacturer, services);
+      const connected = conn.ok;
+      console.info('[BlueGuardian][BLE] GATT inspection stage completed.', {
+        gattConnected: connected,
+        serviceCount: services.length,
+        warningCount: conn.ok ? (conn.warnings?.length ?? 0) : 1,
+        failureReason: conn.ok === false ? conn.error : undefined,
+        manufacturerAvailable: Boolean(std.manufacturer),
+        gattNameAvailable: Boolean(std.deviceName),
+      });
+
+      // Web Bluetooth cannot expose a universal device class, hardware address,
+      // or RSSI for every peripheral. Leave unavailable values unset rather than fabricating them.
+      const dev: BluetoothDevice = {
+        id: request.device.id,
+        name: deviceName,
+        type: inferredType,
+        address: undefined,
+        rssi: undefined,
+        trusted: false,
+        trustScore: 0,
+        riskLevel: 'high',
+        connectionStatus: connected ? 'connected' : 'unknown',
+        firstSeen: new Date(),
+        lastSeen: new Date(),
+        isKnown: false,
+        manufacturer: std.manufacturer,
+        services,
+        discoverySource: 'REAL',
+        gattConnected: connected,
+        connectionHealth: connected ? 'GOOD' : 'UNAVAILABLE',
+      };
+
+      // Preserve the existing local security-assessment flow.
+      diagnosticStage = 'security assessment and result registration';
+      const assessment = assessDeviceSecurity(dev);
+      dev.trustScore = assessment.trustScore;
+      dev.riskLevel = assessment.trustRiskLevel;
+      const guardedDevice = applySecurityPolicy(dev);
+
+      if (connected) {
         request.device.addEventListener?.('gattserverdisconnected', () => {
           dispatch({ type: 'MARK_DISCONNECTED', payload: guardedDevice.id });
         }, { once: true });
-
-        dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
-        dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'complete', devicesFound: 1 } });
-
-        void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
-          console.warn('Device is available for this session but was not saved locally.', error);
-        });
       }
-    } catch (e: any) {
-      dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', error: e?.message ?? 'Scan failed' } });
+
+      dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: {
+          state: 'complete',
+          devicesFound: 1,
+          error: conn.ok === false
+            ? `The real device was selected but GATT connection failed: ${conn.error}`
+            : conn.warnings?.length
+              ? conn.warnings.join(' ')
+              : undefined,
+        },
+      });
+
+      void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
+        console.warn('Device is available for this session but was not saved locally.', error);
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Scan failed';
+      console.error('[BlueGuardian][BLE] Scan pipeline failed.', { stage: diagnosticStage, message }, error);
+      dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', error: `${diagnosticStage}: ${message}` } });
     } finally {
       clearInterval(interval);
     }
   };
 
+  // Backwards-compatible entry point: existing components still follow the
+  // Simulation Mode toggle. New controls can use the explicit methods below.
+  const scanDevices = (): Promise<void> =>
+    runScan(state.simulationMode ? 'simulated' : 'real');
+
+  const scanSimulatedDevices = (): Promise<void> => runScan('simulated');
+  const scanRealDevices = (pickerMode: BluetoothPickerMode = 'all'): Promise<void> => runScan('real', pickerMode);
+
+  const startWatchingPermittedBleDevices = async (): Promise<{ ok: boolean; message: string; watchedCount: number }> => {
+    // Avoid duplicate advertisement listeners when the control is clicked repeatedly.
+    if (advertisementWatchRef.current) {
+      return { ok: true, message: 'Advertisement watching is already active.', watchedCount: authorizedDeviceRefs.current.size };
+    }
+
+    const granted = await getPreviouslyGrantedBluetoothDevices();
+    if (granted.ok === false) {
+      return { ok: false, message: granted.error, watchedCount: 0 };
+    }
+
+    for (const device of granted.devices) authorizedDeviceRefs.current.set(device.id, device);
+    const authorized = Array.from(authorizedDeviceRefs.current.values());
+    if (authorized.length === 0) {
+      return {
+        ok: false,
+        message: 'No BLE devices have been authorized for this website yet. Click Find all BLE devices and select a device first.',
+        watchedCount: 0,
+      };
+    }
+
+    const result = await watchBluetoothAdvertisements(authorized, (observation) => {
+      // Advertisement watching is a progressive enhancement. Record only actual
+      // packets observed now; do not fabricate presence or RSSI for silent devices.
+      const nowMs = observation.observedAt.getTime();
+      const lastUpdate = lastAdvertisementUiUpdateRef.current.get(observation.id) ?? 0;
+      if (nowMs - lastUpdate < 1200) return;
+      lastAdvertisementUiUpdateRef.current.set(observation.id, nowMs);
+
+      const displayName = resolveBluetoothDisplayName(observation.name);
+      const services = observation.uuids.map(uuid => ({ uuid, characteristics: [] }));
+      const device: BluetoothDevice = {
+        id: observation.id,
+        name: displayName,
+        type: inferDeviceType(displayName, undefined, services),
+        address: undefined,
+        rssi: observation.rssi,
+        trusted: false,
+        trustScore: 0,
+        riskLevel: 'high',
+        connectionStatus: 'unknown',
+        firstSeen: observation.observedAt,
+        lastSeen: observation.observedAt,
+        isKnown: false,
+        services,
+        discoverySource: 'REAL',
+        gattConnected: false,
+        connectionHealth: 'UNAVAILABLE',
+      };
+      const assessment = assessDeviceSecurity(device);
+      device.trustScore = assessment.trustScore;
+      device.riskLevel = assessment.trustRiskLevel;
+      dispatch({ type: 'ADD_DEVICE', payload: applySecurityPolicy(device) });
+      void localDatabase.saveDevice(applySecurityPolicy(device)).catch((error: unknown) => {
+        console.warn('BLE advertisement was observed, but its local record could not be saved.', error);
+      });
+    });
+
+    if (result.ok === false) {
+      return { ok: false, message: result.error, watchedCount: 0 };
+    }
+
+    advertisementWatchRef.current = result.stop;
+    return {
+      ok: true,
+      watchedCount: result.watchedCount,
+      message: `Watching advertisements from ${result.watchedCount} previously authorized BLE device(s). This does not discover new or unapproved devices.`,
+    };
+  };
+
+  const stopWatchingPermittedBleDevices = () => {
+    advertisementWatchRef.current?.();
+    advertisementWatchRef.current = null;
+  };
+
   const addMockDevices = () => {
     const mocks = generateSimulatedDevices(4);
-    mocks.forEach((d) => dispatch({ type: 'ADD_DEVICE', payload: d }));
-    void localDatabase.saveDevices(mocks).catch((error: unknown) => {
-      console.warn('Simulated devices are available for this session but were not saved locally.', error);
-    });
+    mocks.forEach((device) => dispatch({ type: 'ADD_DEVICE', payload: device }));
+    console.info('[BlueGuardian][BLE] Added simulated sample records to this session only.', { simulatedCount: mocks.length });
+  };
+
+  const clearSimulatedDevices = () => {
+    dispatch({ type: 'CLEAR_SIMULATED_DEVICES' });
+    console.info('[BlueGuardian][BLE] Cleared simulated records from the current session. Real records were not changed.');
   };
 
   return (
-    <DeviceContext.Provider value={{ state, dispatch, scanDevices, addMockDevices }}>
+    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, backendReady }}>
       {children}
     </DeviceContext.Provider>
   );

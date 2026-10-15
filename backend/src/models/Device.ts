@@ -20,7 +20,9 @@ export interface IDevice extends Document {
   trusted?: boolean;
   blocked?: boolean;
   connectionHealth?: string;
+  /** Set by the server from the authenticated principal, never accepted as authority from request JSON. */
   ownerId?: string;
+  recoveryEnabled?: boolean;
   recoveryState?: 'lost' | 'searching' | 'found' | 'recovered';
   registeredAt?: Date;
   firstSeen: Date;
@@ -28,6 +30,8 @@ export interface IDevice extends Document {
 }
 
 const DeviceSchema = new Schema<IDevice>({
+  // Kept globally unique for compatibility with the existing database's current unique index.
+  // Changing this index requires a reviewed MongoDB migration, not an implicit schema-only edit.
   deviceId: { type: String, required: true, unique: true },
   deviceIdentifier: { type: String, required: true, index: true },
   name: String,
@@ -47,7 +51,10 @@ const DeviceSchema = new Schema<IDevice>({
   trusted: Boolean,
   blocked: Boolean,
   connectionHealth: String,
+  // Optional at schema level so legacy records can be migrated deliberately; API writes always set ownerId.
   ownerId: { type: String, index: true },
+  // Optional to preserve legacy records; new normal-device API writes set false explicitly.
+  recoveryEnabled: { type: Boolean },
   recoveryState: { type: String, enum: ['lost', 'searching', 'found', 'recovered'], default: 'lost' },
   registeredAt: { type: Date, default: Date.now },
   firstSeen: { type: Date, default: Date.now },
@@ -55,5 +62,6 @@ const DeviceSchema = new Schema<IDevice>({
 });
 
 DeviceSchema.index({ ownerId: 1, deviceIdentifier: 1 }, { unique: true });
+DeviceSchema.index({ ownerId: 1, lastSeen: -1 });
 
 export default mongoose.model<IDevice>('Device', DeviceSchema);

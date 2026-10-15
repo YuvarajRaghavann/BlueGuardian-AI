@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { requireAuth } from './auth';
+import { parseBearerToken, requireAuth } from './auth';
 import {
   buildAuthorizedRecoveryRecord,
   normalizeRecoveryState,
@@ -8,6 +8,21 @@ import {
 } from './services/recoveryService';
 
 const originalEnv = { ...process.env };
+const touchedEnvironmentKeys = [
+  'NODE_ENV',
+  'BLUEGUARDIAN_AUTH_MODE',
+  'BLUEGUARDIAN_OWNER_TOKEN',
+  'BLUEGUARDIAN_PARTICIPANT_TOKEN',
+  'BLUEGUARDIAN_OWNER_ID',
+] as const;
+
+function restoreTouchedEnvironment() {
+  for (const key of touchedEnvironmentKeys) {
+    const value = originalEnv[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+  }
+}
 
 describe('recovery auth and validation', () => {
   beforeEach(() => {
@@ -19,11 +34,14 @@ describe('recovery auth and validation', () => {
   });
 
   afterEach(() => {
-    process.env.NODE_ENV = originalEnv.NODE_ENV;
-    process.env.BLUEGUARDIAN_AUTH_MODE = originalEnv.BLUEGUARDIAN_AUTH_MODE;
-    process.env.BLUEGUARDIAN_OWNER_TOKEN = originalEnv.BLUEGUARDIAN_OWNER_TOKEN;
-    process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = originalEnv.BLUEGUARDIAN_PARTICIPANT_TOKEN;
-    process.env.BLUEGUARDIAN_OWNER_ID = originalEnv.BLUEGUARDIAN_OWNER_ID;
+    restoreTouchedEnvironment();
+  });
+
+  it('parses bearer tokens case-insensitively and trims surrounding whitespace', () => {
+    expect(parseBearerToken('  bearer   example-token  ')).toBe('example-token');
+    expect(parseBearerToken('Bearer   ')).toBeNull();
+    expect(parseBearerToken('Basic example-token')).toBeNull();
+    expect(parseBearerToken(undefined)).toBeNull();
   });
 
   it('allows owner authentication when the bearer token matches the configured owner token', () => {
@@ -103,6 +121,18 @@ describe('recovery auth and validation', () => {
 
     expect(statusCode).toBe(503);
     expect(nextCalled).toBe(false);
+  });
+
+  it('does not let a participant identity satisfy owner-only identity checks', () => {
+    const req = { headers: { authorization: 'Bearer blueguardian-participant-token' } } as any;
+    const res: any = {
+      status: (code: number) => ({ json: (payload: any) => ({ code, payload }) }),
+    };
+    let nextCalled = false;
+
+    requireAuth('owner')(req, res, () => { nextCalled = true; });
+    expect(nextCalled).toBe(false);
+    expect(req.auth?.ownerId).toBeUndefined();
   });
 
   it('validates registration input and preserves a lost-device state', () => {

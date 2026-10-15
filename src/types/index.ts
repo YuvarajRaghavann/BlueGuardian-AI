@@ -79,6 +79,8 @@ export interface BluetoothScanState {
   state: ScanState;
   elapsedMs: number;
   devicesFound: number;
+  /** Distinguishes genuine browser observations from generated demo records in UI status. */
+  source?: DiscoverySource;
   error?: string;
 }
 
