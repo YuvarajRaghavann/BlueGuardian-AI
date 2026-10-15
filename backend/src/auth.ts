@@ -33,10 +33,48 @@ export function requireAuth(role: AuthRole = 'owner') {
       console.warn(`[auth] rejected protected request category=${category} role=${role}`);
     };
 
-    if (process.env.NODE_ENV === 'production') {
-      return res.status(503).json({
-        error: 'Production identity verification is not configured. Configure an OIDC verifier before enabling protected APIs.',
+    const oidcConfigured = Boolean(
+      process.env.BLUEGUARDIAN_OIDC_ISSUER?.trim() &&
+      process.env.BLUEGUARDIAN_OIDC_AUDIENCE?.trim() &&
+      process.env.BLUEGUARDIAN_OIDC_JWKS_URI?.trim()
+    );
+
+    if (process.env.NODE_ENV === 'production' || oidcConfigured) {
+      if (!oidcConfigured) {
+        return res.status(503).json({
+          error: 'Production identity verification is not configured. Configure OIDC issuer, audience, and JWKS URI.',
+        });
+      }
+
+      const token = parseBearerToken(req.headers.authorization);
+      if (!token) {
+        logRejection('missing_bearer_token');
+        return res.status(401).json({ error: 'Authorization header with Bearer access token is required.' });
+      }
+
+      void import('./oidc').then(({ verifyOidcAccessToken }) => verifyOidcAccessToken(token)).then(identity => {
+        if (role === 'participant' && !identity.scopes.includes(
+          process.env.BLUEGUARDIAN_OIDC_PARTICIPANT_SCOPE?.trim() || 'blueguardian:recovery:participant'
+        )) {
+          return res.status(403).json({ error: 'The access token does not have participant-reporting permission.' });
+        }
+
+        request.auth = {
+          role,
+          ownerId: identity.subject,
+          token,
+        };
+        return next();
+      }).catch(error => {
+        const status = error && typeof error === 'object' && 'status' in error &&
+          (error.status === 401 || error.status === 503) ? error.status : 503;
+        return res.status(status).json({
+          error: status === 401
+            ? 'Bearer access token is invalid or expired.'
+            : 'Identity verification is currently unavailable.',
+        });
       });
+      return;
     }
 
     if (mode === 'disabled') {
