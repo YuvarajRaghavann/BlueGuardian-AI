@@ -4,6 +4,7 @@ import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type Reco
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { recordWorkflowEvent } from '../services/workflowEventService';
 import { completeOidcCallback, isOidcConfigured, startOidcLogin } from '../services/oidcClient';
+import { useBackendSession } from '../context/BackendSessionContext';
 
 const recoveryTransitions: Record<RecoveryDeviceRecord['recoveryState'], Array<{ status: RecoveryDeviceRecord['recoveryState']; label: string }>> = {
   lost: [
@@ -33,7 +34,7 @@ function formatDate(value?: string | null) {
 export function Recovery() {
   const identityProviderConfigured = isOidcConfigured();
   const productionBuild = import.meta.env.PROD;
-  const [ownerToken, setOwnerToken] = useState('');
+  const { ownerToken, setOwnerToken, signOutOwner } = useBackendSession();
   const [deviceName, setDeviceName] = useState('');
   const [selectedBluetoothDevice, setSelectedBluetoothDevice] = useState<BluetoothDeviceInfo | null>(null);
   const [devices, setDevices] = useState<RecoveryDeviceRecord[]>([]);
@@ -75,7 +76,7 @@ export function Recovery() {
   };
 
   const signOut = () => {
-    setOwnerToken('');
+    signOutOwner();
     setDevices([]);
     setDevicesLoaded(false);
     setSelectedDevice(null);
