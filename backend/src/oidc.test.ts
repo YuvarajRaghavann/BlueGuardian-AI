@@ -101,7 +101,10 @@ describe('OIDC access-token verification', () => {
 
   it('throttles repeated signing-key refreshes for unknown key IDs', async () => {
     const token = makeToken({}, { kid: 'unknown-signing-key' });
-    const fetchMock = vi.mocked(fetch);
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      keys: [{ ...exportedJwk, kid: 'blueguardian-test-key', alg: 'RS256', use: 'sig' }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
 
     await expect(verifyOidcAccessToken(token)).rejects.toMatchObject({ status: 401 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
