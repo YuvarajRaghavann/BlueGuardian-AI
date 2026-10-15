@@ -43,7 +43,7 @@ beforeEach(() => {
   mockHistory.replaceState.mockClear();
   vi.stubGlobal('window', { location: mockLocation, history: mockHistory });
   vi.stubGlobal('sessionStorage', mockSessionStorage);
-  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: string | URL, init?: RequestInit) => {
+  vi.stubGlobal('fetch', vi.fn().mockImplementation(async (input: string | URL) => {
     if (String(input).endsWith('/token')) {
       return new Response(JSON.stringify({ access_token: 'memory-only-access-token', token_type: 'Bearer', expires_in: 300 }), { status: 200 });
     }
