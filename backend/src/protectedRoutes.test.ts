@@ -2,13 +2,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AddressInfo } from 'node:net';
 import app from './app';
 
-const protectedPaths = [
+const disabledLegacyPaths = [
   '/api/devices',
   '/api/threats',
   '/api/actions',
   '/api/events',
-  '/api/recovery/devices',
 ];
+
+const protectedPaths = ['/api/recovery/devices'];
 
 const authEnvironmentKeys = [
   'NODE_ENV',
@@ -59,39 +60,45 @@ describe('protected API routes', () => {
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
   });
 
-  it('rejects unauthenticated requests to all data APIs', async () => {
-    const responses = await Promise.all(
-      protectedPaths.map(path => fetch(`${origin}${path}`)),
+  it('keeps legacy unscoped APIs unmounted and protects recovery APIs', async () => {
+    const legacyResponses = await Promise.all(
+      disabledLegacyPaths.map(path => fetch(`${origin}${path}`)),
     );
+    const recovery = await fetch(`${origin}/api/recovery/devices`);
 
-    expect(responses.map(response => response.status)).toEqual(
-      protectedPaths.map(() => 401),
+    expect(legacyResponses.map(response => response.status)).toEqual(
+      disabledLegacyPaths.map(() => 404),
     );
+    expect(recovery.status).toBe(401);
   });
 
-  it('fails closed for protected APIs in production even when a static token is configured', async () => {
+  it('keeps legacy routes unavailable and fails closed on production recovery APIs', async () => {
     process.env.NODE_ENV = 'production';
-    const responses = await Promise.all(
-      protectedPaths.map(path => fetch(`${origin}${path}`, {
+    const legacyResponses = await Promise.all(
+      disabledLegacyPaths.map(path => fetch(`${origin}${path}`, {
         headers: { Authorization: 'Bearer blueguardian-owner-token' },
       })),
     );
+    const recovery = await fetch(`${origin}/api/recovery/devices`, {
+      headers: { Authorization: 'Bearer blueguardian-owner-token' },
+    });
     const health = await fetch(`${origin}/api/health`);
 
-    expect(responses.map(response => response.status)).toEqual(
-      protectedPaths.map(() => 503),
+    expect(legacyResponses.map(response => response.status)).toEqual(
+      disabledLegacyPaths.map(() => 404),
     );
+    expect(recovery.status).toBe(503);
     expect(health.status).toBe(200);
   });
 
-  it('fails closed when authentication is disabled or missing in development', async () => {
+  it('fails closed when recovery authentication is disabled or missing in development', async () => {
     process.env.NODE_ENV = 'development';
     process.env.BLUEGUARDIAN_AUTH_MODE = 'disabled';
-    const disabled = await fetch(`${origin}/api/devices`);
+    const disabled = await fetch(`${origin}/api/recovery/devices`);
 
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     delete process.env.BLUEGUARDIAN_OWNER_TOKEN;
-    const missingConfig = await fetch(`${origin}/api/devices`, {
+    const missingConfig = await fetch(`${origin}/api/recovery/devices`, {
       headers: { Authorization: 'Bearer supplied-token' },
     });
 
