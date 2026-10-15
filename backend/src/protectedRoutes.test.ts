@@ -9,8 +9,6 @@ const disabledLegacyPaths = [
   '/api/events',
 ];
 
-const protectedPaths = ['/api/recovery/devices'];
-
 const authEnvironmentKeys = [
   'NODE_ENV',
   'BLUEGUARDIAN_AUTH_MODE',
