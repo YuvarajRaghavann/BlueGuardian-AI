@@ -199,7 +199,12 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    }).then(json<{ action?: BackendActionRecord; audit?: BackendEventRecord }>),
+    }).then(json<{ action?: BackendActionRecord; audit?: BackendEventRecord }>).then(result => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('blueguardian:backend-events-updated'));
+      }
+      return result;
+    }),
   },
 
   events: {
@@ -208,7 +213,12 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    }).then(json<BackendEventRecord>),
+    }).then(json<BackendEventRecord>).then(result => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('blueguardian:backend-events-updated'));
+      }
+      return result;
+    }),
   },
 
   recovery: {
