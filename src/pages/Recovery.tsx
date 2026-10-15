@@ -2,6 +2,26 @@ import { useState } from 'react';
 import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
+import { recordWorkflowEvent } from '../services/workflowEventService';
+
+const recoveryTransitions: Record<RecoveryDeviceRecord['recoveryState'], Array<{ status: RecoveryDeviceRecord['recoveryState']; label: string }>> = {
+  lost: [
+    { status: 'searching', label: 'Start searching' },
+    { status: 'found', label: 'Mark found' },
+    { status: 'recovered', label: 'Mark recovered' },
+  ],
+  searching: [
+    { status: 'found', label: 'Mark found' },
+    { status: 'recovered', label: 'Mark recovered' },
+    { status: 'lost', label: 'Pause search / mark lost' },
+  ],
+  found: [
+    { status: 'recovered', label: 'Mark recovered' },
+    { status: 'searching', label: 'Resume searching' },
+    { status: 'lost', label: 'Mark lost again' },
+  ],
+  recovered: [{ status: 'lost', label: 'Reopen as lost' }],
+};
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not recorded';
@@ -103,6 +123,7 @@ export function Recovery() {
       setRecoveryInfo(null);
       setEncounters([]);
       setNotice('Device registration was saved by the backend. Its browser-scoped identifier is not a universal hardware identity.');
+      recordWorkflowEvent({ type: 'recovery', message: `Registered ${name} in the cloud-backed owner recovery workflow as lost.`, severity: 'info', simulated: false, deviceId: registered.deviceId });
       try {
         await loadRecoveryInfo(registered, token);
       } catch (refreshError) {
@@ -151,6 +172,7 @@ export function Recovery() {
       setDevices(current => current.map(item => item.deviceId === updated.deviceId ? updated : item));
       setRecoveryInfo(current => current ? { ...current, recoveryState: updated.recoveryState } : null);
       setNotice(`Recovery state saved as ${status}.`);
+      recordWorkflowEvent({ type: 'recovery', message: `Recovery case ${updated.name} changed to ${status} in the backend.`, severity: status === 'recovered' ? 'info' : status === 'lost' ? 'warning' : 'info', simulated: false, deviceId: updated.deviceId });
       try {
         await loadRecoveryInfo(updated, token);
       } catch (refreshError) {
@@ -186,7 +208,8 @@ export function Recovery() {
         isTestFixture: false,
         description: 'Device selected by its owner in the Web Bluetooth picker.',
       });
-      setNotice('The backend accepted the encounter and recorded its receive time. No coordinates or signal measurements were available or submitted.');
+      setNotice('The backend accepted the manual owner-side observation and recorded its receive time. No coordinates or signal measurements were available or submitted; this is not a community sighting.');
+      recordWorkflowEvent({ type: 'recovery', message: `Owner manually selected ${selectedDevice.name} in the Web Bluetooth picker. This is not a community sighting.`, severity: 'info', simulated: false, deviceId: selectedDevice.deviceId });
       try {
         await loadRecoveryInfo(selectedDevice, token);
       } catch (refreshError) {
@@ -347,12 +370,17 @@ export function Recovery() {
             <div className="flex flex-wrap gap-2">
               <button type="button" disabled={busy} onClick={() => void refreshRecoveryInfo()} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--text)] disabled:opacity-50">Refresh sightings</button>
               <button type="button" disabled={busy} onClick={submitPresenceObservation} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--text)] disabled:opacity-50">Verify present with Bluetooth</button>
-              {recoveryInfo.recoveryState !== 'lost' && (
-                <button type="button" disabled={busy} onClick={() => updateState('lost')} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--text)] disabled:opacity-50">Mark lost</button>
-              )}
-              {recoveryInfo.recoveryState !== 'recovered' && (
-                <button type="button" disabled={busy} onClick={() => updateState('recovered')} className="rounded-lg bg-[var(--success)] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">Mark recovered</button>
-              )}
+              {recoveryTransitions[recoveryInfo.recoveryState].map(transition => (
+                <button
+                  key={transition.status}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void updateState(transition.status)}
+                  className={`rounded-lg border px-3 py-2 text-xs font-semibold disabled:opacity-50 ${transition.status === 'recovered' ? 'border-[var(--success)] bg-[var(--success)] text-slate-950' : 'border-[var(--border)] text-[var(--text)]'}`}
+                >
+                  {transition.label}
+                </button>
+              ))}
             </div>
           </div>
 

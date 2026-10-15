@@ -314,6 +314,14 @@ describe('recovery API integration', () => {
     });
     expect(stateUpdate.status).toBe(200);
 
+    const invalidTransition = await fetch(`${origin}/api/recovery/devices/device-y`, {
+      method: 'PATCH',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'searching' }),
+    });
+    expect(invalidTransition.status).toBe(409);
+    expect(await invalidTransition.json()).toMatchObject({ error: expect.stringMatching(/cannot move from recovered to searching/i) });
+
     const invalidState = await fetch(`${origin}/api/recovery/devices/device-y`, {
       method: 'PATCH',
       headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
