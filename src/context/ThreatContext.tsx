@@ -17,7 +17,7 @@ interface ThreatState {
 
 type Action =
   | { type: 'SET_THREATS'; payload: Threat[] }
-  | { type: 'MERGE_SERVER_THREATS'; payload: Threat[] }
+  | { type: 'MERGE_SERVER_THREATS'; payload: { threats: Threat[]; assessedDeviceIds: string[] } }
   | { type: 'ADD_THREAT'; payload: Threat }
   | { type: 'UPDATE_THREAT'; payload: Threat }
   | { type: 'REMOVE_THREAT'; payload: string }
@@ -36,11 +36,26 @@ function threatReducer(state: ThreatState, action: Action): ThreatState {
     case 'SET_THREATS':
       return { ...state, threats: action.payload };
     case 'MERGE_SERVER_THREATS': {
-      // Server assessments take precedence for the same device/category. Local-only records
-      // remain available as a fallback, preserving browser-only use and older local history.
-      const serverDeviceIds = new Set(action.payload.map(threat => threat.deviceId));
-      const localOnly = state.threats.filter(threat => !serverDeviceIds.has(threat.deviceId));
-      return { ...state, threats: deduplicateThreats([...localOnly, ...action.payload]) };
+      const assessedDeviceIds = new Set(action.payload.assessedDeviceIds);
+      // Drop stale ACTIVE local alerts when the backend has a newer assessment for
+      // that device but no longer sees actionable threat evidence. Preserve non-active
+      // records as history so user decisions are not erased.
+      const history = state.threats.filter(threat =>
+        !assessedDeviceIds.has(threat.deviceId) || threat.status !== 'ACTIVE',
+      );
+      const merged = deduplicateThreats([...history, ...action.payload.threats]).map(threat => {
+        const previous = state.threats.find(
+          current => current.deviceId === threat.deviceId && current.category === threat.category,
+        );
+        if (!previous || previous.status === 'ACTIVE') return threat;
+        return {
+          ...threat,
+          status: previous.status,
+          updatedAt: previous.updatedAt,
+          resolved: previous.resolved,
+        };
+      });
+      return { ...state, threats: merged };
     }
     case 'ADD_THREAT': {
       const exists = state.threats.some(t => t.id === action.payload.id);
@@ -278,8 +293,8 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
       }
       if (changed && !cancelled) {
         try {
-          const serverThreats = await api.listThreats(ownerToken, deviceState.devices);
-          if (!cancelled) dispatch({ type: 'MERGE_SERVER_THREATS', payload: serverThreats });
+          const snapshot = await api.getThreatSnapshot(ownerToken, deviceState.devices);
+          if (!cancelled) dispatch({ type: 'MERGE_SERVER_THREATS', payload: snapshot });
         } catch (error) {
           if (!cancelled) console.warn('Backend threats could not be refreshed.', error);
         }
@@ -292,16 +307,16 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!ownerToken || !backendReady) return;
     let cancelled = false;
-    api.listThreats(ownerToken, deviceState.devices)
-      .then(serverThreats => {
+    api.getThreatSnapshot(ownerToken, deviceState.devices)
+      .then(snapshot => {
         if (cancelled) return;
-        backendAssessedDeviceIds.current = new Set(serverThreats.map(threat => threat.deviceId));
+        backendAssessedDeviceIds.current = new Set(snapshot.assessedDeviceIds);
         for (const device of deviceState.devices) {
           if (backendAssessedDeviceIds.current.has(device.id)) {
             assessedSignatures.current.set(device.id, deviceAssessmentSignature(device));
           }
         }
-        dispatch({ type: 'MERGE_SERVER_THREATS', payload: serverThreats });
+        dispatch({ type: 'MERGE_SERVER_THREATS', payload: snapshot });
         setServerThreatsReadyToken(ownerToken);
       })
       .catch((error: unknown) => {
@@ -323,8 +338,9 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
         assessedSignatures.current.set(device.id, deviceAssessmentSignature(device));
         backendAssessedDeviceIds.current.add(device.id);
       }
-      const serverThreats = await api.listThreats(ownerToken, devices);
-      dispatch({ type: 'MERGE_SERVER_THREATS', payload: serverThreats });
+      const snapshot = await api.getThreatSnapshot(ownerToken, devices);
+      backendAssessedDeviceIds.current = new Set(snapshot.assessedDeviceIds);
+      dispatch({ type: 'MERGE_SERVER_THREATS', payload: snapshot });
     };
     void refreshBackend().catch((error: unknown) => console.warn('Could not refresh backend threat analysis.', error));
   };
