@@ -64,10 +64,11 @@ describe('BlueGuardian false-positive safeguards', () => {
     expect(first.explanation).toContain('not a trained or calibrated model');
   });
 
-  it('retains a high-risk assessment for an explicitly blocked device', () => {
+  it('does not mistake an owner block decision for proof of malicious behaviour', () => {
     const blocked = { ...unknownTile, blocked: true };
     expect(calculateTrustScore(blocked).riskLevel).toBe('high');
-    expect(analyzeDeviceThreat(blocked).threatScore).toBeGreaterThanOrEqual(70);
-    expect(new DevelopmentModel().predict(extractDeviceFeatures(blocked).values).label).toBe('HIGH_RISK_DEVICE');
+    expect(analyzeDeviceThreat(blocked).threatScore).toBe(0);
+    expect(analyzeDeviceThreat(blocked).reasons.map(reason => reason.code)).toContain('BLOCKED_DEVICE');
+    expect(new DevelopmentModel().predict(extractDeviceFeatures(blocked).values).label).toBe('INSUFFICIENT_EVIDENCE');
   });
 });
