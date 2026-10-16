@@ -20,6 +20,23 @@ export interface NativeClassicObservation {
   observedAt: number;
 }
 
+export interface NativeBleWindowFeatures {
+  windowStartMs: number;
+  windowEndMs: number;
+  windowDurationMs: number;
+  observationCount: number;
+  observationsPerSecond: number;
+  uniqueAddresses: number;
+  uniqueAddressFraction: number;
+  maxAddressFraction: number;
+  rssiMean: number;
+  rssiStd: number;
+  rssiObservationFraction: number;
+  advertisedNameFraction?: number;
+  serviceUuidFraction?: number;
+  telemetrySource: 'ANDROID_SCAN_CALLBACKS';
+}
+
 interface NativeClassicScanState {
   state: 'scanning' | 'complete' | 'error';
   devicesFound?: number;
@@ -47,6 +64,7 @@ interface BlueGuardianBluetoothPlugin {
   listPairedDevices(): Promise<{ devices: NativeClassicObservation[]; count: number }>;
   addListener(eventName: 'deviceFound', listenerFunc: (event: NativeBleObservation) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'scanState', listenerFunc: (event: NativeBleScanState) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'scanWindow', listenerFunc: (event: NativeBleWindowFeatures) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'classicDeviceFound', listenerFunc: (event: NativeClassicObservation) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'classicScanState', listenerFunc: (event: NativeClassicScanState) => void): Promise<PluginListenerHandle>;
 }
@@ -68,6 +86,7 @@ export type NativeBleScanOutcome =
 export async function scanNativeAndroidBle(
   onObservation: (observation: NativeBleObservation) => void,
   requestedDurationMs = 12000,
+  onWindowFeatures?: (features: NativeBleWindowFeatures) => void,
 ): Promise<NativeBleScanOutcome> {
   if (!isNativeAndroidApp()) {
     return { ok: false, error: 'Native Android Bluetooth scanning is only available inside the BlueGuardian APK.' };
@@ -77,6 +96,7 @@ export async function scanNativeAndroidBle(
   const observedIds = new Set<string>();
   let deviceListener: PluginListenerHandle | undefined;
   let stateListener: PluginListenerHandle | undefined;
+  let windowListener: PluginListenerHandle | undefined;
   let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
   let startupTimeout: ReturnType<typeof setTimeout> | undefined;
   let resolveCompletion: (state: NativeBleScanState) => void = () => undefined;
@@ -99,6 +119,25 @@ export async function scanNativeAndroidBle(
 
     stateListener = await nativeBluetooth.addListener('scanState', (state) => {
       if (state.state === 'complete' || state.state === 'error') resolveCompletion(state);
+    });
+
+    windowListener = await nativeBluetooth.addListener('scanWindow', (features) => {
+      if (!onWindowFeatures) return;
+      if (!Number.isFinite(features.windowDurationMs) || features.windowDurationMs <= 0) return;
+      onWindowFeatures({
+        ...features,
+        windowStartMs: Number.isFinite(features.windowStartMs) ? features.windowStartMs : Date.now() - features.windowDurationMs,
+        windowEndMs: Number.isFinite(features.windowEndMs) ? features.windowEndMs : Date.now(),
+        observationCount: Number.isFinite(features.observationCount) ? features.observationCount : 0,
+        observationsPerSecond: Number.isFinite(features.observationsPerSecond) ? features.observationsPerSecond : 0,
+        uniqueAddresses: Number.isFinite(features.uniqueAddresses) ? features.uniqueAddresses : 0,
+        uniqueAddressFraction: Number.isFinite(features.uniqueAddressFraction) ? features.uniqueAddressFraction : 0,
+        maxAddressFraction: Number.isFinite(features.maxAddressFraction) ? features.maxAddressFraction : 0,
+        rssiMean: Number.isFinite(features.rssiMean) ? features.rssiMean : -100,
+        rssiStd: Number.isFinite(features.rssiStd) ? features.rssiStd : 0,
+        rssiObservationFraction: Number.isFinite(features.rssiObservationFraction) ? features.rssiObservationFraction : 0,
+        telemetrySource: 'ANDROID_SCAN_CALLBACKS',
+      });
     });
 
     // Guard the startup call as well as the scan window. A native permission/bridge
@@ -164,6 +203,12 @@ export async function scanNativeAndroidBle(
     }
     try {
       const removal = stateListener?.remove();
+      if (removal) void removal.catch(() => undefined);
+    } catch {
+      // Cleanup must not mask the scan result.
+    }
+    try {
+      const removal = windowListener?.remove();
       if (removal) void removal.catch(() => undefined);
     } catch {
       // Cleanup must not mask the scan result.
