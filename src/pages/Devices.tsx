@@ -454,7 +454,7 @@ export function Devices() {
           <div className="flex items-start gap-3 rounded-lg border border-[var(--accent)]/25 bg-[var(--accent)]/5 px-3 py-3">
             <Bluetooth className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
             <p className="text-xs leading-5 text-[var(--text-secondary)]">
-              <strong>Android native BLE discovery:</strong> scans run only while the app is in the foreground and require Nearby Devices permission. Classic Bluetooth and combined scanning are planned for later phases. Normal AirPods audio pairing remains controlled by Android Settings.
+              <strong>Android native Bluetooth discovery:</strong> BLE and classic scans run only while the app is in the foreground. BLE uses Nearby Devices permission; classic discovery may also request Location permission because Android requires it for this scan API. BlueGuardian does not collect GPS coordinates from this permission. Combined BLE + classic scanning is reserved for Phase 5. Normal AirPods audio pairing remains controlled by Android Settings.
             </p>
           </div>
         )}
