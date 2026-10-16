@@ -119,6 +119,15 @@ describe('Firebase Auth REST client', () => {
       .rejects.toThrow(/Identity Toolkit or Secure Token.*Firebase code: API_KEY_SERVICE_BLOCKED/);
   });
 
+  it('normalizes a human-readable invalid API key response into an actionable code', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      error: { message: 'API key not valid. Please pass a valid API key.' },
+    }, false)));
+
+    await expect(signInWithEmailPassword('owner@example.com', 'correct-password'))
+      .rejects.toThrow(/Web API key from project blueguardian-ai-auth.*Firebase code: API_KEY_INVALID/);
+  });
+
   it('clears the in-memory session on sign out', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       email: 'owner@example.com',
