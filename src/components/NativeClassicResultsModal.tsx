@@ -4,6 +4,7 @@ import type { BluetoothDevice, BluetoothScanState } from '../types';
 interface NativeClassicResultsModalProps {
   open: boolean;
   view: 'scan' | 'paired';
+  loadingPaired?: boolean;
   scan: BluetoothScanState;
   devices: BluetoothDevice[];
   onClose: () => void;
@@ -14,6 +15,7 @@ interface NativeClassicResultsModalProps {
 export function NativeClassicResultsModal({
   open,
   view,
+  loadingPaired = false,
   scan,
   devices,
   onClose,
@@ -23,12 +25,15 @@ export function NativeClassicResultsModal({
 
   const pairedView = view === 'paired';
   const scanning = !pairedView && scan.state === 'scanning';
-  const failed = !pairedView && (scan.state === 'error'
+  const loading = pairedView && loadingPaired;
+  const failed = scan.state === 'error'
     || scan.state === 'permission-denied'
-    || scan.state === 'unsupported');
+    || scan.state === 'unsupported';
 
   const summary = pairedView
-    ? devices.length > 0
+    ? loading
+      ? 'Reading Android’s paired-device list…'
+      : devices.length > 0
       ? `Android returned ${devices.length} paired device(s).`
       : scan.error || 'No paired classic Bluetooth devices were returned.'
     : scanning
@@ -77,7 +82,7 @@ export function NativeClassicResultsModal({
 
         <div className="border-b border-[var(--border)] px-5 py-3">
           <div className="flex items-start gap-2">
-            {scanning ? (
+            {(scanning || loading) ? (
               <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[var(--accent)]" />
             ) : failed ? (
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--danger)]" />
@@ -126,10 +131,12 @@ export function NativeClassicResultsModal({
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
               <Bluetooth className="h-8 w-8 text-[var(--text-muted)]" />
               <p className="text-sm font-medium text-[var(--text)]">
-                {scanning ? 'Waiting for discoverable devices' : pairedView ? 'No paired devices to show' : 'No classic devices found'}
+                {loading ? 'Loading paired devices…' : scanning ? 'Waiting for discoverable devices' : pairedView ? 'No paired devices to show' : 'No classic devices found'}
               </p>
               <p className="max-w-md text-xs leading-5 text-[var(--text-muted)]">
-                {pairedView
+                {loading
+                  ? 'Android is checking its system paired-device registry. The permission prompt may need your approval.'
+                  : pairedView
                   ? 'Pair an eligible device in Android Settings, then refresh this list.'
                   : 'Make the other classic Bluetooth device discoverable or place it in pairing mode before retrying. Devices that only advertise over BLE belong in the separate BLE scan.'}
               </p>
