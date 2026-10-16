@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import { AndroidBackNavigation } from './components/AndroidBackNavigation';
 import { DashboardLayout } from './layouts/DashboardLayout';
 import { Dashboard } from './pages/Dashboard';
 import { Devices } from './pages/Devices';
@@ -10,19 +11,22 @@ import { SettingsPage } from './pages/Settings';
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Navigate to="/dashboard" replace />} />
-      <Route element={<DashboardLayout />}>
-        <Route path="dashboard" element={<Dashboard />} />
-        <Route path="devices" element={<Devices />} />
-        <Route path="threats" element={<Threats />} />
-        <Route path="recovery" element={<Recovery />} />
-        <Route path="events" element={<Events />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="settings" element={<SettingsPage />} />
-      </Route>
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+    <>
+      <AndroidBackNavigation />
+      <Routes>
+        <Route path="/" element={<Navigate to="/dashboard" replace />} />
+        <Route element={<DashboardLayout />}>
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="devices" element={<Devices />} />
+          <Route path="threats" element={<Threats />} />
+          <Route path="recovery" element={<Recovery />} />
+          <Route path="events" element={<Events />} />
+          <Route path="analytics" element={<Analytics />} />
+          <Route path="settings" element={<SettingsPage />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </>
   );
 }
 
