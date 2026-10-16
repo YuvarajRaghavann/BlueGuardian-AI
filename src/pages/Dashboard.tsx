@@ -25,6 +25,7 @@ import { useSecurity } from '../context/SecurityContext';
 import type { BluetoothDevice } from '../types';
 import { needsManualApproval } from '../utils/connectionPolicy';
 import { visibleEvents } from '../utils/visibleEvents';
+import { getCurrentModelMetadata } from '../ml/mlService';
 
 export function Dashboard() {
   const { state, dispatch: deviceDispatch, scanRealDevices, scanSimulatedDevices } = useBluetoothDevices();
