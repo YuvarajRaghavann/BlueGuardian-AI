@@ -826,7 +826,13 @@ export function Recovery() {
                     <p className="text-sm text-[var(--text)]">
                       {formatDate(encounter.observedAt)} · {encounter.source}
                       {encounter.simulated || encounter.isTestFixture ? ' · SIMULATED TEST DATA' : ''}
+                      {typeof encounter.confidence === 'number' ? ` · Candidate confidence ${Math.round(encounter.confidence * 100)}%` : ''}
                     </p>
+                    {encounter.description?.toLowerCase().includes('community ble') && (
+                      <span className="mt-1 inline-flex rounded-full border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--warning)]">
+                        Unverified community candidate
+                      </span>
+                    )}
                     {encounter.location && (
                       <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[var(--text-muted)]">
                         <span>{encounter.location.address ?? `${encounter.location.lat}, ${encounter.location.lng}`}</span>
