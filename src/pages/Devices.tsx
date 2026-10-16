@@ -309,64 +309,37 @@ export function Devices() {
         </div>
       </header>
 
-      <section className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface)]/80 p-4">
-        <div className="flex items-start gap-3">
-          <Bluetooth className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-          <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Your nearby devices' : 'Connect to a nearby device'}</p>
-            <p className="text-xs leading-5 text-[var(--text-secondary)]">
-              {nativeAndroid
-                ? 'Scan for nearby Bluetooth devices, review the results, and choose a device to inspect its details. BlueGuardian will not pair or connect without your action.'
-                : 'Choose a nearby device, then review its available details and security status. Simulated examples are kept separate from real device observations.'}
-            </p>
+      <section className="overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--surface)] p-5 shadow-[0_20px_50px_rgba(0,0,0,.25)] sm:p-6">
+        <div className="mx-auto flex max-w-xl flex-col items-center text-center">
+          <div className={cn("relative mb-5 grid h-44 w-44 place-items-center rounded-full border border-[var(--accent)]/50 bg-[radial-gradient(circle,rgba(82,103,255,.15),rgba(82,103,255,.025)_62%,transparent_64%)] sm:h-52 sm:w-52", isScanning && "animate-pulse")}>
+            <div className={cn("absolute inset-3 rounded-full border border-[var(--accent)]/25", isScanning && "animate-spin")} style={{ animationDuration: '7s' }} />
+            <div className={cn("absolute inset-7 rounded-full border border-[var(--accent)]/15", isScanning && "animate-ping")} />
+            <Bluetooth className="h-14 w-14 text-[var(--text)] drop-shadow-[0_0_18px_rgba(82,103,255,.5)]" strokeWidth={1.5} />
           </div>
+          <p className="text-xs font-semibold uppercase tracking-[.24em] text-[var(--accent)]">Device finder</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">{isScanning ? 'Searching nearby devices…' : visibleDevices.length ? 'Your devices, at a glance' : 'Find your nearby devices'}</h2>
+          <p className="mt-2 max-w-md text-sm leading-6 text-[var(--text-secondary)]">{isScanning ? 'Keep Bluetooth on and bring the device you need nearby.' : visibleDevices.length ? 'Select any device below to see its details and security status.' : 'Make sure Bluetooth is turned on and your device is nearby, then start a scan.'}</p>
+          <button type="button" onClick={() => void (nativeAndroid ? handleCombinedScan() : handleScan())} disabled={isScanning} className="mt-5 inline-flex min-h-12 w-full max-w-sm items-center justify-center gap-2 rounded-xl bg-[var(--accent)] px-6 text-sm font-semibold text-white shadow-[0_10px_28px_rgba(82,103,255,.28)] transition hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60">
+            <Bluetooth className={cn("h-4 w-4", isScanning && "animate-pulse")} />{isScanning ? 'Searching…' : visibleDevices.length ? 'Search again' : 'Scan for devices'}
+          </button>
         </div>
-
-        <div className={cn("rounded-lg border border-[var(--border)] bg-[var(--bg)]/60 p-3", nativeAndroid && 'hidden')}>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3">
-              <Bug className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-              <div>
-                <p className="text-sm font-semibold text-[var(--text)]">Bluetooth troubleshooting</p>
-                <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                  Check whether this browser exposes Web Bluetooth, is running in a secure context, and supports the optional permission/watch APIs.
-                </p>
+        {!nativeAndroid && (
+          <div className="mt-6 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <Bug className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+                <div><p className="text-sm font-semibold text-[var(--text)]">Bluetooth help</p><p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">Check availability and permissions if a scan cannot start.</p></div>
               </div>
+              <button type="button" onClick={() => void handleRunDiagnostics()} className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent)] hover:bg-[var(--accent)]/15"><Bug className="h-3.5 w-3.5" /> Check Bluetooth</button>
             </div>
-            <button
-              type="button"
-              onClick={() => void handleRunDiagnostics()}
-              className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-md)] border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-3 py-2 text-xs font-semibold text-[var(--accent)] hover:bg-[var(--accent)]/15"
-            >
-              <Bug className="h-3.5 w-3.5" /> Run browser check
-            </button>
+            {diagnosticError && <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{diagnosticError}</p>}
+            {diagnostics && <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+              <div className="rounded-lg border border-[var(--border)] p-2.5"><span className="text-[var(--text-muted)]">Secure context</span><p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.secureContext ? 'Ready' : 'Unavailable'}</p></div>
+              <div className="rounded-lg border border-[var(--border)] p-2.5"><span className="text-[var(--text-muted)]">Bluetooth access</span><p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.requestDeviceApi ? 'Available' : 'Unavailable'}</p></div>
+              <div className="rounded-lg border border-[var(--border)] p-2.5"><span className="text-[var(--text-muted)]">Adapter</span><p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.bluetoothAvailability === 'available' ? 'Available' : diagnostics.bluetoothAvailability === 'unavailable' ? 'Unavailable' : 'Unknown'}</p></div>
+            </div>}
           </div>
-          {diagnosticError && <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{diagnosticError}</p>}
-          {diagnostics && (
-            <div className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-md border border-[var(--border)] p-2.5">
-                <span className="text-[var(--text-muted)]">Secure context</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.secureContext ? 'Yes' : 'No'}</p>
-              </div>
-              <div className="rounded-md border border-[var(--border)] p-2.5">
-                <span className="text-[var(--text-muted)]">Web Bluetooth API</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.requestDeviceApi ? 'Available' : 'Not available'}</p>
-              </div>
-              <div className="rounded-md border border-[var(--border)] p-2.5">
-                <span className="text-[var(--text-muted)]">Bluetooth availability</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.bluetoothAvailability === 'available' ? 'Available' : diagnostics.bluetoothAvailability === 'unavailable' ? 'Unavailable' : 'Unknown'}</p>
-              </div>
-              <div className="rounded-md border border-[var(--border)] p-2.5">
-                <span className="text-[var(--text-muted)]">Previously granted device list</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.getDevicesApi ? 'Available' : 'Not available'}</p>
-              </div>
-              <div className="rounded-md border border-[var(--border)] p-2.5">
-                <span className="text-[var(--text-muted)]">Advertisement watch</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.watchAdvertisementsApi ? 'Available' : 'Not available'}</p>
-              </div>
-            </div>
-          )}
-        </div>
+        )}
       </section>
 
       <section className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
