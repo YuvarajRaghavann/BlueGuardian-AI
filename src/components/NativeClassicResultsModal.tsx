@@ -32,17 +32,17 @@ export function NativeClassicResultsModal({
 
   const summary = pairedView
     ? loading
-      ? 'Reading Android’s paired-device list…'
+      ? 'Reading saved devices on this phone…'
       : devices.length > 0
-      ? `Android returned ${devices.length} paired device(s).`
-      : scan.error || 'No paired Bluetooth devices were returned.'
+      ? `${devices.length} paired device(s) available.`
+      : scan.error || 'No paired devices found on this phone.'
     : scanning
       ? `Searching nearby… ${devices.length} device(s) found`
       : failed
-        ? scan.error || 'Classic Bluetooth discovery failed.'
+        ? scan.error || 'Device search failed.'
         : devices.length > 0
           ? `Found ${devices.length} device(s). Select one to view details.`
-          : scan.error || 'No classic Bluetooth devices were discovered.';
+          : scan.error || 'No devices found. Keep Bluetooth on and try again.';
 
   return (
     <div
@@ -114,7 +114,7 @@ export function NativeClassicResultsModal({
                       {device.paired ? <Bluetooth className="h-5 w-5" /> : <Radio className="h-5 w-5" />}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-[var(--text)]">{device.name || 'Unknown classic Bluetooth device'}</p>
+                      <p className="truncate text-sm font-semibold text-[var(--text)]">{device.name || 'Unknown Bluetooth device'}</p>
                       <p className="mt-1 truncate text-xs text-[var(--text-muted)]">{device.address || device.id}</p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-secondary)]">
                         <span>{device.paired ? 'Paired in Android' : 'Discovered nearby'}</span>
@@ -131,7 +131,7 @@ export function NativeClassicResultsModal({
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
               <Bluetooth className="h-8 w-8 text-[var(--text-muted)]" />
               <p className="text-sm font-medium text-[var(--text)]">
-                {loading ? 'Loading paired devices…' : scanning ? 'Waiting for discoverable devices' : failed ? (pairedView ? 'Could not load paired devices' : 'Classic discovery could not start') : pairedView ? 'No paired devices to show' : 'No classic devices found'}
+                {loading ? 'Loading saved devices…' : scanning ? 'Waiting for discoverable devices' : failed ? (pairedView ? 'Could not load paired devices' : 'Search could not start') : pairedView ? 'No paired devices to show' : 'No classic devices found'}
               </p>
               <p className="max-w-md text-xs leading-5 text-[var(--text-muted)]">
                 {loading
@@ -139,17 +139,17 @@ export function NativeClassicResultsModal({
                   : failed
                     ? pairedView
                       ? 'Grant Nearby Devices permission to BlueGuardian in Android Settings, then retry loading the paired-device list.'
-                      : 'Grant Nearby Devices and Location permission for classic discovery. On Android 12+, allow precise location if prompted. Confirm Bluetooth is enabled, wait for any system scan to finish, and retry. BlueGuardian does not collect GPS coordinates from this permission.'
+                      : 'Allow BlueGuardian's requested Bluetooth permissions in Android Settings, confirm Bluetooth is on, and try again. The app does not collect GPS coordinates from this permission.'
                     : pairedView
                       ? 'Pair an eligible Bluetooth device in Android Settings, then refresh this list.'
-                      : 'Make the other classic Bluetooth device discoverable or place it in pairing mode before retrying. Devices that only advertise over BLE belong in the separate BLE scan.'}
+                      : 'Make sure the device is discoverable or in pairing mode, then try again.'}
               </p>
             </div>
           )}
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-3">
-          <span className="text-xs text-[var(--text-muted)]">Classic Bluetooth discovery</span>
+          <span className="text-xs text-[var(--text-muted)]">Device search</span>
           <button
             type="button"
             onClick={onClose}
