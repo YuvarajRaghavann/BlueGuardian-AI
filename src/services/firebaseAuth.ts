@@ -4,7 +4,7 @@
  * The Firebase web API key and project ID are client configuration, not secrets.
  * ID and refresh tokens are kept in JavaScript memory only; reload requires sign-in.
  */
-const FIREBASE_API_KEY = 'AIzaSyD8D6PorYO8175H8kv6nvV1SfhFBWvYeFiA';
+const FIREBASE_API_KEY = 'AIzaSyD8D6PorYO8175H8kv6nvVl5hfBWvYeFiA';
 const IDENTITY_TOOLKIT_URL = 'https://identitytoolkit.googleapis.com/v1';
 const SECURE_TOKEN_URL = 'https://securetoken.googleapis.com/v1/token';
 
