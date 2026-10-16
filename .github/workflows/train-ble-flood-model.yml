@@ -71,7 +71,7 @@ jobs:
               "candidate_remains_disabled": model.get("deploymentStatus") == "disabled_until_explicit_review",
           }, indent=2))
           with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
-              output.write(f"eligible={'true' if eligible else 'false'}\\n")
+              output.write(f"eligible={'true' if eligible else 'false'}\n")
           PY
 
       - name: Embed gate-passing candidate weights in the isolated ML branch
