@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: blueguardian-android-shell-${{ github.ref }}
+  group: blueguardian-android-shell-final-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
