@@ -107,3 +107,5 @@ jobs:
             android-build-info.txt
           if-no-files-found: error
           retention-days: 14
+
+# Verification rerun requested after final UX changes.
