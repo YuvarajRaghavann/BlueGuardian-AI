@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - 'android/phase2-cloud-build-*'
+      - 'android/phase4-classic-discovery-*'
   workflow_dispatch:
 
 permissions:
