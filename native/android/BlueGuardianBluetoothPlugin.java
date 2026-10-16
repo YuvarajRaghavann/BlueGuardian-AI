@@ -450,7 +450,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 } else if (anotherDiscoveryActive) {
                     call.reject("Another classic Bluetooth discovery session is active. Wait briefly and retry.");
                 } else {
-                    call.reject("Android's Bluetooth service rejected classic discovery. Confirm Nearby Devices and Location permissions are granted, then wait briefly and retry.");
+                    call.reject("Android's Bluetooth service rejected classic discovery. Bluetooth may be temporarily unavailable; wait briefly, then retry.");
                 }
                 return;
             }
@@ -458,7 +458,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             classicDiscoveryOwned = true;
         } catch (SecurityException error) {
             stopClassicDiscoveryInternal(false);
-            call.reject("Android denied classic Bluetooth discovery. Check Nearby Devices permission.");
+            call.reject("Android denied classic Bluetooth discovery. Check Nearby Devices and Location permissions.");
             return;
         } catch (RuntimeException error) {
             stopClassicDiscoveryInternal(false);
