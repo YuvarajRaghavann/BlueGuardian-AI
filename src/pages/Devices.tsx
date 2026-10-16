@@ -241,6 +241,10 @@ export function Devices() {
   };
 
   const handleGenerateSimulated = async () => {
+    setCombinedResultsOpen(false);
+    setNativeResultsOpen(false);
+    setClassicResultsOpen(false);
+    setPairedResultsOpen(false);
     setSourceView('simulated');
     // Keep the general-purpose scan entry point in real mode. Demo generation
     // is explicit and must not switch future scans elsewhere in the app to fake data.
@@ -328,7 +332,9 @@ export function Devices() {
               <Bluetooth className={cn('h-4 w-4', isScanning && 'animate-spin')} />
               {isScanning
                 ? nativeAndroid
-                  ? state.scan.transport === 'ANDROID_CLASSIC_SCAN' ? 'Classic discovery running…' : 'Scanning nearby BLE advertisements…'
+                  ? state.scan.transport === 'ANDROID_COMBINED_SCAN'
+                    ? (state.scan.scanStage === 'CLASSIC' ? 'Combined scan · classic discovery…' : 'Combined scan · BLE discovery…')
+                    : state.scan.transport === 'ANDROID_CLASSIC_SCAN' ? 'Classic discovery running…' : 'Scanning nearby BLE advertisements…'
                   : 'Opening Bluetooth chooser…'
                 : nativeAndroid ? 'Scan nearby BLE devices' : pickerMode === 'known' ? 'Select named BLE device' : 'Select BLE device'}
             </button>
