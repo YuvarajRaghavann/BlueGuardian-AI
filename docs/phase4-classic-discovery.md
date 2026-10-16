@@ -11,7 +11,7 @@ This branch starts from Phase 3 repaired source commit `590fce85187545fd114d12d0
 - Native classic Bluetooth discovery via Android `BluetoothAdapter.startDiscovery()`.
 - Broadcast handling for discovery-started, device-found, and discovery-finished events.
 - A bounded foreground discovery window, explicit stop, permission/state errors, and lifecycle cleanup.
-- Runtime permission handling for Android 12+ Nearby Devices permissions and legacy location permission where required for discovery.
+- Runtime permission handling for Android 12+ Nearby Devices plus coarse/fine location when classic inquiry requires it, and legacy location permission on older supported versions. BlueGuardian does not collect GPS coordinates from this permission.
 - Separate listing of devices in Android's bonded/paired device registry.
 - A distinct classic-discovery results dialog with real names when Android provides them, address, RSSI when provided, paired flag, scan status, and honest empty/error messaging.
 - Integration into the existing device state, security assessment, and local persistence path.
@@ -41,7 +41,17 @@ After the APK exists, physical-device acceptance should confirm:
 2. A test device in classic discoverable/pairing mode is listed with only the fields Android reports.
 3. BLE-only devices are not falsely represented as classic discoveries.
 4. Android's paired-device registry loads in a separate view.
-5. Permission denial, Bluetooth-off, empty results, and an existing discovery session report clear outcomes.
+5. Permission denial, Bluetooth-off/not-ready state, empty results, and an existing discovery session report distinct outcomes. A startup failure must never be rendered as a successful empty scan.
+6. If a system discovery session races with startup, BlueGuardian must not cancel that session unless its own start call succeeded.
 6. Discovered/paired devices remain marked unconnected unless a later approved phase implements and verifies connection handling.
 
 Passing CI proves build integration, not real-radio hardware behavior. Phase 5 should not begin until Phase 4's source/build acceptance passes and the classic discovery behavior has been reviewed.
+
+
+## Phase 4 device-reported startup failure follow-up
+
+The repair branch adds the location permission declaration and runtime request required by Android's classic discovery API unless the app asserts `neverForLocation`. BlueGuardian does not use that assertion because the Android documentation notes it can restrict which Bluetooth devices are visible. Classic discovery asks for the required location permission only when the user chooses the classic scan; the feature does not read or store GPS coordinates.
+
+The native bridge now tracks whether Android accepted this plugin's discovery start before treating the adapter session as owned. It will not cancel an adapter-wide discovery session after its own start call has failed. When startup fails, the dialog explicitly states that discovery did not start rather than showing the regular "No classic devices found" empty result.
+
+CI can verify permission declarations, TypeScript/web regression tests, Capacitor sync, and Android compilation. It cannot prove radio behavior on a physical handset. Phase 5 remains gated on reinstalling this repair APK and confirming classic discovery starts on the user's device.
