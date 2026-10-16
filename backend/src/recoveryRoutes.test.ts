@@ -268,7 +268,7 @@ describe('recovery API integration', () => {
 
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({
-        error: 'Recovery storage is unavailable. Retry after the database connection is restored.',
+        error: 'Database storage is unavailable. Retry after the connection is restored.',
       });
       expect(error).toHaveBeenCalledWith(expect.stringMatching(
         /^\[api\] request failed category=database_unavailable method=GET route=\/devices dbState=\d errorName=MongoServerSelectionError$/,
