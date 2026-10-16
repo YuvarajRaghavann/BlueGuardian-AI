@@ -59,7 +59,7 @@ export function Devices() {
   const nativeScanDevices = useMemo(() => {
     return state.devices
       .filter((device) => {
-        if (device.discoverySource !== 'REAL' || device.discoveryTransport === 'CLASSIC') return false;
+        if (device.discoverySource !== 'REAL' || (device.discoveryTransport === 'CLASSIC' || device.discoveryTransport === 'PAIRED')) return false;
         if (nativeScanStartedAt === null) return true;
         const seenAt = device.lastSeen instanceof Date
           ? device.lastSeen.getTime()
@@ -76,7 +76,7 @@ export function Devices() {
   
   const nativeClassicDevices = useMemo(() => state.devices
     .filter((device) => {
-      if (device.discoverySource !== 'REAL' || device.discoveryTransport !== 'CLASSIC') return false;
+      if (device.discoverySource !== 'REAL' || (device.discoveryTransport !== 'CLASSIC' && device.discoveryTransport !== 'PAIRED')) return false;
       if (classicScanStartedAt === null) return true;
       const seenAt = device.lastSeen instanceof Date
         ? device.lastSeen.getTime()
