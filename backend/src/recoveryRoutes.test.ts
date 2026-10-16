@@ -160,8 +160,9 @@ describe('recovery API integration', () => {
     });
     expect(response.status).toBe(202);
     const body = await response.json();
-    expect(body).toMatchObject({ accepted: true, observationsReceived: 1, reportsRecorded: 1 });
+    expect(body).toMatchObject({ accepted: true, observationsReceived: 1 });
     expect(JSON.stringify(body)).not.toContain('owner-lost-device');
+    expect(body).not.toHaveProperty('reportsRecorded');
     expect(store.encounters[0]).toMatchObject({
       deviceId: 'owner-lost-device',
       ownerId: 'test-owner',

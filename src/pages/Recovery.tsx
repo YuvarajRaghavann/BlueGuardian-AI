@@ -27,6 +27,7 @@ export function Recovery() {
   const [encounters, setEncounters] = useState<RecoveryEncounterRecord[]>([]);
   const [busy, setBusy] = useState(false);
   const [shareLocation, setShareLocation] = useState(false);
+  const [communityShareLocation, setCommunityShareLocation] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -268,6 +269,9 @@ export function Recovery() {
         type: 'unknown',
         discoverySource: 'REAL',
         recoveryState: 'lost',
+        ...(selectedBluetoothDevice.name && (selectedBluetoothDevice.uuids?.length ?? 0) > 0
+          ? { recoveryFingerprint: { name: selectedBluetoothDevice.name, serviceUuids: selectedBluetoothDevice.uuids } }
+          : {}),
       });
       setSelectedDevice(registered);
       setDevices(current => [registered, ...current.filter(item => item.deviceId !== registered.deviceId)]);
@@ -275,9 +279,12 @@ export function Recovery() {
       setSelectedBluetoothDevice(null);
       setRecoveryInfo(null);
       setEncounters([]);
-      setNotice(selectedBluetoothDevice.source === 'native'
+      const fingerprintReady = Boolean(selectedBluetoothDevice.name && (selectedBluetoothDevice.uuids?.length ?? 0) > 0);
+      setNotice(`${selectedBluetoothDevice.source === 'native'
         ? 'Device registration was saved by the backend using the Android-reported Bluetooth address. Addresses may be randomized and are not guaranteed to be a universal hardware identity.'
-        : 'Device registration was saved by the backend using a browser-scoped identifier, which is not a universal hardware identity.');
+        : 'Device registration was saved by the backend using a browser-scoped identifier, which is not a universal hardware identity.'} ${fingerprintReady
+          ? 'A name + BLE service fingerprint was registered for privacy-preserving community candidate matching; it is not a unique hardware identity, so sightings remain unverified leads.'
+          : 'Community matching is not enabled for this device because its advertisement did not expose both a name and service UUIDs.'}`);
       try {
         await loadRecoveryInfo(registered, token);
       } catch (refreshError) {
@@ -432,6 +439,72 @@ export function Recovery() {
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Unable to submit this observation.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const scanForCommunitySightings = async () => {
+    const token = await getFreshFirebaseIdToken() ?? ownerToken.trim();
+    if (!token) {
+      setError('Sign in with your Firebase account before submitting a community sighting.');
+      return;
+    }
+    if (!isNativeAndroidApp()) {
+      setError('Community discovery requires the native Android app. Browser Web Bluetooth cannot passively scan nearby devices.');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const candidates = new Map<string, { name: string; serviceUuids: string[] }>();
+      const outcome = await scanNativeAndroidBle((observation) => {
+        const name = observation.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
+        const serviceUuids = [...new Set((observation.serviceUuids ?? []).map(uuid => uuid.trim().toLowerCase()).filter(Boolean))].sort();
+        if (!name || serviceUuids.length === 0) return;
+        const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids });
+        if (!candidates.has(key)) candidates.set(key, { name, serviceUuids });
+      }, 12000);
+
+      const observations = Array.from(candidates.values()).slice(0, 30);
+      if (observations.length === 0) {
+        setError(outcome.ok
+          ? 'The scan found no BLE advertisements with both a usable name and service UUIDs. No community report was sent. Many earbuds do not advertise enough stable information for safe matching.'
+          : outcome.error);
+        return;
+      }
+
+      let location: { lat: number; lng: number } | undefined;
+      if (communityShareLocation) {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) {
+          setError('Location is unavailable on this device. Turn off optional location sharing to submit Bluetooth-only candidates.');
+          return;
+        }
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true, timeout: 12000, maximumAge: 0,
+            });
+          });
+          location = { lat: position.coords.latitude, lng: position.coords.longitude };
+        } catch (caught) {
+          setError(`Location was not obtained (${errorMessage(caught)}). No report was sent. Allow location access or disable optional location sharing.`);
+          return;
+        }
+      }
+
+      const result = await api.recovery.submitCommunitySightings(token, {
+        observations,
+        shareLocation: communityShareLocation,
+        ...(location ? { location } : {}),
+      });
+      setOwnerToken(token);
+      setActiveOwnerToken(token);
+      setNotice(`Community scan submitted ${result.observationsReceived} eligible BLE fingerprint candidate(s). Matching reports, if any, are private to device owners. These are candidate leads, not proof that a lost device was found.`);
+    } catch (caught) {
+      setError(errorMessage(caught));
     } finally {
       setBusy(false);
     }
@@ -637,6 +710,27 @@ export function Recovery() {
             </ul>
           )}
         </div>
+      </section>
+
+      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+        <div className="flex items-center gap-2">
+          <Bluetooth className="h-4 w-4 text-[var(--accent)]" />
+          <h2 className="text-lg font-semibold text-[var(--text)]">Community recovery scan</h2>
+        </div>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
+          Help owners by scanning nearby BLE advertisements while this screen is open. BlueGuardian sends only advertised names and service UUIDs needed for candidate matching, not Bluetooth MAC addresses. A match is stored as an unverified lead and never marks a device recovered automatically. Background scanning is not supported.
+        </p>
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+          <input type="checkbox" checked={communityShareLocation} onChange={event => setCommunityShareLocation(event.target.checked)} disabled={busy} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
+          <span>
+            <span className="block text-sm font-medium text-[var(--text)]">Share this phone's location with matched owners (optional)</span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">GPS is requested only after the scan and only when this box is checked. Without it, reports contain no location.</span>
+          </span>
+        </label>
+        <button type="button" onClick={() => void scanForCommunitySightings()} disabled={busy || !ownerToken.trim()} className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50">
+          {busy ? 'Scanning and submitting…' : 'Scan and help nearby owners'}
+        </button>
+        {!isNativeAndroidApp() && <p className="mt-2 text-xs text-[var(--text-muted)]">Native Android APK required for nearby BLE scanning. The browser cannot scan passively.</p>}
       </section>
 
       {selectedDevice && recoveryInfo && (

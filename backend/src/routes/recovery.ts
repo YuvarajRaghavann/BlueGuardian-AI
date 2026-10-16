@@ -242,7 +242,6 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
   }
 
   const timeBucket = Math.floor(Date.now() / 60_000);
-  let recordedReports = 0;
   for (const fingerprintHash of fingerprintHashes) {
     const matches = await Device.find({
       recoveryEnabled: true,
@@ -280,12 +279,11 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
         device.recoveryState = 'searching';
         await device.save();
       }
-      recordedReports += 1;
     }
   }
 
   // Do not reveal whether any owner/device matched, or return device IDs.
-  return res.status(202).json({ accepted: true, observationsReceived: fingerprintHashes.size, reportsRecorded: recordedReports });
+  return res.status(202).json({ accepted: true, observationsReceived: fingerprintHashes.size });
 }));
 
 export default router;
