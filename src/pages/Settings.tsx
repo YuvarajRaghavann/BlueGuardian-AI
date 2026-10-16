@@ -132,10 +132,10 @@ export function SettingsPage() {
     },
     {
       key: 'requireConnectionApproval' as const,
-      available: false,
+      available: true,
       icon: Lock,
       title: 'Require connection approval',
-      description: 'Requires Android system-level integration; this app cannot intercept every system pairing flow.',
+      description: 'Require explicit in-app approval before BlueGuardian opens a browser GATT connection to an untrusted BLE device. Android system pairing remains controlled by Android Settings.',
     },
     {
       key: 'enforceFastPairApproval' as const,
