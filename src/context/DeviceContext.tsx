@@ -588,10 +588,12 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       trusted: false,
       trustScore: 0,
       riskLevel: 'high',
-      connectionStatus: paired ? 'disconnected' : 'unknown',
+      // Pairing is not a reliable indication of live connection state.
+      connectionStatus: 'unknown',
       firstSeen: observedAt,
       lastSeen: observedAt,
-      isKnown: paired,
+      // Android pairing must not silently grant BlueGuardian trust.
+      isKnown: false,
       services: [],
       discoverySource: 'REAL',
       discoveryTransport: observation.transport,
