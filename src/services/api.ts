@@ -1,7 +1,18 @@
 import type { BluetoothDevice, ConnectionStatus, DeviceType, RiskLevel, SecurityAction, SecurityActionType, Threat, ThreatCategory, ThreatSeverity, ThreatStatus, ThreatReason, MLThreatClass } from '../types';
 import { resolveBluetoothDisplayName } from './bluetoothService';
+import { getApiBaseConfig } from './apiBase';
 
-const BASE = (import.meta.env.VITE_API_BASE?.trim() || '/api').replace(/\/+$/, '') || '/api';
+const BASE = () => getApiBaseConfig().baseUrl;
+
+function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const config = getApiBaseConfig();
+  if (!config.configured || !config.baseUrl) {
+    return Promise.reject(new Error(
+      config.error || 'Backend URL is not configured. Open Settings → Backend and database.',
+    ));
+  }
+  return fetch(url, { ...options, cache: 'no-store' });
+}
 
 function recoveryHeaders(token: string, jsonBody = false): Record<string, string> {
   if (!token.trim()) {
@@ -15,7 +26,7 @@ function recoveryHeaders(token: string, jsonBody = false): Record<string, string
 }
 
 function recoveryFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  return fetch(url, { ...options, cache: 'no-store' });
+  return apiFetch(url, { ...options, cache: 'no-store' });
 }
 
 export interface RecoveryDeviceRecord {
@@ -214,13 +225,13 @@ export interface PostSecurityActionPayload {
 }
 
 export const api = {
-  health: () => fetch(`${BASE}/health`).then(json<{ status: string; database: string }>),
-  listDevices: (token: string) => fetch(`${BASE}/devices`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => records.map(fromApiDevice)),
-  getDevice: (token: string, id: string) => fetch(`${BASE}/devices/${encodeURIComponent(id)}`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>>).then(fromApiDevice),
-  createDevice: (token: string, device: BluetoothDevice) => fetch(`${BASE}/devices`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(toApiDevice(device)) }).then(json<Record<string, any>>).then(fromApiDevice),
-  updateDevice: (token: string, id: string, patch: Partial<BluetoothDevice>) => fetch(`${BASE}/devices/${encodeURIComponent(id)}`, { method: 'PATCH', headers: recoveryHeaders(token, true), body: JSON.stringify(patch) }).then(json<Record<string, any>>).then(fromApiDevice),
-  assessDevice: (token: string, id: string) => fetch(`${BASE}/devices/${encodeURIComponent(id)}/assess`, { method: 'POST', headers: recoveryHeaders(token) }).then(json<Record<string, any>>),
-  listThreats: (token: string, devices: BluetoothDevice[] = []) => fetch(`${BASE}/threats`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => {
+  health: () => apiFetch(`${BASE()}/health`).then(json<{ status: string; database: string }>),
+  listDevices: (token: string) => apiFetch(`${BASE()}/devices`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => records.map(fromApiDevice)),
+  getDevice: (token: string, id: string) => apiFetch(`${BASE()}/devices/${encodeURIComponent(id)}`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>>).then(fromApiDevice),
+  createDevice: (token: string, device: BluetoothDevice) => apiFetch(`${BASE()}/devices`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(toApiDevice(device)) }).then(json<Record<string, any>>).then(fromApiDevice),
+  updateDevice: (token: string, id: string, patch: Partial<BluetoothDevice>) => apiFetch(`${BASE()}/devices/${encodeURIComponent(id)}`, { method: 'PATCH', headers: recoveryHeaders(token, true), body: JSON.stringify(patch) }).then(json<Record<string, any>>).then(fromApiDevice),
+  assessDevice: (token: string, id: string) => apiFetch(`${BASE()}/devices/${encodeURIComponent(id)}/assess`, { method: 'POST', headers: recoveryHeaders(token) }).then(json<Record<string, any>>),
+  listThreats: (token: string, devices: BluetoothDevice[] = []) => apiFetch(`${BASE()}/threats`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => {
     const latestByDeviceCategory = new Map<string, Threat>();
     for (const record of records) {
       const mapped = fromApiThreat(record, devices);
@@ -230,25 +241,25 @@ export const api = {
     }
     return Array.from(latestByDeviceCategory.values()).sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
   }),
-  listActions: (token: string) => fetch(`${BASE}/actions`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => records.map(fromApiAction)),
-  postAction: (token: string, payload: PostSecurityActionPayload) => fetch(`${BASE}/actions`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(payload) }).then(json<{ action: Record<string, any> }>).then(result => fromApiAction(result.action)),
-  listEvents: (token: string) => fetch(`${BASE}/events`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>),
-  postEvent: (token: string, ev: any) => fetch(`${BASE}/events`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(ev) }).then(json<any>),
+  listActions: (token: string) => apiFetch(`${BASE()}/actions`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => records.map(fromApiAction)),
+  postAction: (token: string, payload: PostSecurityActionPayload) => apiFetch(`${BASE()}/actions`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(payload) }).then(json<{ action: Record<string, any> }>).then(result => fromApiAction(result.action)),
+  listEvents: (token: string) => apiFetch(`${BASE()}/events`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>),
+  postEvent: (token: string, ev: any) => apiFetch(`${BASE()}/events`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(ev) }).then(json<any>),
   recovery: {
-    listDevices: (token: string) => recoveryFetch(`${BASE}/recovery/devices`, { headers: recoveryHeaders(token) }).then(json<RecoveryDeviceRecord[]>),
-    registerDevice: (token: string, payload: Record<string, unknown>) => recoveryFetch(`${BASE}/recovery/devices`, {
+    listDevices: (token: string) => recoveryFetch(`${BASE()}/recovery/devices`, { headers: recoveryHeaders(token) }).then(json<RecoveryDeviceRecord[]>),
+    registerDevice: (token: string, payload: Record<string, unknown>) => recoveryFetch(`${BASE()}/recovery/devices`, {
       method: 'POST',
       headers: recoveryHeaders(token, true),
       body: JSON.stringify(payload),
     }).then(json<RecoveryDeviceRecord>),
-    updateState: (token: string, deviceId: string, status: RecoveryDeviceRecord['recoveryState']) => recoveryFetch(`${BASE}/recovery/devices/${encodeURIComponent(deviceId)}`, {
+    updateState: (token: string, deviceId: string, status: RecoveryDeviceRecord['recoveryState']) => recoveryFetch(`${BASE()}/recovery/devices/${encodeURIComponent(deviceId)}`, {
       method: 'PATCH',
       headers: recoveryHeaders(token, true),
       body: JSON.stringify({ status }),
     }).then(json<RecoveryDeviceRecord>),
-    getRecoveryInfo: (token: string, deviceId: string) => recoveryFetch(`${BASE}/recovery/devices/${encodeURIComponent(deviceId)}`, { headers: recoveryHeaders(token) }).then(json<RecoveryInfoRecord>),
-    listEncounters: (token: string, deviceId: string) => recoveryFetch(`${BASE}/recovery/devices/${encodeURIComponent(deviceId)}/encounters`, { headers: recoveryHeaders(token) }).then(json<RecoveryEncounterRecord[]>),
-    submitEncounter: (token: string, deviceId: string, payload: Record<string, unknown>) => recoveryFetch(`${BASE}/recovery/devices/${encodeURIComponent(deviceId)}/encounters`, {
+    getRecoveryInfo: (token: string, deviceId: string) => recoveryFetch(`${BASE()}/recovery/devices/${encodeURIComponent(deviceId)}`, { headers: recoveryHeaders(token) }).then(json<RecoveryInfoRecord>),
+    listEncounters: (token: string, deviceId: string) => recoveryFetch(`${BASE()}/recovery/devices/${encodeURIComponent(deviceId)}/encounters`, { headers: recoveryHeaders(token) }).then(json<RecoveryEncounterRecord[]>),
+    submitEncounter: (token: string, deviceId: string, payload: Record<string, unknown>) => recoveryFetch(`${BASE()}/recovery/devices/${encodeURIComponent(deviceId)}/encounters`, {
       method: 'POST',
       headers: recoveryHeaders(token, true),
       body: JSON.stringify(payload),
