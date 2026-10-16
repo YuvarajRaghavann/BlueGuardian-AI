@@ -1,0 +1,34 @@
+{
+  "status": "untrained",
+  "modelName": "BlueGuardian BLE Flood Random Forest",
+  "modelVersion": "0.0.0-untrained",
+  "labelSemantics": {
+    "benign": "Benign BLE advertising window under the dataset's recorded conditions.",
+    "ble_flood": "Labeled BLE advertisement-flood/spam window under the dataset's recorded conditions."
+  },
+  "featureNames": [
+    "observation_count",
+    "observations_per_second",
+    "unique_addresses",
+    "unique_address_fraction",
+    "max_address_fraction",
+    "rssi_mean",
+    "rssi_std",
+    "rssi_observation_fraction"
+  ],
+  "imputationValues": {
+    "observation_count": 0,
+    "observations_per_second": 0,
+    "unique_addresses": 0,
+    "unique_address_fraction": 0,
+    "max_address_fraction": 0,
+    "rssi_mean": -100,
+    "rssi_std": 0,
+    "rssi_observation_fraction": 0
+  },
+  "decisionThreshold": 0.5,
+  "trees": [],
+  "evaluationSummary": null,
+  "deploymentStatus": "disabled_until_explicit_review",
+  "validationReview": null
+}
