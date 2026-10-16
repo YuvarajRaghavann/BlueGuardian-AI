@@ -1,10 +1,11 @@
-name: Inspect BLE Research Dataset
+name: Inspect Mendeley BLE Dataset Access
 
 on:
   push:
     branches:
       - 'ml/blueguardian-trained-threat-model-20261016'
     paths:
+      - 'ml_training/inspect_mendeley_access.py'
       - '.github/workflows/inspect-mendeley-ble.yml'
   workflow_dispatch:
 
@@ -12,16 +13,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: blueguardian-mendeley-inventory
+  group: blueguardian-mendeley-access-diagnostic
   cancel-in-progress: false
 
 jobs:
-  inventory:
-    name: Inventory public dataset archive (no source data committed)
+  inspect:
+    name: Inspect public landing page and file access route
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 15
     steps:
-      - name: Check out the isolated ML branch
+      - name: Check out isolated ML branch
         uses: actions/checkout@v5
 
       - name: Set up Python
@@ -29,15 +30,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Download archive and list capture metadata
-        run: |
-          python ml_training/inspect_mendeley_dataset.py \
-            --output ml_training/reports/mendeley_v2_inventory.md
+      - name: Inspect landing page and documented API routes (no archive download)
+        run: python ml_training/inspect_mendeley_access.py
 
-      - name: Upload dataset inventory report
+      - name: Upload access diagnostics
         uses: actions/upload-artifact@v4
         with:
-          name: mendeley-ble-v2-inventory
-          path: ml_training/reports/mendeley_v2_inventory.md
+          name: mendeley-ble-access-diagnostics
+          path: ml_training/reports/mendeley_access_diagnostics.json
           if-no-files-found: error
           retention-days: 14
