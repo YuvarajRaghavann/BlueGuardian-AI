@@ -45,10 +45,38 @@ let activeSession: InMemoryFirebaseSession | null = null;
 
 function extractFirebaseErrorCode(message: string | undefined): string | undefined {
   if (!message) return undefined;
-  // Firebase normally returns a code such as INVALID_LOGIN_CREDENTIALS.
-  // Some API-key restriction failures append explanatory text after a colon.
-  const candidate = message.trim().split(/[:\s]/, 1)[0]?.toUpperCase();
-  return candidate && /^[A-Z0-9_]+$/.test(candidate) ? candidate : undefined;
+  const normalized = message.trim().toUpperCase();
+
+  // Google Identity Toolkit sometimes returns a human-readable detail instead
+  // of a symbolic Firebase code (for example, "API key not valid...").
+  if (/API KEY NOT VALID|INVALID API KEY|API_KEY_INVALID|INVALID_API_KEY/.test(normalized)) {
+    return 'API_KEY_INVALID';
+  }
+  if (/API_KEY_HTTP_REFERRER_BLOCKED|HTTP.?REFERRER.{0,50}BLOCKED/.test(normalized)) {
+    return 'API_KEY_HTTP_REFERRER_BLOCKED';
+  }
+  if (/API_KEY_SERVICE_BLOCKED|REQUESTS TO THIS API.{0,100}BLOCKED|API.{0,40}RESTRICTION.{0,40}BLOCKED/.test(normalized)) {
+    return 'API_KEY_SERVICE_BLOCKED';
+  }
+  if (/CONFIGURATION_NOT_FOUND|CONFIGURATION NOT FOUND/.test(normalized)) {
+    return 'CONFIGURATION_NOT_FOUND';
+  }
+
+  const knownCodes = [
+    'INVALID_LOGIN_CREDENTIALS',
+    'OPERATION_NOT_ALLOWED',
+    'TOO_MANY_ATTEMPTS_TRY_LATER',
+    'EMAIL_NOT_FOUND',
+    'INVALID_PASSWORD',
+    'EMAIL_EXISTS',
+    'WEAK_PASSWORD',
+    'INVALID_EMAIL',
+    'USER_DISABLED',
+    'QUOTA_EXCEEDED',
+  ];
+  return knownCodes.find(code =>
+    new RegExp(`(^|[^A-Z0-9_])${code}([^A-Z0-9_]|$)`).test(normalized),
+  );
 }
 
 function firebaseErrorMessage(message: string | undefined): string {
