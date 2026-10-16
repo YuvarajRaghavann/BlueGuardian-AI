@@ -43,30 +43,65 @@ interface InMemoryFirebaseSession extends FirebaseClientSession {
 
 let activeSession: InMemoryFirebaseSession | null = null;
 
-function firebaseErrorMessage(code: string | undefined): string {
+function extractFirebaseErrorCode(message: string | undefined): string | undefined {
+  if (!message) return undefined;
+  // Firebase normally returns a code such as INVALID_LOGIN_CREDENTIALS.
+  // Some API-key restriction failures append explanatory text after a colon.
+  const candidate = message.trim().split(/[:\\s]/, 1)[0]?.toUpperCase();
+  return candidate && /^[A-Z0-9_]+$/.test(candidate) ? candidate : undefined;
+}
+
+function firebaseErrorMessage(message: string | undefined): string {
+  const code = extractFirebaseErrorCode(message);
+  let friendly: string;
+
   switch (code) {
     case 'EMAIL_EXISTS':
-      return 'An account already exists for this email. Sign in instead.';
+      friendly = 'An account already exists for this email. Sign in instead.';
+      break;
     case 'OPERATION_NOT_ALLOWED':
-      return 'Email/password sign-in is disabled. Enable it in Firebase Console → Authentication → Sign-in method.';
+      friendly = 'Email/password sign-in is disabled. Enable it in Firebase Console → Authentication → Sign-in method.';
+      break;
     case 'INVALID_LOGIN_CREDENTIALS':
     case 'EMAIL_NOT_FOUND':
     case 'INVALID_PASSWORD':
-      return 'The email or password is incorrect.';
+      friendly = 'The email or password is incorrect. If you added this user in Firebase Console, use the exact password set there or request a password reset.';
+      break;
     case 'WEAK_PASSWORD':
-      return 'Choose a password with at least 6 characters.';
+      friendly = 'Choose a password with at least 6 characters.';
+      break;
     case 'INVALID_EMAIL':
-      return 'Enter a valid email address.';
+      friendly = 'Enter a valid email address.';
+      break;
     case 'TOO_MANY_ATTEMPTS_TRY_LATER':
-      return 'Firebase temporarily blocked sign-in attempts. Wait a little and try again.';
+      friendly = 'Firebase temporarily blocked sign-in attempts. Wait a little before trying again.';
+      break;
     case 'API_KEY_INVALID':
     case 'INVALID_API_KEY':
-      return 'The Firebase web API key is invalid. Check the BlueGuardian Firebase web app configuration.';
+      friendly = 'The Firebase web API key was rejected. Check that BlueGuardian uses the Web API key from project blueguardian-ai-auth.';
+      break;
+    case 'API_KEY_HTTP_REFERRER_BLOCKED':
+      friendly = 'The Firebase API key has an HTTP-referrer restriction that blocks this app. Review the key restrictions in Google Cloud Console.';
+      break;
+    case 'API_KEY_SERVICE_BLOCKED':
+      friendly = 'The Firebase API key is restricted from using Identity Toolkit or Secure Token. Review its API restrictions in Google Cloud Console.';
+      break;
+    case 'CONFIGURATION_NOT_FOUND':
+      friendly = 'Firebase could not find a valid email/password authentication configuration for this project. Check the project ID and enabled provider.';
+      break;
     case 'USER_DISABLED':
-      return 'This Firebase account is disabled.';
+      friendly = 'This Firebase account is disabled.';
+      break;
+    case 'QUOTA_EXCEEDED':
+      friendly = 'Firebase Authentication quota was exceeded. Check project quotas and try again later.';
+      break;
     default:
-      return 'Firebase authentication failed. Check your sign-in method and try again.';
+      friendly = 'Firebase rejected the authentication request. Check the error code below and the Firebase project/API-key configuration.';
   }
+
+  // Keep the server error category visible so a future failure is diagnosable
+  // without exposing credentials, tokens, or the raw response payload.
+  return code ? `${friendly} (Firebase code: ${code})` : `${friendly} (Firebase code unavailable)`;
 }
 
 async function readFirebaseResponse<T>(response: Response): Promise<T> {
@@ -119,6 +154,30 @@ async function authenticateWithPassword(path: 'signUp' | 'signInWithPassword', e
 
 export function signInWithEmailPassword(email: string, password: string): Promise<FirebaseClientSession> {
   return authenticateWithPassword('signInWithPassword', email, password);
+}
+
+/**
+ * Ask Firebase to send its password-reset email. The UI does not reveal whether
+ * an email is registered, avoiding unnecessary account-enumeration signals.
+ */
+export async function sendFirebasePasswordResetEmail(emailInput: string): Promise<string> {
+  const email = emailInput.trim().toLowerCase();
+  if (!email) throw new Error('Enter your email address first.');
+
+  let response: Response;
+  try {
+    response = await fetch(`${IDENTITY_TOOLKIT_URL}/accounts:sendOobCode?key=${encodeURIComponent(FIREBASE_API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requestType: 'PASSWORD_RESET', email }),
+      cache: 'no-store',
+    });
+  } catch {
+    throw new Error('Cannot reach Firebase Authentication. Check the phone internet connection and Firebase API-key restrictions.');
+  }
+
+  const data = await readFirebaseResponse<{ email?: string }>(response);
+  return data.email || email;
 }
 
 export function createFirebaseAccount(email: string, password: string): Promise<FirebaseClientSession> {
