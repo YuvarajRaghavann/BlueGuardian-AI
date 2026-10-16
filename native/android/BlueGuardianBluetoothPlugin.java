@@ -41,7 +41,7 @@ import java.util.Set;
     permissions = {
         @Permission(alias = "bluetoothScan", strings = { Manifest.permission.BLUETOOTH_SCAN }),
         @Permission(alias = "bluetoothConnect", strings = { Manifest.permission.BLUETOOTH_CONNECT }),
-        @Permission(alias = "location", strings = { Manifest.permission.ACCESS_FINE_LOCATION })
+        @Permission(alias = "location", strings = { Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION })
     }
 )
 public class BlueGuardianBluetoothPlugin extends Plugin {
@@ -60,6 +60,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     private int activeDurationMs = DEFAULT_SCAN_DURATION_MS;
 
     private BluetoothAdapter activeClassicAdapter;
+    private boolean classicDiscoveryOwned;
     private BroadcastReceiver classicReceiver;
     private Runnable stopClassicRunnable;
     private final Set<String> classicSeenAddresses = new HashSet<>();
@@ -272,9 +273,10 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     public void startClassicDiscovery(PluginCall call) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (getPermissionState("bluetoothScan") != PermissionState.GRANTED
-                || getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+                || getPermissionState("bluetoothConnect") != PermissionState.GRANTED
+                || getPermissionState("location") != PermissionState.GRANTED) {
                 requestPermissionForAliases(
-                    new String[] { "bluetoothScan", "bluetoothConnect" },
+                    new String[] { "bluetoothScan", "bluetoothConnect", "location" },
                     call,
                     "onModernClassicPermissions"
                 );
@@ -292,8 +294,9 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     @PermissionCallback
     private void onModernClassicPermissions(PluginCall call) {
         if (getPermissionState("bluetoothScan") != PermissionState.GRANTED
-            || getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
-            call.reject("BlueGuardian needs Nearby Devices permission for classic Bluetooth discovery.");
+            || getPermissionState("bluetoothConnect") != PermissionState.GRANTED
+            || getPermissionState("location") != PermissionState.GRANTED) {
+            call.reject("Classic Bluetooth discovery needs Nearby Devices and Location permission on this Android version. Allow precise location for BlueGuardian in Android Settings; this feature does not collect GPS coordinates.");
             return;
         }
         startClassicDiscoveryAfterPermissions(call);
@@ -345,8 +348,6 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         activeClassicDurationMs = requestedDuration == null
             ? DEFAULT_SCAN_DURATION_MS
             : Math.max(MIN_SCAN_DURATION_MS, Math.min(MAX_SCAN_DURATION_MS, requestedDuration));
-        activeClassicAdapter = adapter;
-
         IntentFilter filter = new IntentFilter();
         filter.addAction(BluetoothDevice.ACTION_FOUND);
         filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
@@ -410,6 +411,9 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 }
 
                 if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+                    // The system session has ended; cleanup must not cancel a new
+                    // discovery session that another app might start immediately after it.
+                    classicDiscoveryOwned = false;
                     stopClassicDiscoveryInternal(true);
                 }
             }
@@ -429,13 +433,29 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         }
 
         try {
-            if (adapter.isDiscovering()) adapter.cancelDiscovery();
-            boolean started = adapter.startDiscovery();
-            if (!started) {
+            // Android shares one adapter-wide classic inquiry session. If another
+            // app starts discovery after our first check, do not cancel its session.
+            if (adapter.isDiscovering()) {
                 stopClassicDiscoveryInternal(false);
-                call.reject("Android could not start classic Bluetooth discovery. Wait briefly and try again.");
+                call.reject("Another classic Bluetooth discovery session became active. Wait briefly and try again.");
                 return;
             }
+            boolean started = adapter.startDiscovery();
+            if (!started) {
+                int adapterState = adapter.getState();
+                boolean anotherDiscoveryActive = adapter.isDiscovering();
+                stopClassicDiscoveryInternal(false);
+                if (adapterState != BluetoothAdapter.STATE_ON) {
+                    call.reject("Bluetooth is not fully ready. Turn Bluetooth on, wait a few seconds, and retry classic discovery.");
+                } else if (anotherDiscoveryActive) {
+                    call.reject("Another classic Bluetooth discovery session is active. Wait briefly and retry.");
+                } else {
+                    call.reject("Android's Bluetooth service rejected classic discovery. Confirm Nearby Devices and Location permissions are granted, then wait briefly and retry.");
+                }
+                return;
+            }
+            activeClassicAdapter = adapter;
+            classicDiscoveryOwned = true;
         } catch (SecurityException error) {
             stopClassicDiscoveryInternal(false);
             call.reject("Android denied classic Bluetooth discovery. Check Nearby Devices permission.");
@@ -476,9 +496,11 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             stopClassicRunnable = null;
         }
 
+        boolean ownsDiscovery = classicDiscoveryOwned;
+        classicDiscoveryOwned = false;
         BluetoothAdapter adapter = activeClassicAdapter;
         activeClassicAdapter = null;
-        if (adapter != null) {
+        if (adapter != null && ownsDiscovery) {
             try {
                 if (adapter.isDiscovering()) adapter.cancelDiscovery();
             } catch (RuntimeException ignored) {
