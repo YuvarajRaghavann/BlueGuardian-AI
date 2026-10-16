@@ -594,7 +594,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       isKnown: paired,
       services: [],
       discoverySource: 'REAL',
-      discoveryTransport: 'CLASSIC',
+      discoveryTransport: observation.transport,
       paired,
       gattConnected: false,
       connectionHealth: 'UNAVAILABLE',
