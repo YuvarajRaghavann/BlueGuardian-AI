@@ -637,7 +637,7 @@ export function Dashboard() {
               <div className="flex items-center justify-between">
                 <span className="text-xs text-[var(--text-muted)]">Model</span>
                 <span className="max-w-[180px] text-right text-xs font-medium text-white">
-                  BlueGuardian Development Classifier
+                  {modelMetadata.name}
                 </span>
               </div>
 
