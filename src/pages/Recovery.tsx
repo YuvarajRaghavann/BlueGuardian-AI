@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
+import { setOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
 
 function formatDate(value?: string | null) {
@@ -38,6 +39,9 @@ export function Recovery() {
     setNotice(null);
     try {
       const loadedDevices = await api.recovery.listDevices(token);
+      // Only publish the credential to the rest of the app after a protected
+      // owner request succeeds. The session helper holds it in memory only.
+      setOwnerToken(token);
       setDevices(loadedDevices);
       setDevicesLoaded(true);
       if (selectedDevice) {
@@ -228,6 +232,9 @@ export function Recovery() {
             value={ownerToken}
             disabled={busy}
             onChange={event => {
+              // Do not keep using a previously authenticated owner token after
+              // the user starts entering a different credential.
+              setOwnerToken(null);
               setOwnerToken(event.target.value);
               setDevices([]);
               setDevicesLoaded(false);
@@ -242,7 +249,7 @@ export function Recovery() {
           />
         </label>
         <p id="recovery-auth-note" className="mt-2 text-xs text-[var(--text-muted)]">
-          The token is held only in this page's memory and is never written to browser storage. The current backend token is a development integration, not production identity management.
+          The token is kept in application memory only and is not written to browser storage. After a successful owner request it enables owner-scoped device, threat, and action synchronization until the app is reloaded or the token is cleared. The current static backend token is a development integration, not production identity management.
         </p>
         <button
           type="button"
