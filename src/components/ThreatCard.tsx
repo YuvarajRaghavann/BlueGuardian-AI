@@ -13,6 +13,7 @@ import {
   UserX,
   Brain,
   Clock3,
+  Radio,
 } from 'lucide-react';
 
 const categoryIcons: Record<ThreatCategory, typeof AlertCircle> = {
@@ -26,6 +27,7 @@ const categoryIcons: Record<ThreatCategory, typeof AlertCircle> = {
   UNSTABLE_CONNECTION: WifiOff,
   BLOCKED_DEVICE: UserX,
   SPOOFING_SUSPECTED: WifiOff,
+  BLE_ADVERTISING_FLOOD: Radio,
   OTHER: AlertCircle,
 };
 
