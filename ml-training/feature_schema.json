@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "1.0",
+  "features": [
+    "normalizedTrustScore",
+    "normalizedRSSI",
+    "knownFlag",
+    "trustedFlag",
+    "explicitlyBlockedFlag",
+    "serviceCountNorm",
+    "independentSecurityIndicatorCountNorm",
+    "suspiciousNameFlag",
+    "connectionStatusFlag",
+    "deviceTypeRisk",
+    "discoverySourceFlag"
+  ],
+  "labelColumn": "label",
+  "groupingColumn": "device_group",
+  "requiredColumns": [
+    "device_group",
+    "label",
+    "normalizedTrustScore",
+    "normalizedRSSI",
+    "knownFlag",
+    "trustedFlag",
+    "explicitlyBlockedFlag",
+    "serviceCountNorm",
+    "independentSecurityIndicatorCountNorm",
+    "suspiciousNameFlag",
+    "connectionStatusFlag",
+    "deviceTypeRisk",
+    "discoverySourceFlag"
+  ]
+}
