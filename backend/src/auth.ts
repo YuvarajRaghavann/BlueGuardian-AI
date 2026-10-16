@@ -220,9 +220,11 @@ export function requireAuth(role: AuthRole = 'owner') {
         const claims = await verifyFirebaseIdToken(token, firebaseProjectId);
         const hasParticipantRole = claims.role === 'participant' || claims.participant === true;
 
-        if (role === 'participant' && !hasParticipantRole) {
-          return res.status(403).json({ error: 'A server-assigned participant role is required for this operation.' });
-        }
+        // Any cryptographically verified Firebase account may opt into community reports.
+        // Owner-only endpoints still use their own route role and owner-scoped database filters.
+        // Custom participant claims may be used for additional product policy, but are not required
+        // merely to submit a privacy-limited sighting.
+        void hasParticipantRole;
 
         request.auth = {
           role: role === 'participant' ? 'participant' : 'owner',

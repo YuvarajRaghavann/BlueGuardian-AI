@@ -70,6 +70,7 @@ router.post('/devices', requireAuth('owner'), asyncHandler(async (req, res) => {
     existing.deviceId = registration.deviceId ?? existing.deviceId;
     existing.discoverySource = registration.discoverySource ?? existing.discoverySource;
     existing.recoveryEnabled = true;
+    if (registration.recoveryFingerprintHash) existing.recoveryFingerprintHash = registration.recoveryFingerprintHash;
     existing.recoveryState = normalizeRecoveryState(registration.recoveryState ?? existing.recoveryState ?? 'lost');
     existing.lastSeen = new Date();
     await existing.save();
@@ -85,6 +86,7 @@ router.post('/devices', requireAuth('owner'), asyncHandler(async (req, res) => {
     recoveryEnabled: true,
     discoverySource: registration.discoverySource ?? 'REAL',
     recoveryState: normalizeRecoveryState(registration.recoveryState),
+    recoveryFingerprintHash: registration.recoveryFingerprintHash,
     registeredAt: new Date(),
     firstSeen: new Date(),
     lastSeen: new Date(),
@@ -199,6 +201,91 @@ router.post('/devices/:deviceId/encounters', requireAuth('owner'), rateLimit, as
   const publicEncounter = encounter.toObject();
   delete publicEncounter.ownerId;
   return res.status(201).json(publicEncounter);
+}));
+
+
+// Community sighting intake. Participants submit only a canonical BLE fingerprint;
+// the API never reveals which owner's case matched. Location is optional and explicit.
+router.post('/community/sightings', requireAuth('participant'), rateLimit, asyncHandler(async (req, res) => {
+  const observations = req.body?.observations;
+  const shareLocation = req.body?.shareLocation === true;
+  const location = req.body?.location;
+  if (!Array.isArray(observations) || observations.length < 1 || observations.length > 30) {
+    throw new RecoveryValidationError('Submit between 1 and 30 nearby BLE observations.');
+  }
+  if (req.body?.shareLocation !== undefined && typeof req.body.shareLocation !== 'boolean') {
+    throw new RecoveryValidationError('shareLocation must be a boolean.');
+  }
+  if (location !== undefined && !shareLocation) {
+    throw new RecoveryValidationError('Location cannot be submitted unless the participant explicitly opts in.');
+  }
+  const locationPayload = location === undefined ? undefined : validateEncounterInput({
+    deviceId: 'community-observation',
+    source: 'REAL',
+    simulated: false,
+    isTestFixture: false,
+    location,
+  }).location;
+
+  const fingerprintHashes = new Set<string>();
+  for (const observation of observations) {
+    const registration = validateRegistrationInput({
+      deviceName: typeof observation?.name === 'string' ? observation.name : '',
+      deviceIdentifier: 'community-observation',
+      recoveryFingerprint: {
+        name: observation?.name,
+        serviceUuids: observation?.serviceUuids,
+      },
+      discoverySource: 'REAL',
+    });
+    if (registration.recoveryFingerprintHash) fingerprintHashes.add(registration.recoveryFingerprintHash);
+  }
+
+  const timeBucket = Math.floor(Date.now() / 60_000);
+  let recordedReports = 0;
+  for (const fingerprintHash of fingerprintHashes) {
+    const matches = await Device.find({
+      recoveryEnabled: true,
+      recoveryState: { $in: ['lost', 'searching'] },
+      recoveryFingerprintHash: fingerprintHash,
+    }).limit(5);
+    for (const device of matches) {
+      if (!device.ownerId || !device.deviceId) continue;
+      const deduplicationKey = createHash('sha256')
+        .update(JSON.stringify({ ownerId: device.ownerId, deviceId: device.deviceId, fingerprintHash, timeBucket }))
+        .digest('hex');
+      const existing = await RecoveryEncounter.findOne({
+        ownerId: device.ownerId, deviceId: device.deviceId, deduplicationKey,
+      });
+      if (existing) continue;
+      const encounter = new RecoveryEncounter({
+        deviceId: device.deviceId,
+        ownerId: device.ownerId,
+        deduplicationKey,
+        source: 'REAL',
+        confidence: 0.45,
+        location: locationPayload,
+        description: 'Community BLE fingerprint candidate. This is an unverified lead; confirm the device before marking it found.',
+        simulated: false,
+        isTestFixture: false,
+        observedAt: new Date(),
+      });
+      try {
+        await encounter.save();
+      } catch (error) {
+        if ((error as { code?: number })?.code === 11000) continue;
+        throw error;
+      }
+      if (device.recoveryState === 'lost') {
+        device.recoveryState = 'searching';
+        await device.save();
+      }
+      recordedReports += 1;
+    }
+  }
+
+  // Do not reveal whether any owner/device matched, or return device IDs.
+  return res.status(202).json({ accepted: true, observationsReceived: fingerprintHashes.size, reportsRecorded: recordedReports });
 }));
 
 export default router;

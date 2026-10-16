@@ -137,6 +137,55 @@ describe('recovery API integration', () => {
   });
 
   const ownerHeaders = { Authorization: 'Bearer blueguardian-owner-token' };
+
+  it('accepts a community BLE candidate without exposing matching owner or device identity', async () => {
+    const { createHash } = await import('node:crypto');
+    const fingerprintHash = createHash('sha256')
+      .update(JSON.stringify({ name: 'owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }))
+      .digest('hex');
+    store.devices.push({
+      deviceId: 'owner-lost-device',
+      deviceIdentifier: 'private-address',
+      ownerId: 'test-owner',
+      name: 'Owner earbuds',
+      discoverySource: 'REAL',
+      recoveryEnabled: true,
+      recoveryState: 'lost',
+      recoveryFingerprintHash: fingerprintHash,
+    });
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ observations: [{ name: 'Owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }], shareLocation: false }),
+    });
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body).toMatchObject({ accepted: true, observationsReceived: 1, reportsRecorded: 1 });
+    expect(JSON.stringify(body)).not.toContain('owner-lost-device');
+    expect(store.encounters[0]).toMatchObject({
+      deviceId: 'owner-lost-device',
+      ownerId: 'test-owner',
+      source: 'REAL',
+      simulated: false,
+      confidence: 0.45,
+    });
+    expect(store.encounters[0].location).toBeUndefined();
+    expect(store.devices[0].recoveryState).toBe('searching');
+  });
+
+  it('rejects community reports that try to attach a location without opt-in', async () => {
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        observations: [{ name: 'Owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }],
+        shareLocation: false,
+        location: { lat: 12.9, lng: 80.2 },
+      }),
+    });
+    expect(response.status).toBe(400);
+  });
+
   it('persists registrations, ignores client owner IDs, and returns owner-authorized records', async () => {
     const registration = await fetch(`${origin}/api/recovery/devices`, {
       method: 'POST',

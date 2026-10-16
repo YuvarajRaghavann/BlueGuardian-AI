@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 export type RecoveryStatus = 'lost' | 'searching' | 'found' | 'recovered';
 
 export interface RegistrationInput {
@@ -8,6 +9,7 @@ export interface RegistrationInput {
   discoverySource?: 'REAL' | 'SIMULATED';
   recoveryState?: RecoveryStatus | string;
   status?: RecoveryStatus | string;
+  recoveryFingerprintHash?: string;
 }
 
 export interface EncounterInput {
@@ -50,6 +52,27 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
     throw new RecoveryValidationError('Device identifier must not exceed 256 characters.');
   }
 
+  const recoveryFingerprint = payload.recoveryFingerprint as { name?: unknown; serviceUuids?: unknown } | undefined;
+  let recoveryFingerprintHash: string | undefined;
+  if (recoveryFingerprint !== undefined) {
+    if (!recoveryFingerprint || typeof recoveryFingerprint !== 'object' || Array.isArray(recoveryFingerprint)) {
+      throw new RecoveryValidationError('Recovery fingerprint must contain an advertised name and service UUID list.');
+    }
+    const fingerprintName = typeof recoveryFingerprint.name === 'string'
+      ? recoveryFingerprint.name.normalize('NFKC').replace(/\\s+/g, ' ').trim().toLowerCase()
+      : '';
+    const rawUuids = recoveryFingerprint.serviceUuids;
+    if (!fingerprintName || fingerprintName.length > 96 || !Array.isArray(rawUuids) ||
+      rawUuids.length === 0 || rawUuids.length > 32 ||
+      rawUuids.some((uuid) => typeof uuid !== 'string' || uuid.trim().length === 0 || uuid.length > 128)) {
+      throw new RecoveryValidationError('Community recovery needs an advertised device name and at least one valid BLE service UUID.');
+    }
+    const serviceUuids = [...new Set((rawUuids as string[]).map(uuid => uuid.trim().toLowerCase()))].sort();
+    recoveryFingerprintHash = createHash('sha256')
+      .update(JSON.stringify({ name: fingerprintName, serviceUuids }))
+      .digest('hex');
+  }
+
   const requestedState = payload.recoveryState ?? payload.status;
   if (requestedState !== undefined && requestedState !== 'lost' && requestedState !== 'searching' && requestedState !== 'found' && requestedState !== 'recovered') {
     throw new RecoveryValidationError('Recovery state must be lost, searching, found, or recovered.');
@@ -73,6 +96,7 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
     type,
     discoverySource,
     recoveryState,
+    recoveryFingerprintHash,
   };
 }
 
