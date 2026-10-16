@@ -194,8 +194,8 @@ function fromApiThreat(record: Record<string, any>, devices: BluetoothDevice[] =
   const prediction = record.mlClassification || record.mlConfidence !== undefined ? {
     label: mlLabel,
     confidence,
-    modelName: String(record.modelName ?? 'BlueGuardian Development Classifier'),
-    modelVersion: String(record.modelVersion ?? '0.1.0-demo'),
+    modelName: String(record.modelName ?? 'Legacy development assessment'),
+    modelVersion: String(record.modelVersion ?? 'unknown'),
     predictedAt: safeTimestamp,
     featuresUsed: [] as string[],
     explanation: reasons.find(reason => reason.code === 'ML_CLASSIFICATION')?.message ?? 'Development classifier output from the backend assessment service.',
@@ -225,6 +225,70 @@ function fromApiThreat(record: Record<string, any>, devices: BluetoothDevice[] =
   };
 }
 
+export interface ThreatSnapshot {
+  /** Latest assessment IDs received from the owner-scoped backend, including benign devices. */
+  assessedDeviceIds: string[];
+  /** Only actionable current alerts, never benign assessments treated as threats. */
+  threats: Threat[];
+}
+
+function isActionableAssessment(record: Record<string, any>): boolean {
+  const scoreValue = Number(record.finalThreatScore ?? record.threatScore ?? record.score ?? 0);
+  const score = Number.isFinite(scoreValue) ? scoreValue : 0;
+  const reasons: Array<Record<string, unknown>> = Array.isArray(record.reasons)
+    ? record.reasons.filter((reason: unknown): reason is Record<string, unknown> => Boolean(reason) && typeof reason === 'object')
+    : [];
+  const codes = new Set(reasons.map(reason => String(reason.code ?? '')));
+  const explicitlyBlocked = codes.has('BLOCKED_DEVICE');
+  const corroboratedSuspicion = score >= 35
+    && codes.has('SUSPICIOUS_NAME')
+    && codes.has('UNSTABLE_CONNECTION');
+
+  return score >= 50 || explicitlyBlocked || corroboratedSuspicion;
+}
+
+/**
+ * Backend assessment rows are not synonymous with threats: the backend stores
+ * every model evaluation, including BENIGN/low-score results. Select the newest
+ * assessment per device first, then surface it only when there is actionable
+ * evidence. Otherwise an old high-risk row can outlive a newer clean assessment.
+ */
+async function fetchThreatSnapshot(
+  token: string,
+  devices: BluetoothDevice[] = [],
+): Promise<ThreatSnapshot> {
+  const response = await apiFetch(`${BASE()}/threats`, {
+    headers: recoveryHeaders(token),
+  });
+  const records = await json<Record<string, any>[]>(response);
+  const sorted = [...records].sort((left, right) => {
+    const time = (record: Record<string, any>) => {
+      const parsed = new Date(record.timestamp ?? record.detectedAt ?? 0).getTime();
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    return time(right) - time(left);
+  });
+
+  const latestByDevice = new Map<string, Record<string, any>>();
+  for (const record of sorted) {
+    const deviceId = String(record.deviceId ?? record.id ?? '').trim();
+    if (deviceId && !latestByDevice.has(deviceId)) {
+      latestByDevice.set(deviceId, record);
+    }
+  }
+
+  const latestRecords = Array.from(latestByDevice.values());
+  const threats = latestRecords
+    .filter(isActionableAssessment)
+    .map(record => fromApiThreat(record, devices))
+    .sort((left, right) => right.detectedAt.getTime() - left.detectedAt.getTime());
+
+  return {
+    assessedDeviceIds: latestRecords.map(record => String(record.deviceId ?? record.id)),
+    threats,
+  };
+}
+
 export interface PostSecurityActionPayload {
   deviceId: string;
   deviceName?: string;
@@ -244,16 +308,10 @@ export const api = {
   createDevice: (token: string, device: BluetoothDevice) => apiFetch(`${BASE()}/devices`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(toApiDevice(device)) }).then(json<Record<string, any>>).then(fromApiDevice),
   updateDevice: (token: string, id: string, patch: Partial<BluetoothDevice>) => apiFetch(`${BASE()}/devices/${encodeURIComponent(id)}`, { method: 'PATCH', headers: recoveryHeaders(token, true), body: JSON.stringify(patch) }).then(json<Record<string, any>>).then(fromApiDevice),
   assessDevice: (token: string, id: string) => apiFetch(`${BASE()}/devices/${encodeURIComponent(id)}/assess`, { method: 'POST', headers: recoveryHeaders(token) }).then(json<Record<string, any>>),
-  listThreats: (token: string, devices: BluetoothDevice[] = []) => apiFetch(`${BASE()}/threats`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => {
-    const latestByDeviceCategory = new Map<string, Threat>();
-    for (const record of records) {
-      const mapped = fromApiThreat(record, devices);
-      const key = `${mapped.deviceId}|${mapped.category}`;
-      const existing = latestByDeviceCategory.get(key);
-      if (!existing || mapped.detectedAt.getTime() > existing.detectedAt.getTime()) latestByDeviceCategory.set(key, mapped);
-    }
-    return Array.from(latestByDeviceCategory.values()).sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime());
-  }),
+  listThreats: (token: string, devices: BluetoothDevice[] = []) =>
+    fetchThreatSnapshot(token, devices).then(snapshot => snapshot.threats),
+  getThreatSnapshot: (token: string, devices: BluetoothDevice[] = []) =>
+    fetchThreatSnapshot(token, devices),
   listActions: (token: string) => apiFetch(`${BASE()}/actions`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>).then(records => records.map(fromApiAction)),
   postAction: (token: string, payload: PostSecurityActionPayload) => apiFetch(`${BASE()}/actions`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(payload) }).then(json<{ action: Record<string, any> }>).then(result => fromApiAction(result.action)),
   listEvents: (token: string) => apiFetch(`${BASE()}/events`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>),
