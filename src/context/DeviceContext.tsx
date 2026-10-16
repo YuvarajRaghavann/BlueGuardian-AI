@@ -8,7 +8,7 @@ import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
-import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeClassicObservation } from '../services/nativeBluetoothService';
+import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -117,6 +117,18 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
       const shouldRefreshConnection = incoming.discoverySource === 'REAL';
       if (!shouldUpgradeName && !shouldRefreshConnection) return state;
 
+      const existingTransports = existing.discoveryTransports ?? (
+        existing.discoveryTransport === 'BLE' || existing.discoveryTransport === 'CLASSIC'
+          ? [existing.discoveryTransport]
+          : []
+      );
+      const incomingTransports = incoming.discoveryTransports ?? (
+        incoming.discoveryTransport === 'BLE' || incoming.discoveryTransport === 'CLASSIC'
+          ? [incoming.discoveryTransport]
+          : []
+      );
+      const mergedTransports = Array.from(new Set([...existingTransports, ...incomingTransports]));
+
       const refreshed = applySecurityPolicy({
         ...existing,
         ...(shouldUpgradeName ? { name: incoming.name } : {}),
@@ -124,6 +136,7 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
         manufacturer: existing.manufacturer ?? incoming.manufacturer,
         services: incoming.services.length > 0 ? incoming.services : existing.services,
         discoveryTransport: incoming.discoveryTransport ?? existing.discoveryTransport,
+        discoveryTransports: mergedTransports.length > 0 ? mergedTransports : existing.discoveryTransports,
         paired: incoming.paired ?? existing.paired,
         rssi: typeof incoming.rssi === 'number' ? incoming.rssi : existing.rssi,
         lastSeen: incoming.lastSeen,
@@ -222,6 +235,8 @@ const DeviceContext = createContext<{
   scanRealDevices: (pickerMode?: BluetoothPickerMode) => Promise<void>;
   /** Runs native Android classic discovery as a separate foreground scan. */
   scanClassicDevices: () => Promise<void>;
+  /** Runs BLE then classic discovery under one combined result set, deduplicated by reported address. */
+  scanCombinedDevices: () => Promise<void>;
   /** Loads system-bonded devices separately; this is not a live scan or connection. */
   loadPairedDevices: () => Promise<number>;
   addMockDevices: () => void;
@@ -612,6 +627,60 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  const registerCombinedObservation = (
+    observation: NativeBleObservation | NativeClassicObservation,
+    transport: 'BLE' | 'CLASSIC',
+  ) => {
+    const address = String(observation.address || observation.id || '').trim();
+    if (!address) return;
+
+    const observedAt = new Date(
+      typeof observation.observedAt === 'number' ? observation.observedAt : Date.now(),
+    );
+    const deviceName = resolveBluetoothDisplayName(observation.name);
+    const serviceUuids = transport === 'BLE' && 'serviceUuids' in observation && Array.isArray(observation.serviceUuids)
+      ? observation.serviceUuids
+      : [];
+    const services: BluetoothDevice['services'] = serviceUuids.map((uuid) => ({
+      uuid,
+      characteristics: [],
+    }));
+    const paired = transport === 'CLASSIC' && 'paired' in observation ? observation.paired : undefined;
+    const device: BluetoothDevice = {
+      // In a combined pass, BLE and classic reports sharing the same normalized
+      // Android address merge into one record. BLE privacy/random addresses can
+      // differ from a device's classic address, so identity is not guaranteed across radios.
+      id: 'android-combined:' + address.toLowerCase(),
+      name: deviceName,
+      type: inferDeviceType(deviceName, undefined, services),
+      address,
+      rssi: typeof observation.rssi === 'number' ? observation.rssi : undefined,
+      trusted: false,
+      trustScore: 0,
+      riskLevel: 'high',
+      connectionStatus: 'unknown',
+      firstSeen: observedAt,
+      lastSeen: observedAt,
+      isKnown: false,
+      services,
+      discoverySource: 'REAL',
+      discoveryTransport: 'COMBINED',
+      discoveryTransports: [transport],
+      paired,
+      gattConnected: false,
+      connectionHealth: 'UNAVAILABLE',
+    };
+
+    const assessment = assessDeviceSecurity(device);
+    device.trustScore = assessment.trustScore;
+    device.riskLevel = assessment.trustRiskLevel;
+    const guardedDevice = applySecurityPolicy(device);
+    dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
+    void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
+      console.warn('Combined Bluetooth observation could not be saved locally.', error);
+    });
+  };
+
   const scanClassicDevices = async (): Promise<void> => {
     if (!isNativeAndroidApp()) {
       dispatch({
@@ -664,6 +733,123 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       const message = error instanceof Error ? error.message : 'Classic Bluetooth discovery failed.';
       console.error('[BlueGuardian][Classic] Discovery pipeline failed.', { stage: diagnosticStage, message }, error);
       dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', source: 'REAL', transport: 'ANDROID_CLASSIC_SCAN', error: message } });
+    } finally {
+      clearInterval(interval);
+    }
+  };
+
+  const scanCombinedDevices = async (): Promise<void> => {
+    if (!isNativeAndroidApp()) {
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: {
+          state: 'unsupported',
+          source: 'REAL',
+          transport: 'ANDROID_COMBINED_SCAN',
+          error: 'Combined BLE and classic discovery is only available inside the BlueGuardian Android APK.',
+        },
+      });
+      return;
+    }
+
+    const startedAt = Date.now();
+    const observedIdentities = new Set<string>();
+    const messages: string[] = [];
+    let bleError: string | undefined;
+    let classicError: string | undefined;
+
+    dispatch({
+      type: 'SET_SCAN_STATE',
+      payload: {
+        state: 'scanning',
+        elapsedMs: 0,
+        devicesFound: 0,
+        source: 'REAL',
+        transport: 'ANDROID_COMBINED_SCAN',
+        scanStage: 'BLE',
+        error: undefined,
+      },
+    });
+
+    const interval = setInterval(() => {
+      dispatch({ type: 'SET_SCAN_STATE', payload: { elapsedMs: Date.now() - startedAt } });
+    }, 200);
+
+    try {
+      // The transports are intentionally sequential, not simultaneous. This avoids
+      // competing Android runtime-permission prompts and adapter discovery sessions
+      // while still presenting a single combined action and deduplicated results.
+      try {
+        const bleResult = await scanNativeAndroidBle((observation) => {
+          const identity = String(observation.address || observation.id || '').trim().toLowerCase();
+          if (identity) observedIdentities.add(identity);
+          registerCombinedObservation(observation, 'BLE');
+        }, 9000);
+
+        if (bleResult.ok === false) {
+          bleError = bleResult.error;
+        } else if (bleResult.devicesFound === 0 && bleResult.message) {
+          messages.push('BLE: ' + bleResult.message);
+        }
+      } catch (error: unknown) {
+        bleError = error instanceof Error ? error.message : 'Unknown BLE discovery error.';
+      }
+
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: { state: 'scanning', transport: 'ANDROID_COMBINED_SCAN', scanStage: 'CLASSIC' },
+      });
+
+      try {
+        const classicResult = await scanNativeAndroidClassic((observation) => {
+          const identity = String(observation.address || observation.id || '').trim().toLowerCase();
+          if (identity) observedIdentities.add(identity);
+          registerCombinedObservation(observation, 'CLASSIC');
+        }, 9000);
+
+        if (classicResult.ok === false) {
+          classicError = classicResult.error;
+        } else if (classicResult.devicesFound === 0 && classicResult.message) {
+          messages.push('Classic: ' + classicResult.message);
+        }
+      } catch (error: unknown) {
+        classicError = error instanceof Error ? error.message : 'Unknown classic discovery error.';
+      }
+
+      if (bleError) messages.push('BLE scan failed: ' + bleError);
+      if (classicError) messages.push('Classic scan failed: ' + classicError);
+      const bothFailed = Boolean(bleError && classicError);
+      const permissionFailure = bothFailed && /permission|denied|not allowed/i.test(bleError + ' ' + classicError);
+
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: {
+          state: bothFailed ? (permissionFailure ? 'permission-denied' : 'error') : 'complete',
+          source: 'REAL',
+          transport: 'ANDROID_COMBINED_SCAN',
+          scanStage: undefined,
+          devicesFound: observedIdentities.size,
+          error: messages.length > 0
+            ? messages.join(' ')
+            : observedIdentities.size === 0
+              ? 'Combined scan completed, but Android reported no BLE advertisements or discoverable classic devices.'
+              : undefined,
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Combined Bluetooth discovery failed.';
+      console.error('[BlueGuardian][Combined] Discovery pipeline failed.', message, error);
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: {
+          state: 'error',
+          source: 'REAL',
+          transport: 'ANDROID_COMBINED_SCAN',
+          scanStage: undefined,
+          devicesFound: observedIdentities.size,
+          error: message,
+        },
+      });
     } finally {
       clearInterval(interval);
     }
@@ -809,7 +995,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, scanClassicDevices, loadPairedDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, backendReady }}>
+    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, scanClassicDevices, scanCombinedDevices, loadPairedDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, backendReady }}>
       {children}
     </DeviceContext.Provider>
   );
