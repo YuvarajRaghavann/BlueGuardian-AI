@@ -32,7 +32,7 @@ export function NativeCombinedResultsModal({
       ? 'Searching nearby devices… ' + devices.length + ' found so far'
       : 'Searching nearby devices… ' + devices.length + ' found so far'
     : failed
-      ? scan.error || 'Combined Bluetooth discovery failed.'
+      ? scan.error || 'Device search failed.'
       : devices.length > 0
         ? 'Found ' + devices.length + ' device(s). Select one to view details.'
         : scan.error || 'No devices found. Keep Bluetooth on and try again.';
@@ -142,7 +142,7 @@ export function NativeCombinedResultsModal({
               <p className="text-sm font-medium text-[var(--text)]">
                 {scanning
                   ? scan.scanStage === 'CLASSIC' ? 'Waiting for discoverable classic devices' : 'Waiting for BLE advertisements'
-                  : failed ? 'Combined scan did not complete' : 'No devices found in this scan'}
+                  : failed ? 'Search did not complete' : 'No devices found in this scan'}
               </p>
               <p className="max-w-md text-xs leading-5 text-[var(--text-muted)]">
                 {scanning
