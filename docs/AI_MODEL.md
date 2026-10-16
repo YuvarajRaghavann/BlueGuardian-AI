@@ -69,7 +69,7 @@ All concrete models implement this interface, allowing drop‑in replacement.
 ## 4. Evidence-Based Development Heuristic (src/ml/developmentModel.ts)
 
 * **Name**: BlueGuardian Evidence Heuristic
-* **Version**: 0.2.0-heuristic
+* **Version**: 0.3.0-heuristic
 * **Status**: Development baseline
 
 The hash-based pseudo-random class picker has been removed. The baseline makes a deterministic, explainable decision from explicit evidence such as an suspicious advertised name or corroborating independent indicators; an owner block is policy state, not attack evidence. A new/unknown device is unverified, not malicious solely because manufacturer/type/history is missing. The model returns `INSUFFICIENT_EVIDENCE` when no positive signal is strong enough to support a benign or threat label. One RSSI sample is not treated as spoofing evidence. This remains a rules-based heuristic, **not a trained statistical model**. Its displayed confidence is evidence strength, not a calibrated probability or measured accuracy.
@@ -78,12 +78,13 @@ The hash-based pseudo-random class picker has been removed. The baseline makes a
 
 | Class | Meaning |
 |-------|---------|
-| BENIGN | No strong positive threat evidence in this observation; unknown devices may still require manual approval |
+| INSUFFICIENT_EVIDENCE | The observation is not strong enough to verify benignity or support a threat label; keep approval controls in place |
+| BENIGN | The device is known and explicitly trusted, with no independent threat indicator in the supplied features |
 | SUSPICIOUS | An advertised name contains a suspicious term; not proof of an attack |
 | POTENTIAL_SPOOFING | Reserved class; a single RSSI snapshot is not sufficient to assert spoofing |
 | POTENTIAL_UNAUTHORIZED_ACCESS | Multiple independent indicators support additional review |
 | ANOMALOUS_BEHAVIOR | Reserved for stronger behavioral/temporal evidence |
-| HIGH_RISK_DEVICE | Explicitly blocked device or other corroborated high-risk evidence |
+| HIGH_RISK_DEVICE | Reserved for corroborated high-risk evidence; an owner block alone does not trigger this class |
 
 ---
 
