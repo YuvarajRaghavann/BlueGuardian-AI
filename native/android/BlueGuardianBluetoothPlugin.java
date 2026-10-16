@@ -720,8 +720,8 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             if (count != null && count > maxAddressCount) maxAddressCount = count;
         }
         double observations = (double) bleWindowObservationCount;
-        double addressed = Math.max(1.0, (double) bleWindowAddressCounts.values().stream()
-            .mapToInt(value -> value == null ? 0 : value).sum());
+        // emitObservation() rejects empty addresses, so every counted observation is address-bearing.
+        double addressed = Math.max(1.0, observations);
         double meanRssi = bleWindowRssiCount > 0L ? bleWindowRssiSum / bleWindowRssiCount : -100.0;
         double variance = bleWindowRssiCount > 0L
             ? (bleWindowRssiSumSquares / bleWindowRssiCount) - (meanRssi * meanRssi)
