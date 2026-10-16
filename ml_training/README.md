@@ -6,13 +6,14 @@ This pipeline is the first real-data ML track for BlueGuardian: **benign BLE adv
 
 The current 11-feature BlueGuardian Development Heuristic describes a single device snapshot. Packet-flood detection needs temporal observations. This pipeline uses a 5-second window feature schema that can be extracted from PCAP captures and calculated on Android from native scan observations:
 
-1. `packet_count`: advertisement packets/events observed in the window.
-2. `packets_per_second`: observed packets divided by the actual window duration.
+1. `observation_count`: advertising reports/packets recorded in the window.
+2. `observations_per_second`: reports divided by the actual window duration.
 3. `unique_addresses`: distinct advertiser addresses in the window.
 4. `unique_address_fraction`: distinct addresses divided by address-bearing observations.
 5. `max_address_fraction`: highest per-address observation count divided by address-bearing observations.
 6. `rssi_mean`: mean RSSI when present; missing values are imputed from training data.
 7. `rssi_std`: RSSI standard deviation when at least two RSSI observations exist; missing values are imputed from training data.
+8. `rssi_observation_fraction`: fraction of reports that include a usable RSSI value.
 
 **Important telemetry difference:** a phone's Android BLE scanner does not necessarily report every over-the-air packet. Training PCAP windows and Android feature windows must use comparable collection conditions; the model is not eligible for deployment merely because the training script succeeds.
 
@@ -46,7 +47,7 @@ python ml_training/extract_pcap_windows.py \
   --window-seconds 5
 ```
 
-The extractor skips non-advertising packets and writes one aggregate row per non-empty time window. It does not infer labels from a filename; the manifest is the explicit source of ground truth.
+The extractor skips non-advertising packets and writes one aggregate row per non-empty time window. Android feature windows are based on scanner callbacks, not guaranteed raw radio packets; this parity limitation must be checked before model promotion. It does not infer labels from a filename; the manifest is the explicit source of ground truth.
 
 ## Train and evaluate
 
