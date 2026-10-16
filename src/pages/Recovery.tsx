@@ -660,7 +660,7 @@ export function Recovery() {
           {selectedBluetoothDevice && (
             <div className="mt-4 space-y-3">
               <p className="break-all text-xs text-[var(--text-muted)]">
-                Selected: {selectedBluetoothDevice.name ?? 'Unnamed Bluetooth device'} · {selectedBluetoothDevice.source === 'native' ? `Native Android ${selectedBluetoothDevice.transport ?? 'Bluetooth'} address` : 'Browser-scoped identifier'} · {selectedBluetoothDevice.address || selectedBluetoothDevice.id}
+                Selected: {selectedBluetoothDevice.name ?? 'Unnamed Bluetooth device'} · {selectedBluetoothDevice.address || selectedBluetoothDevice.id}
               </p>
               <label className="block text-sm text-[var(--text-secondary)]">
                 Display name
@@ -711,7 +711,7 @@ export function Recovery() {
                     className={`w-full rounded-lg border p-3 text-left ${selectedDevice?.deviceId === device.deviceId ? 'border-[var(--accent)]' : 'border-[var(--border)]'}`}
                   >
                     <span className="block text-sm font-medium text-[var(--text)]">{device.name}</span>
-                    <span className="mt-1 block text-xs text-[var(--text-muted)]">{device.recoveryState} · {device.discoverySource}</span>
+                    <span className="mt-1 block text-xs text-[var(--text-muted)]">{device.recoveryState} · {device.discoverySource === 'REAL' ? 'Device record' : 'Sample'}</span>
                   </button>
                 </li>
               ))}
@@ -723,15 +723,15 @@ export function Recovery() {
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
         <div className="flex items-center gap-2">
           <Bluetooth className="h-4 w-4 text-[var(--accent)]" />
-          <h2 className="text-lg font-semibold text-[var(--text)]">Community recovery scan</h2>
+          <h2 className="text-lg font-semibold text-[var(--text)]">Help find lost devices</h2>
         </div>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
-          Help owners by scanning nearby BLE advertisements while this screen is open. BlueGuardian sends only advertised names and service UUIDs needed for candidate matching, not Bluetooth MAC addresses. A match is stored as an unverified lead and never marks a device recovered automatically. Background scanning is not supported.
+          Join an optional community search to help owners receive nearby-device sightings. Matches are private leads, not confirmed recoveries. Location is shared only when you opt in, and a match never marks a device recovered automatically.
         </p>
         <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
           <input type="checkbox" checked={communityShareLocation} onChange={event => setCommunityShareLocation(event.target.checked)} disabled={busy} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
           <span>
-            <span className="block text-sm font-medium text-[var(--text)]">Share this phone's location with matched owners (optional)</span>
+            <span className="block text-sm font-medium text-[var(--text)]">Include this phone's location (optional)</span>
             <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">Location is optional. When switched off, sightings are sent without GPS coordinates.</span>
           </span>
         </label>
