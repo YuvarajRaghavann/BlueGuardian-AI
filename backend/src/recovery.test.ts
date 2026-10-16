@@ -229,9 +229,10 @@ describeFingerprint('community recovery fingerprint validation', () => {
   });
 
   itFingerprint('allows name-only fingerprints but canonicalizes them as weak candidates', () => {
-    expectFingerprint(() => validateFingerprintRegistration({
+    const result = validateFingerprintRegistration({
       deviceName: 'Earbuds', deviceIdentifier: 'device-a',
       recoveryFingerprint: { name: 'Earbuds', serviceUuids: [] },
-    })).toMatchObject({ recoveryFingerprintHash: expectFingerprint.any(String) });
+    });
+    expectFingerprint(result.recoveryFingerprintHash).toMatch(/^[a-f0-9]{64}$/);
   });
 });
