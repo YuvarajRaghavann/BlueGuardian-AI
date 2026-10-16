@@ -72,8 +72,8 @@ export function validateAction(
 
   switch (action) {
     case 'TRUST':
-      if (device.trusted && device.isKnown) return { valid: false, reason: 'Device already trusted' };
       if (device.blocked) return { valid: false, reason: 'Unblock this device before approving it' };
+      if (device.trusted && device.isKnown && !device.approvalRequired) return { valid: false, reason: 'Device already trusted' };
       // A risk assessment may be high while review is pending. Trust approval is
       // a review decision, not a connection attempt, so only an explicit block
       // prevents recording that decision here.
