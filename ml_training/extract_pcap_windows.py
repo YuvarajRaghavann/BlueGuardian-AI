@@ -118,7 +118,9 @@ def extract_rssi(layers: list[Any]) -> float | None:
     for layer in layers:
         layer_name = type(layer).__name__.upper()
         for field, value in getattr(layer, "fields", {}).items():
-            field_name = field.lower()
+            # Scapy exposes field names such as dBm_AntSignal and dBm_AntSignal
+            # with punctuation/case varying by dissector; normalize before matching.
+            field_name = re.sub(r"[^a-z0-9]", "", field.lower())
             if field_name not in RSSI_FIELDS and not (
                 field_name == "signal" and ("RF" in layer_name or "RADIOTAP" in layer_name)
             ):
