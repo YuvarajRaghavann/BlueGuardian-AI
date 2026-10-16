@@ -64,6 +64,10 @@ export interface BluetoothDevice {
   manufacturer?: string;
   services: GattServiceInfo[];
   discoverySource: DiscoverySource;
+  /** Physical discovery transport; discovery never implies connection. */
+  discoveryTransport?: 'BLE' | 'CLASSIC';
+  /** True only when Android reports the device is bonded/paired. */
+  paired?: boolean;
   gattConnected?: boolean;
   connectionHealth?: ConnectionHealth;
   approvalRequired?: boolean;
@@ -82,7 +86,7 @@ export interface BluetoothScanState {
   /** Distinguishes genuine browser observations from generated demo records in UI status. */
   source?: DiscoverySource;
   /** Identifies the scanner implementation used for this scan. */
-  transport?: 'WEB_BLE_SELECTION' | 'ANDROID_BLE_SCAN';
+  transport?: 'WEB_BLE_SELECTION' | 'ANDROID_BLE_SCAN' | 'ANDROID_CLASSIC_SCAN' | 'ANDROID_PAIRED_DEVICES';
   error?: string;
 }
 
