@@ -39,9 +39,9 @@ export function NativeCombinedResultsModal({
 
   const transportLabel = (device: BluetoothDevice) => {
     const transports = device.discoveryTransports ?? [];
-    if (transports.includes('BLE') && transports.includes('CLASSIC')) return 'BLE + CLASSIC';
-    if (transports.includes('BLE')) return 'BLE';
-    if (transports.includes('CLASSIC')) return 'CLASSIC';
+    if (transports.includes('BLE') && transports.includes('CLASSIC')) return 'Dual signal';
+    if (transports.includes('BLE')) return 'Bluetooth';
+    if (transports.includes('CLASSIC')) return 'Nearby';
     return 'COMBINED';
   };
 
@@ -141,15 +141,15 @@ export function NativeCombinedResultsModal({
               <Bluetooth className="h-8 w-8 text-[var(--text-muted)]" />
               <p className="text-sm font-medium text-[var(--text)]">
                 {scanning
-                  ? scan.scanStage === 'CLASSIC' ? 'Waiting for discoverable classic devices' : 'Waiting for BLE advertisements'
+                  ? scan.scanStage === 'CLASSIC' ? 'Waiting for nearby devices' : 'Waiting for nearby devices'
                   : failed ? 'Search did not complete' : 'No devices found in this scan'}
               </p>
               <p className="max-w-md text-xs leading-5 text-[var(--text-muted)]">
                 {scanning
-                  ? 'Keep BlueGuardian in the foreground. BLE targets must advertise; classic targets must be discoverable during the classic scan.'
+                  ? 'Keep BlueGuardian open, bring your device nearby, and make sure Bluetooth is on.'
                   : failed
-                    ? 'Check the reported permission or Bluetooth error, fix it in Android Settings if needed, then retry.'
-                    : 'A completed empty scan is possible when no compatible devices respond. Try an actively advertising BLE device and a classic device in discoverable or pairing mode.'}
+                    ? 'Check your Bluetooth permissions in Settings, then try again.'
+                    : 'No devices responded this time. Keep Bluetooth on and make the device discoverable or in pairing mode, then search again.'}
               </p>
             </div>
           )}
