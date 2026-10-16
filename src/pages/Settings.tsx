@@ -14,12 +14,23 @@ import { getModelStatus, availableModels } from '../ml/mlService';
 import { useSecurity } from '../context/SecurityContext';
 import { api } from '../services/api';
 import { localDatabase } from '../services/localDatabase';
+import { getApiBaseConfig, setApiBaseUrl, type ApiBaseConfig } from '../services/apiBase';
 
 export function SettingsPage() {
   const modelStatus = getModelStatus();
   const models = availableModels();
   const [backendHealth, setBackendHealth] = useState<{ status: string; database: string } | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
+  const [backendCheckVersion, setBackendCheckVersion] = useState(0);
+  const [apiBaseConfig, setApiBaseConfigState] = useState<ApiBaseConfig>(() => getApiBaseConfig());
+  const [apiBaseDraft, setApiBaseDraft] = useState(() => {
+    const config = getApiBaseConfig();
+    return config.source === 'same-origin' || (config.source === 'build' && config.baseUrl.startsWith('/'))
+      ? ''
+      : config.baseUrl;
+  });
+  const [apiBaseBusy, setApiBaseBusy] = useState(false);
+  const [apiBaseMessage, setApiBaseMessage] = useState<string | null>(null);
   const [localStorageAvailable, setLocalStorageAvailable] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -38,7 +49,7 @@ export function SettingsPage() {
         }
       });
     return () => { cancelled = true; };
-  }, []);
+  }, [backendCheckVersion]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +71,47 @@ export function SettingsPage() {
       type: 'SET_POLICY',
       payload: { [key]: !policy[key] },
     });
+  };
+
+  const handleSaveApiBase = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setApiBaseBusy(true);
+    setApiBaseMessage(null);
+    try {
+      const next = setApiBaseUrl(apiBaseDraft.trim() || null);
+      setApiBaseConfigState(next);
+      setApiBaseDraft(next.source === 'same-origin' || (next.source === 'build' && next.baseUrl.startsWith('/'))
+        ? ''
+        : next.baseUrl);
+      setApiBaseMessage(next.configured
+        ? 'Backend URL saved on this device. Checking the health endpoint…'
+        : next.error || 'No remote backend URL is configured.');
+      setBackendCheckVersion((version) => version + 1);
+    } catch (error: unknown) {
+      setApiBaseMessage(error instanceof Error ? error.message : 'The backend URL could not be saved.');
+    } finally {
+      setApiBaseBusy(false);
+    }
+  };
+
+  const handleResetApiBase = () => {
+    setApiBaseBusy(true);
+    setApiBaseMessage(null);
+    try {
+      const next = setApiBaseUrl(null);
+      setApiBaseConfigState(next);
+      setApiBaseDraft(next.source === 'same-origin' || (next.source === 'build' && next.baseUrl.startsWith('/'))
+        ? ''
+        : next.baseUrl);
+      setApiBaseMessage(next.configured
+        ? 'Using the default backend configuration. Checking connectivity…'
+        : 'The Android app has no default remote endpoint. Enter your deployed HTTPS backend URL.');
+      setBackendCheckVersion((version) => version + 1);
+    } catch (error: unknown) {
+      setApiBaseMessage(error instanceof Error ? error.message : 'The backend URL could not be reset.');
+    } finally {
+      setApiBaseBusy(false);
+    }
   };
 
   const policyItems = [
@@ -148,14 +200,64 @@ export function SettingsPage() {
       </header>
 
       <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25">
+        <div className="mb-4">
+          <h2 className="text-sm font-semibold text-[var(--text)]">Backend endpoint</h2>
+          <p className="mt-1 max-w-3xl text-xs leading-5 text-[var(--text-muted)]">
+            Configure where this app sends health, device, threat, action, event and recovery API requests. The endpoint is saved on this device and is not a secret. For the Android APK, use the deployed backend’s HTTPS URL. If you omit the trailing <code>/api</code>, BlueGuardian adds it automatically.
+          </p>
+        </div>
+        <form onSubmit={handleSaveApiBase} className="space-y-3">
+          <label className="block text-sm text-[var(--text-secondary)]">
+            Backend API base URL
+            <input
+              type="url"
+              inputMode="url"
+              value={apiBaseDraft}
+              onChange={(event) => setApiBaseDraft(event.target.value)}
+              placeholder="https://your-backend.example.com/api"
+              disabled={apiBaseBusy}
+              className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              aria-describedby="backend-url-help"
+            />
+          </label>
+          <p id="backend-url-help" className="text-xs leading-5 text-[var(--text-muted)]">
+            Active endpoint: <span className="break-all font-mono">{apiBaseConfig.baseUrl || 'Not configured for this Android build'}</span>
+            {' · '}
+            {apiBaseConfig.source === 'device' ? 'Saved on this device' : apiBaseConfig.source === 'build' ? 'Build configuration' : apiBaseConfig.source === 'same-origin' ? 'Browser same-origin /api proxy' : 'Configuration required'}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="submit"
+              disabled={apiBaseBusy}
+              className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50"
+            >
+              {apiBaseBusy ? 'Saving…' : 'Save and test backend'}
+            </button>
+            <button
+              type="button"
+              onClick={handleResetApiBase}
+              disabled={apiBaseBusy}
+              className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
+            >
+              Use default
+            </button>
+          </div>
+          {apiBaseMessage && <p role="status" className="text-xs leading-5 text-[var(--text-secondary)]">{apiBaseMessage}</p>}
+          <p className="text-xs leading-5 text-[var(--text-muted)]">
+            The server must allow the Capacitor Android WebView origin <code>https://localhost</code> in <code>BLUEGUARDIAN_CORS_ORIGINS</code>. The current owner-token backend is for development only; protected APIs deliberately fail closed in production until OIDC/JWKS identity verification is configured.
+          </p>
+        </form>
+      </section>
+
+      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-[var(--text)]">Backend and database</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">Live result from the unauthenticated `/api/health` endpoint.</p>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">Live result from the configured, unauthenticated `/api/health` endpoint.</p>
           </div>
           <StatusBadge
-            label={backendError ? 'UNAVAILABLE' : backendHealth?.status.toUpperCase() ?? 'CHECKING'}
-            variant={backendError ? 'danger' : backendHealth?.status === 'ok' ? 'success' : 'warning'}
+            label={!apiBaseConfig.configured ? 'SETUP REQUIRED' : backendError ? 'UNAVAILABLE' : backendHealth?.status.toUpperCase() ?? 'CHECKING'}
+            variant={!apiBaseConfig.configured ? 'warning' : backendError ? 'danger' : backendHealth?.status === 'ok' ? 'success' : 'warning'}
           />
         </div>
         <p className="mt-3 text-sm text-[var(--text-secondary)]">
@@ -169,7 +271,7 @@ export function SettingsPage() {
           <div>
             <h2 className="text-sm font-semibold text-[var(--text)]">Browser-local records</h2>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--text-muted)]">
-              Device observations, development assessments, and security action history are stored in this browser's IndexedDB. They are not synchronized to the backend or shared across browsers.
+              Device observations and development assessments remain available in IndexedDB. After an owner token is successfully verified on the Device Recovery page, supported device, threat and security-action workflows can also synchronize through the configured owner-scoped backend. Local data remains available if the remote service is unavailable.
             </p>
           </div>
           <StatusBadge
