@@ -1,0 +1,5 @@
+pcap_path,label,session_id
+data/raw/benign_capture_01.pcapng,benign,benign_session_01
+data/raw/ble_flood_capture_01.pcapng,ble_flood,flood_session_01
+data/raw/benign_capture_02.pcapng,benign,benign_session_02
+data/raw/ble_flood_capture_02.pcapng,ble_flood,flood_session_02
