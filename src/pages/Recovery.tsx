@@ -760,6 +760,9 @@ export function Recovery() {
               {recoveryInfo.recoveryState !== 'lost' && (
                 <button type="button" disabled={busy} onClick={() => updateState('lost')} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--text)] disabled:opacity-50">Mark lost</button>
               )}
+              {recoveryInfo.recoveryState !== 'found' && recoveryInfo.recoveryState !== 'recovered' && (
+                <button type="button" disabled={busy} onClick={() => updateState('found')} className="rounded-lg border border-[var(--accent)] px-3 py-2 text-xs font-semibold text-[var(--accent)] disabled:opacity-50">Confirm device found</button>
+              )}
               {recoveryInfo.recoveryState !== 'recovered' && (
                 <button type="button" disabled={busy} onClick={() => updateState('recovered')} className="rounded-lg bg-[var(--success)] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">Mark recovered</button>
               )}
