@@ -4,7 +4,7 @@ import {
   timingSafeEqual,
   verify as verifySignature,
 } from 'node:crypto';
-import type { Request, NextFunction, Response } from 'express';
+import type { Request, NextFunction, Response as ExpressResponse } from 'express';
 
 export type AuthRole = 'owner' | 'participant';
 
@@ -194,7 +194,7 @@ export async function verifyFirebaseIdToken(token: string, projectId: string): P
 }
 
 export function requireAuth(role: AuthRole = 'owner') {
-  return async (req: Request, res: Response, next: NextFunction) => {
+  return async (req: Request, res: ExpressResponse, next: NextFunction) => {
     const { mode, ownerToken, participantToken, ownerId, firebaseProjectId } = getAuthConfig();
     const request = req as Request & { auth?: AuthContext };
     const logRejection = (category: 'missing_bearer_token' | 'invalid_owner_token' | 'invalid_participant_token' | 'invalid_firebase_token') => {
