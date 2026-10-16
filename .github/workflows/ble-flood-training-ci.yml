@@ -1,0 +1,43 @@
+name: Validate BLE Flood Training Pipeline
+
+on:
+  push:
+    branches:
+      - 'ml/blueguardian-trained-threat-model-20261016'
+    paths:
+      - 'ml_training/**'
+      - 'src/ml/**'
+      - '.github/workflows/ble-flood-training-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blueguardian-ble-training-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-training:
+    name: Validate training code and split hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the isolated ML branch
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ml_training/requirements.txt
+
+      - name: Install training requirements
+        run: python -m pip install -r ml_training/requirements.txt
+
+      - name: Compile Python training scripts
+        run: python -m py_compile ml_training/*.py
+
+      - name: Run split-hygiene and imputation unit tests
+        run: python -m unittest ml_training.test_training_pipeline -v
