@@ -643,7 +643,7 @@ export function Dashboard() {
 
               <div className="flex items-center justify-between">
                 <span className="text-xs text-[var(--text-muted)]">Version</span>
-                <span className="text-xs font-medium text-white">0.1.0-demo</span>
+                <span className="text-xs font-medium text-white">{modelMetadata.version}</span>
               </div>
 
               <div className="grid grid-cols-3 gap-2 border-t border-[var(--border)] pt-4">
