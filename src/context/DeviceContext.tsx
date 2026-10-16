@@ -1,16 +1,29 @@
 import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
-import type { BluetoothDevice, BluetoothScanState, DeviceType } from '../types';
+import type { BluetoothDevice, BluetoothScanState, DeviceType, SecurityPolicy } from '../types';
 import { generateSimulatedDevices } from '../services/bluetoothSimulator';
 import { isBluetoothSupported, requestBluetoothDevice, connectAndDiscover, readStandardCharacteristics, normalizeBluetoothName, resolveBluetoothDisplayName, getPreviouslyGrantedBluetoothDevices, watchBluetoothAdvertisements, type BluetoothPickerMode, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { calculateTrustScore } from '../utils/trustScore';
-import { evaluateSecureBluetoothProfile, needsManualApproval } from '../utils/connectionPolicy';
+import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
 import { API_BASE_CHANGED_EVENT } from '../services/apiBase';
+import { loadSecurityPolicy } from '../services/localSettings';
 import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
+
+const DEFAULT_SECURITY_POLICY: SecurityPolicy = {
+  confirmBlock: true,
+  confirmTrust: true,
+  showLowConfidenceWarnings: true,
+  showSimulatedEvents: true,
+  requireConnectionApproval: true,
+  blockUnknownFileTransfers: true,
+  enforceFastPairApproval: true,
+  enableRssiGuard: true,
+  restrictWearablesToAudio: true,
+};
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -53,11 +66,12 @@ function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
     ? { ...normalizedDevice, riskLevel: 'high' }
     : { ...normalizedDevice, trustScore: baselineTrust.score, riskLevel: baselineTrust.riskLevel };
 
+  const policy = loadSecurityPolicy(DEFAULT_SECURITY_POLICY);
   const profile = evaluateSecureBluetoothProfile(scoredDevice, {
     rssi: scoredDevice.rssi,
     fileName: scoredDevice.name,
     deviceType: scoredDevice.type,
-  });
+  }, policy);
 
   if (scoredDevice.blocked || profile.connectionDecision === 'BLOCK') {
     return { ...scoredDevice, blocked: true, approvalRequired: false, riskLevel: 'high' };
@@ -67,8 +81,7 @@ function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
   return {
     ...scoredDevice,
     approvalRequired: profile.connectionDecision === 'REQUIRE_APPROVAL'
-      || profile.wearableMode === 'RESTRICTED'
-      || needsManualApproval(scoredDevice),
+      || (policy.restrictWearablesToAudio && profile.wearableMode === 'RESTRICTED'),
   };
 }
 
@@ -240,6 +253,8 @@ const DeviceContext = createContext<{
   /** Listen for advertisements from previously authorized BLE devices only. */
   startWatchingPermittedBleDevices: () => Promise<{ ok: boolean; message: string; watchedCount: number }>;
   stopWatchingPermittedBleDevices: () => void;
+  canConnectSelectedDevice: (deviceId: string) => boolean;
+  connectSelectedDevice: (deviceId: string) => Promise<{ ok: boolean; message: string }>;
   backendReady: boolean;
 }>({} as any);
 
@@ -491,16 +506,48 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Keep the native handle in memory for optional advertisement watching after
-      // the user explicitly authorizes this device. Never put it in IndexedDB/API data.
+      // The chooser grants visibility, not a GATT connection. Keep the native handle
+      // in memory only and apply the separate in-app approval gate before connecting.
       authorizedDeviceRefs.current.set(request.device.id, request.device);
+      const previousDevice = state.devices.find((item) => item.id === request.device.id);
+      const previewDevice = applySecurityPolicy({
+        ...(previousDevice ?? {}),
+        id: request.device.id,
+        name: resolveBluetoothDisplayName(request.device.name, undefined, previousDevice?.manufacturer),
+        type: previousDevice?.type ?? inferDeviceType(request.device.name ?? '', previousDevice?.manufacturer, []),
+        trusted: previousDevice?.trusted ?? false,
+        blocked: previousDevice?.blocked ?? false,
+        trustScore: previousDevice?.trustScore ?? 0,
+        riskLevel: previousDevice?.riskLevel ?? 'high',
+        connectionStatus: previousDevice?.connectionStatus ?? 'unknown',
+        firstSeen: previousDevice?.firstSeen ?? new Date(),
+        lastSeen: new Date(),
+        isKnown: previousDevice?.isKnown ?? false,
+        manufacturer: previousDevice?.manufacturer,
+        services: previousDevice?.services ?? [],
+        discoverySource: 'REAL',
+        discoveryTransport: 'BLE',
+        gattConnected: false,
+        connectionHealth: 'UNAVAILABLE',
+      });
+      const currentPolicy = loadSecurityPolicy(DEFAULT_SECURITY_POLICY);
+      if (previewDevice.blocked || (currentPolicy.requireConnectionApproval && previewDevice.approvalRequired)) {
+        dispatch({ type: 'ADD_DEVICE', payload: previewDevice });
+        void localDatabase.saveDevice(previewDevice).catch((error: unknown) => {
+          console.warn('Selected BLE device could not be saved locally.', error);
+        });
+        dispatch({
+          type: 'SET_SCAN_STATE',
+          payload: { state: 'complete', source: 'REAL', transport: 'WEB_BLE_SELECTION', devicesFound: 1 },
+        });
+        return;
+      }
+
       console.info('[BlueGuardian][BLE] User selected a physical BLE peripheral.', {
         nameReportedByChooser: request.device.name ?? '(name not advertised)',
         gattReferenceAvailable: Boolean(request.device.gatt),
       });
 
-      // Keep the selected observation even if GATT connection/service access fails.
-      // A selectable BLE advertisement is still useful information to the owner.
       diagnosticStage = 'GATT connection and service discovery';
       const conn = await connectAndDiscover(request.device);
       const std = conn.ok
@@ -531,16 +578,18 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         type: inferredType,
         address: undefined,
         rssi: undefined,
-        trusted: false,
-        trustScore: 0,
-        riskLevel: 'high',
+        trusted: previousDevice?.trusted ?? false,
+        blocked: previousDevice?.blocked ?? false,
+        trustScore: previousDevice?.trustScore ?? 0,
+        riskLevel: previousDevice?.riskLevel ?? 'high',
         connectionStatus: connected ? 'connected' : 'unknown',
-        firstSeen: new Date(),
+        firstSeen: previousDevice?.firstSeen ?? new Date(),
         lastSeen: new Date(),
-        isKnown: false,
-        manufacturer: std.manufacturer,
-        services,
+        isKnown: previousDevice?.isKnown ?? false,
+        manufacturer: std.manufacturer ?? previousDevice?.manufacturer,
+        services: conn.ok ? services : (previousDevice?.services ?? []),
         discoverySource: 'REAL',
+        discoveryTransport: 'BLE',
         gattConnected: connected,
         connectionHealth: connected ? 'GOOD' : 'UNAVAILABLE',
       };
@@ -910,6 +959,50 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
   // Backwards-compatible entry point: existing components still follow the
   // Simulation Mode toggle. New controls can use the explicit methods below.
+  const canConnectSelectedDevice = (deviceId: string): boolean =>
+    authorizedDeviceRefs.current.has(deviceId);
+
+  const connectSelectedDevice = async (deviceId: string): Promise<{ ok: boolean; message: string }> => {
+    const nativeDevice = authorizedDeviceRefs.current.get(deviceId);
+    const existing = state.devices.find((device) => device.id === deviceId);
+    if (!nativeDevice || !existing) {
+      return { ok: false, message: 'This browser session no longer has an authorized BLE handle. Scan and select the device again.' };
+    }
+    if (existing.blocked) return { ok: false, message: 'This device is blocked by owner policy. Unblock it explicitly before connecting.' };
+
+    try {
+      const connection = await connectAndDiscover(nativeDevice);
+      const standard = connection.ok ? await readStandardCharacteristics(connection.gatt) : {};
+      const updated = applySecurityPolicy({
+        ...existing,
+        name: resolveBluetoothDisplayName(nativeDevice.name, standard.deviceName, standard.manufacturer ?? existing.manufacturer),
+        type: inferDeviceType(nativeDevice.name ?? existing.name, standard.manufacturer ?? existing.manufacturer, connection.ok ? connection.services : existing.services),
+        manufacturer: standard.manufacturer ?? existing.manufacturer,
+        services: connection.ok ? connection.services : existing.services,
+        connectionStatus: connection.ok ? 'connected' : 'unknown',
+        gattConnected: connection.ok,
+        connectionHealth: connection.ok ? 'GOOD' : 'UNAVAILABLE',
+        lastSeen: new Date(),
+        discoverySource: 'REAL',
+        discoveryTransport: 'BLE',
+      });
+      dispatch({ type: 'UPDATE_DEVICE', payload: updated });
+      void localDatabase.saveDevice(updated).catch((error: unknown) => {
+        console.warn('Connected BLE device could not be saved locally.', error);
+      });
+      if (connection.ok) {
+        nativeDevice.addEventListener?.('gattserverdisconnected', () => {
+          dispatch({ type: 'MARK_DISCONNECTED', payload: deviceId });
+        }, { once: true });
+      }
+      return connection.ok
+        ? { ok: true, message: 'Connection approved. GATT services were inspected successfully.' }
+        : { ok: false, message: `Connection was not established: ${connection.error}` };
+    } catch (error: unknown) {
+      return { ok: false, message: error instanceof Error ? error.message : 'Bluetooth connection failed.' };
+    }
+  };
+
   const scanDevices = (): Promise<void> =>
     runScan(state.simulationMode ? 'simulated' : 'real');
 
@@ -1003,7 +1096,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, scanClassicDevices, scanCombinedDevices, loadPairedDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, backendReady }}>
+    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, scanClassicDevices, scanCombinedDevices, loadPairedDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, canConnectSelectedDevice, connectSelectedDevice, backendReady }}>
       {children}
     </DeviceContext.Provider>
   );
