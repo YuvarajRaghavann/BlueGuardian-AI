@@ -649,7 +649,7 @@ export function Dashboard() {
               <div className="grid grid-cols-3 gap-2 border-t border-[var(--border)] pt-4">
                 <Metric value={mlClassified} label="AI alerts" />
                 <Metric value={highRiskML} label="High risk" />
-                <Metric value={mlClassified > 0 ? `${avgMLConfidence}%` : '—'} label="Confidence" />
+                <Metric value={mlClassified > 0 ? `${avgMLConfidence}%` : '—'} label="Evidence strength" />
               </div>
 
               <div className="flex items-center gap-2 rounded-lg bg-[var(--bg-elevated)] px-3 py-2.5">
