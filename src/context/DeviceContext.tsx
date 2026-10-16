@@ -10,7 +10,8 @@ import { applySecurityActionToDevice } from '../services/securityActionService';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
 import { API_BASE_CHANGED_EVENT } from '../services/apiBase';
-import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
+import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeBleWindowFeatures, type NativeClassicObservation } from '../services/nativeBluetoothService';
+import { processBleObservationWindow } from '../ml/bleFloodMonitor';
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -439,7 +440,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
             console.warn('Android BLE observation was received but could not be saved locally.', error);
           });
-        }, 12000);
+        }, 12000, processBleObservationWindow);
 
         if (nativeResult.ok === false) {
           const permissionFailure = /permission|denied|not allowed/i.test(nativeResult.error);
@@ -792,7 +793,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           const identity = String(observation.address || observation.id || '').trim().toLowerCase();
           if (identity) observedIdentities.add(identity);
           registerCombinedObservation(observation, 'BLE', combinedTransportHistory);
-        }, 9000);
+        }, 9000, processBleObservationWindow);
 
         if (bleResult.ok === false) {
           bleError = bleResult.error;
