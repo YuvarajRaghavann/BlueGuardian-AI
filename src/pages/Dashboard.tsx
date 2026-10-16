@@ -136,7 +136,11 @@ export function Dashboard() {
     );
 
     if (!completed) {
-      setActionError('This action was rejected by the current security policy.');
+      setActionError(
+        pendingAction === 'TRUST'
+          ? 'Approval could not be saved. Check whether this device is already trusted or explicitly blocked.'
+          : 'The block action could not be saved. Refresh the device status and try again.',
+      );
       return;
     }
 
@@ -164,7 +168,7 @@ export function Dashboard() {
         ? 'User approved a newly discovered device after a security review.'
         : 'User blocked a newly discovered device due to elevated risk.',
     );
-    setActionError(completed ? null : 'This action was rejected by the current security policy.');
+    setActionError(completed ? null : 'The action could not be saved. Check the device status and try again.');
   };
 
   return (
