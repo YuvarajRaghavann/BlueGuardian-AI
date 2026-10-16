@@ -464,7 +464,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         if (adapter != null) {
             try {
                 if (adapter.isDiscovering()) adapter.cancelDiscovery();
-            } catch (SecurityException | RuntimeException ignored) {
+            } catch (RuntimeException ignored) {
                 // Android may already have stopped discovery or revoked permission.
             }
         }
