@@ -79,24 +79,30 @@ export function DeviceDetailModal({
 }: DeviceDetailModalProps) {
   const { state: threatState } = useThreats();
   const { state: securityState, executeAction, getAllowedActions } = useSecurity();
-  const { canConnectSelectedDevice, connectSelectedDevice } = useBluetoothDevices();
+  const { state: deviceState, canConnectSelectedDevice, connectSelectedDevice } = useBluetoothDevices();
+  const currentDevice = device ? deviceState.devices.find(item => item.id === device.id) ?? device : null;
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
 
   const [assessment, setAssessment] = useState(() =>
-    device ? calculateTrustScore(device) : null,
+    currentDevice ? calculateTrustScore(currentDevice) : null,
   );
   const [confirmAction, setConfirmAction] =
     useState<SecurityActionType | null>(null);
 
   useEffect(() => {
-    if (device) setAssessment(calculateTrustScore(device));
-  }, [device]);
+    if (currentDevice) setAssessment(calculateTrustScore(currentDevice));
+  }, [currentDevice]);
 
-  if (!device) return null;
+  useEffect(() => {
+    setConnectionMessage(null);
+    setConnectionBusy(false);
+  }, [currentDevice?.id]);
+
+  if (!currentDevice) return null;
 
   const deviceThreats = threatState.threats.filter(
-    (t) => t.deviceId === device.id,
+    (t) => t.deviceId === currentDevice.id,
   );
   const activeThreats = deviceThreats.filter(
     (t) => t.status === 'ACTIVE' || t.status === 'INVESTIGATING',
@@ -104,25 +110,25 @@ export function DeviceDetailModal({
   const mlThreat = deviceThreats.find((t) => t.mlPrediction);
 
   const simpleAssessment = {
-    trustScore: device.trustScore,
-    trustRiskLevel: device.riskLevel,
+    trustScore: currentDevice.trustScore,
+    trustRiskLevel: currentDevice.riskLevel,
     ruleBasedThreatScore: 0,
     ruleBasedSeverity: 'low' as const,
     ruleBasedCategory: 'OTHER' as const,
     ruleBasedReasons: [],
     mlPrediction: undefined,
     finalThreatScore:
-      device.riskLevel === 'high'
+      currentDevice.riskLevel === 'high'
         ? 80
-        : device.riskLevel === 'medium'
+        : currentDevice.riskLevel === 'medium'
           ? 50
-          : device.riskLevel === 'low'
+          : currentDevice.riskLevel === 'low'
             ? 20
             : 0,
     finalSeverity:
-      device.riskLevel === 'high'
+      currentDevice.riskLevel === 'high'
         ? 'high'
-        : device.riskLevel === 'medium'
+        : currentDevice.riskLevel === 'medium'
           ? 'medium'
           : 'low',
     finalClassification: '',
@@ -132,7 +138,7 @@ export function DeviceDetailModal({
   } as any;
 
   const protection = calculateProtectionStatus(
-    device,
+    currentDevice,
     simpleAssessment,
     activeThreats,
   );
@@ -140,16 +146,16 @@ export function DeviceDetailModal({
   const protectionColor = getProtectionStatusColor(protection);
 
   const recommendation = getSecurityRecommendation(
-    device,
+    currentDevice,
     simpleAssessment,
     activeThreats,
   );
-  const securityProfile = evaluateSecureBluetoothProfile(device, {
-    rssi: device.rssi,
-    fileName: device.name,
-    deviceType: device.type,
+  const securityProfile = evaluateSecureBluetoothProfile(currentDevice, {
+    rssi: currentDevice.rssi,
+    fileName: currentDevice.name,
+    deviceType: currentDevice.type,
   }, securityState.policy);
-  const allowedActions = getAllowedActions(device);
+  const allowedActions = getAllowedActions(currentDevice);
 
   const handleAction = (type: SecurityActionType) => {
     const requiresConfirmation =
@@ -163,18 +169,18 @@ export function DeviceDetailModal({
       return;
     }
 
-    executeAction(type, device, recommendation.explanation);
+    executeAction(type, currentDevice, recommendation.explanation);
   };
 
   const confirmExecute = () => {
     if (confirmAction) {
-      executeAction(confirmAction, device, recommendation.explanation);
+      executeAction(confirmAction, currentDevice, recommendation.explanation);
       setConfirmAction(null);
     }
   };
 
   const IconComp =
-    typeIcons[device.type] ||
+    typeIcons[currentDevice.type] ||
     (({ className }) => <HelpCircle className={className} />);
 
   const sectionClass =
@@ -194,23 +200,23 @@ export function DeviceDetailModal({
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="truncate text-base font-semibold text-[var(--text)] sm:text-lg">
-                    {device.name}
+                    {currentDevice.name}
                   </h2>
                   <StatusBadge
-                    label={device.riskLevel}
+                    label={currentDevice.riskLevel}
                     variant={
-                      device.riskLevel === 'trusted'
+                      currentDevice.riskLevel === 'trusted'
                         ? 'success'
-                        : device.riskLevel === 'low'
+                        : currentDevice.riskLevel === 'low'
                           ? 'info'
-                          : device.riskLevel === 'medium'
+                          : currentDevice.riskLevel === 'medium'
                             ? 'warning'
                             : 'danger'
                     }
                   />
                 </div>
                 <p className="mt-0.5 text-xs capitalize text-[var(--text-muted)]">
-                  {device.type} · {device.manufacturer ?? 'Unknown manufacturer'}
+                  {currentDevice.type} · {currentDevice.manufacturer ?? 'Unknown manufacturer'}
                 </p>
               </div>
             </div>
@@ -229,7 +235,7 @@ export function DeviceDetailModal({
               {/* Trust hero */}
               <section className="grid gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:grid-cols-[auto_1fr] sm:items-center">
                 <div className="flex justify-center sm:justify-start">
-                  <TrustScore score={device.trustScore} size="lg" />
+                  <TrustScore score={currentDevice.trustScore} size="lg" />
                 </div>
 
                 <div>
@@ -238,19 +244,19 @@ export function DeviceDetailModal({
                   </p>
                   <div className="mt-1 flex items-baseline gap-2">
                     <span className="text-3xl font-semibold text-[var(--text)]">
-                      {device.trustScore}
+                      {currentDevice.trustScore}
                     </span>
                     <span className="text-sm text-[var(--text-muted)]">
                       / 100
                     </span>
                   </div>
                   <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                    {device.isKnown
+                    {currentDevice.isKnown
                       ? 'Recognized device with established trust history.'
                       : 'Device has not been previously established as trusted.'}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {Boolean(device.approvalRequired) && (
+                    {Boolean(currentDevice.approvalRequired) && (
                       <StatusBadge
                         label="Pending approval"
                         variant="warning"
@@ -320,7 +326,7 @@ export function DeviceDetailModal({
                       Trust score
                     </p>
                     <p className="mt-1 text-lg font-semibold text-[var(--text)]">
-                      {device.trustScore}
+                      {currentDevice.trustScore}
                     </p>
                   </div>
 
@@ -456,9 +462,9 @@ export function DeviceDetailModal({
                       </dt>
                       <dd>
                         <StatusBadge
-                          label={device.discoverySource}
+                          label={currentDevice.discoverySource}
                           variant={
-                            device.discoverySource === 'REAL'
+                            currentDevice.discoverySource === 'REAL'
                               ? 'info'
                               : 'warning'
                           }
@@ -469,7 +475,7 @@ export function DeviceDetailModal({
                     <div className="flex justify-between gap-3">
                       <dt className="text-[var(--text-muted)]">First seen</dt>
                       <dd className="text-right text-[var(--text-secondary)]">
-                        {formatDistanceToNow(device.firstSeen, {
+                        {formatDistanceToNow(currentDevice.firstSeen, {
                           addSuffix: true,
                         })}
                       </dd>
@@ -478,7 +484,7 @@ export function DeviceDetailModal({
                     <div className="flex justify-between gap-3">
                       <dt className="text-[var(--text-muted)]">Last seen</dt>
                       <dd className="text-right text-[var(--text-secondary)]">
-                        {formatDistanceToNow(device.lastSeen, {
+                        {formatDistanceToNow(currentDevice.lastSeen, {
                           addSuffix: true,
                         })}
                       </dd>
@@ -488,11 +494,11 @@ export function DeviceDetailModal({
                       <dt className="text-[var(--text-muted)]">Connection</dt>
                       <dd>
                         <StatusBadge
-                          label={device.connectionStatus}
+                          label={currentDevice.connectionStatus}
                           variant={
-                            device.connectionStatus === 'connected'
+                            currentDevice.connectionStatus === 'connected'
                               ? 'success'
-                              : device.connectionStatus === 'connecting'
+                              : currentDevice.connectionStatus === 'connecting'
                                 ? 'warning'
                                 : 'info'
                           }
@@ -505,7 +511,7 @@ export function DeviceDetailModal({
                         Known device
                       </dt>
                       <dd className="text-[var(--text-secondary)]">
-                        {device.isKnown ? 'Yes' : 'No'}
+                        {currentDevice.isKnown ? 'Yes' : 'No'}
                       </dd>
                     </div>
                   </dl>
@@ -557,7 +563,7 @@ export function DeviceDetailModal({
                         Signal strength
                       </p>
                       <p className="mt-1 font-mono text-sm text-[var(--text-secondary)]">
-                        {device.rssi ?? 'N/A'} dBm
+                        {currentDevice.rssi ?? 'N/A'} dBm
                       </p>
                     </div>
 
@@ -566,7 +572,7 @@ export function DeviceDetailModal({
                         MAC address
                       </p>
                       <p className="mt-1 break-all font-mono text-sm text-[var(--text-secondary)]">
-                        {device.address ?? 'N/A'}
+                        {currentDevice.address ?? 'N/A'}
                       </p>
                     </div>
 
@@ -575,14 +581,14 @@ export function DeviceDetailModal({
                         Services
                       </p>
                       <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                        {device.services.length}
+                        {currentDevice.services.length}
                       </p>
                     </div>
                   </div>
 
-                  {device.services.length > 0 && (
+                  {currentDevice.services.length > 0 && (
                     <div className="mt-4 space-y-1.5 border-t border-[var(--border)] pt-3">
-                      {device.services.map((s, i) => (
+                      {currentDevice.services.map((s, i) => (
                         <div
                           key={i}
                           className="break-all rounded-md bg-[var(--bg)] px-2.5 py-2 font-mono text-[11px] text-[var(--text-muted)]"
@@ -609,7 +615,7 @@ export function DeviceDetailModal({
                         Known device
                       </span>
                       <span className="text-sm text-[var(--text-secondary)]">
-                        {device.isKnown ? 'Yes' : 'No'}
+                        {currentDevice.isKnown ? 'Yes' : 'No'}
                       </span>
                     </div>
 
@@ -619,12 +625,12 @@ export function DeviceDetailModal({
                       </span>
                       <span
                         className={`text-sm ${
-                          device.riskLevel === 'high'
+                          currentDevice.riskLevel === 'high'
                             ? 'text-[var(--danger)]'
                             : 'text-[var(--text-secondary)]'
                         }`}
                       >
-                        {device.riskLevel === 'high' ? 'Detected' : 'Not detected'}
+                        {currentDevice.riskLevel === 'high' ? 'Detected' : 'Not detected'}
                       </span>
                     </div>
                   </div>
@@ -635,20 +641,20 @@ export function DeviceDetailModal({
                     </p>
 
                     <ul className="space-y-1.5 text-sm text-[var(--text-secondary)]">
-                      {!device.isKnown && (
+                      {!currentDevice.isKnown && (
                         <li>• Device not previously seen</li>
                       )}
-                      {device.riskLevel === 'high' && (
+                      {currentDevice.riskLevel === 'high' && (
                         <li>• High risk classification</li>
                       )}
-                      {device.connectionStatus === 'unknown' && (
+                      {currentDevice.connectionStatus === 'unknown' && (
                         <li>• Connection state unknown</li>
                       )}
-                      {!device.address && <li>• No MAC address available</li>}
-                      {device.isKnown &&
-                        device.riskLevel !== 'high' &&
-                        device.connectionStatus !== 'unknown' &&
-                        device.address && (
+                      {!currentDevice.address && <li>• No MAC address available</li>}
+                      {currentDevice.isKnown &&
+                        currentDevice.riskLevel !== 'high' &&
+                        currentDevice.connectionStatus !== 'unknown' &&
+                        currentDevice.address && (
                           <li className="text-[var(--success)]">
                             • No immediate risk factors identified
                           </li>
@@ -660,7 +666,7 @@ export function DeviceDetailModal({
 
               {/* Actions */}
               <div className="border-t border-[var(--border)] pt-4">
-                {canConnectSelectedDevice(device.id) && !device.gattConnected && !device.blocked && (
+                {canConnectSelectedDevice(currentDevice.id) && !currentDevice.gattConnected && !currentDevice.blocked && (
                   <div className="mb-4 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3">
                     <p className="text-sm font-medium text-[var(--text)]">Bluetooth connection approval</p>
                     <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">Selecting a device does not connect it. Approve here to let BlueGuardian open a browser GATT connection and inspect services. Android system pairing remains controlled by Android Settings.</p>
@@ -670,7 +676,7 @@ export function DeviceDetailModal({
                       onClick={() => {
                         setConnectionBusy(true);
                         setConnectionMessage(null);
-                        void connectSelectedDevice(device.id)
+                        void connectSelectedDevice(currentDevice.id)
                           .then(result => setConnectionMessage(result.message))
                           .catch(error => setConnectionMessage(error instanceof Error ? error.message : 'Bluetooth connection failed.'))
                           .finally(() => setConnectionBusy(false));
@@ -725,13 +731,13 @@ export function DeviceDetailModal({
             <div className="p-5">
               <p className="text-sm leading-6 text-[var(--text-secondary)]">
                 {confirmAction === 'BLOCK' &&
-                  `Blocking ${device.name} will mark it as blocked in BlueGuardian. This is an application-level decision; browser Web Bluetooth cannot enforce OS-level blocking.`}
+                  `Blocking ${currentDevice.name} will mark it as blocked in BlueGuardian. This is an application-level decision; browser Web Bluetooth cannot enforce OS-level blocking.`}
                 {confirmAction === 'FORGET' &&
-                  `Forgetting ${device.name} will remove it from BlueGuardian permanently. This action cannot be undone.`}
+                  `Forgetting ${currentDevice.name} will remove it from BlueGuardian permanently. This action cannot be undone.`}
                 {confirmAction === 'TRUST' &&
-                  `Marking ${device.name} as trusted will lower its threat level. Ensure you recognize this device.`}
+                  `Marking ${currentDevice.name} as trusted will lower its threat level. Ensure you recognize this currentDevice.`}
                 {confirmAction === 'UNBLOCK' &&
-                  `Unblocking ${device.name} will remove its BlueGuardian application-level block. This does not change its trust status or enforce an operating-system block.`}
+                  `Unblocking ${currentDevice.name} will remove its BlueGuardian application-level block. This does not change its trust status or enforce an operating-system block.`}
               </p>
 
               <div className="mt-5 flex justify-end gap-2">
