@@ -213,7 +213,7 @@ export function Dashboard() {
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(59,156,255,0.16)] transition-all hover:-translate-y-0.5 hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ScanLine className={`h-4 w-4 ${scanActive ? 'animate-pulse' : ''}`} />
-            {scanActive ? 'Searching...' : 'Find nearby BLE devices'}
+            {scanActive ? 'Searching...' : isNativeAndroidApp() ? 'Find nearby BLE devices' : 'Select a BLE device'}
           </button>
           <button
             type="button"
