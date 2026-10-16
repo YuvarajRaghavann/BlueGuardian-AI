@@ -62,7 +62,7 @@ export function validateAction(
 
   switch (action) {
     case 'TRUST':
-      if (device.trusted) return { valid: false, reason: 'Device already trusted' };
+      if (device.trusted && !device.approvalRequired && device.isKnown) return { valid: false, reason: 'Device already trusted' };
       if (protection === 'BLOCKED') return { valid: false, reason: 'Cannot trust a blocked device without unblocking first' };
       return { valid: true };
     case 'MARK_UNKNOWN':
