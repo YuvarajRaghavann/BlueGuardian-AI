@@ -6,6 +6,7 @@ on:
       - 'android/phase2-cloud-build-*'
       - 'android/phase4-classic-discovery-*'
       - 'android/phase5-combined-scanning-*'
+      - 'android/phase6-backend-integration-*'
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  verify-backend:
+    name: Backend tests and TypeScript verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the project branch
+        uses: actions/checkout@v5
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci --no-audit --no-fund
+
+      - name: Run backend regression tests and TypeScript build
+        working-directory: backend
+        run: npm run test:ci
+
   build-debug-apk:
     name: Build debug APK in GitHub-hosted runner
     runs-on: ubuntu-latest
