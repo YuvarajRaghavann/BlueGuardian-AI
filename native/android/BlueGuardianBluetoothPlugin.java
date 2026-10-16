@@ -11,6 +11,9 @@ import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
@@ -55,6 +58,12 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     private ScanCallback activeScanCallback;
     private Runnable stopScanRunnable;
     private int activeDurationMs = DEFAULT_SCAN_DURATION_MS;
+
+    private BluetoothAdapter activeClassicAdapter;
+    private BroadcastReceiver classicReceiver;
+    private Runnable stopClassicRunnable;
+    private final Set<String> classicSeenAddresses = new HashSet<>();
+    private int activeClassicDurationMs = DEFAULT_SCAN_DURATION_MS;
 
     @PluginMethod
     public void startBleScan(PluginCall call) {
@@ -253,6 +262,329 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         notifyListeners("deviceFound", observation);
     }
 
+
+    /*
+     * Phase 4: classic Bluetooth discovery is a separate foreground scan from
+     * BLE advertisement scanning. It only discovers devices currently in
+     * classic discovery mode; the paired-device API is provided separately.
+     */
+    @PluginMethod
+    public void startClassicDiscovery(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (getPermissionState("bluetoothScan") != PermissionState.GRANTED
+                || getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+                requestPermissionForAliases(
+                    new String[] { "bluetoothScan", "bluetoothConnect" },
+                    call,
+                    "onModernClassicPermissions"
+                );
+                return;
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+            && getPermissionState("location") != PermissionState.GRANTED) {
+            requestPermissionForAlias("location", call, "onLegacyClassicLocationPermission");
+            return;
+        }
+
+        startClassicDiscoveryAfterPermissions(call);
+    }
+
+    @PermissionCallback
+    private void onModernClassicPermissions(PluginCall call) {
+        if (getPermissionState("bluetoothScan") != PermissionState.GRANTED
+            || getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+            call.reject("BlueGuardian needs Nearby Devices permission for classic Bluetooth discovery.");
+            return;
+        }
+        startClassicDiscoveryAfterPermissions(call);
+    }
+
+    @PermissionCallback
+    private void onLegacyClassicLocationPermission(PluginCall call) {
+        if (getPermissionState("location") != PermissionState.GRANTED) {
+            call.reject("Location permission is required for classic Bluetooth discovery on this Android version.");
+            return;
+        }
+        startClassicDiscoveryAfterPermissions(call);
+    }
+
+    @SuppressLint("MissingPermission")
+    private void startClassicDiscoveryAfterPermissions(PluginCall call) {
+        BluetoothManager manager = (BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
+        BluetoothAdapter adapter = manager != null ? manager.getAdapter() : null;
+        if (adapter == null) {
+            call.reject("Android did not provide a Bluetooth adapter.");
+            return;
+        }
+
+        try {
+            if (!adapter.isEnabled()) {
+                call.reject("Bluetooth is turned off. Enable Bluetooth in Android Settings and retry.");
+                return;
+            }
+        } catch (SecurityException error) {
+            call.reject("BlueGuardian cannot read Bluetooth state. Grant Nearby Devices permission and retry.");
+            return;
+        }
+
+        stopClassicDiscoveryInternal(false);
+        classicSeenAddresses.clear();
+        Integer requestedDuration = call.getInt("durationMs");
+        activeClassicDurationMs = requestedDuration == null
+            ? DEFAULT_SCAN_DURATION_MS
+            : Math.max(MIN_SCAN_DURATION_MS, Math.min(MAX_SCAN_DURATION_MS, requestedDuration));
+        activeClassicAdapter = adapter;
+
+        IntentFilter filter = new IntentFilter();
+        filter.addAction(BluetoothDevice.ACTION_FOUND);
+        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
+        filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
+
+        classicReceiver = new BroadcastReceiver() {
+            @Override
+            @SuppressLint("MissingPermission")
+            public void onReceive(Context context, Intent intent) {
+                if (intent == null || intent.getAction() == null) return;
+                String action = intent.getAction();
+
+                if (BluetoothDevice.ACTION_FOUND.equals(action)) {
+                    BluetoothDevice device;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice.class);
+                    } else {
+                        device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+                    }
+                    if (device == null) return;
+
+                    short rssiValue = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, (short) 0);
+                    String address;
+                    String name = null;
+                    try {
+                        address = device.getAddress();
+                        name = device.getName();
+                    } catch (SecurityException error) {
+                        emitClassicScanError("Android denied access to classic Bluetooth device details. Check Nearby Devices permission.");
+                        return;
+                    }
+                    if (address == null || address.trim().isEmpty()) return;
+                    if (!classicSeenAddresses.add(address)) return;
+
+                    JSObject observation = new JSObject();
+                    observation.put("id", address);
+                    observation.put("address", address);
+                    if (name != null && !name.trim().isEmpty()) {
+                        observation.put("name", name.replaceAll("[\\p{Cntrl}]", " ").trim());
+                    }
+                    observation.put("rssi", (int) rssiValue);
+                    observation.put("transport", "CLASSIC");
+                    observation.put("source", "REAL");
+                    observation.put("paired", device.getBondState() == BluetoothDevice.BOND_BONDED);
+                    observation.put("observedAt", System.currentTimeMillis());
+                    notifyListeners("classicDeviceFound", observation);
+                    return;
+                }
+
+                if (BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)) {
+                    JSObject state = new JSObject();
+                    state.put("state", "scanning");
+                    state.put("message", "Classic Bluetooth discovery started.");
+                    notifyListeners("classicScanState", state);
+                    return;
+                }
+
+                if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+                    stopClassicDiscoveryInternal(true);
+                }
+            }
+        };
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                getContext().registerReceiver(classicReceiver, filter, Context.RECEIVER_EXPORTED);
+            } else {
+                getContext().registerReceiver(classicReceiver, filter);
+            }
+        } catch (RuntimeException error) {
+            classicReceiver = null;
+            activeClassicAdapter = null;
+            call.reject("BlueGuardian could not register for classic Bluetooth discovery: " + safeMessage(error));
+            return;
+        }
+
+        try {
+            if (adapter.isDiscovering()) adapter.cancelDiscovery();
+            boolean started = adapter.startDiscovery();
+            if (!started) {
+                stopClassicDiscoveryInternal(false);
+                call.reject("Android could not start classic Bluetooth discovery. Wait briefly and try again.");
+                return;
+            }
+        } catch (SecurityException error) {
+            stopClassicDiscoveryInternal(false);
+            call.reject("Android denied classic Bluetooth discovery. Check Nearby Devices permission.");
+            return;
+        } catch (RuntimeException error) {
+            stopClassicDiscoveryInternal(false);
+            call.reject("Android could not start classic Bluetooth discovery: " + safeMessage(error));
+            return;
+        }
+
+        stopClassicRunnable = () -> stopClassicDiscoveryInternal(true);
+        mainHandler.postDelayed(stopClassicRunnable, activeClassicDurationMs);
+
+        JSObject state = new JSObject();
+        state.put("state", "scanning");
+        state.put("durationMs", activeClassicDurationMs);
+        notifyListeners("classicScanState", state);
+
+        JSObject result = new JSObject();
+        result.put("started", true);
+        result.put("durationMs", activeClassicDurationMs);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void stopClassicDiscovery(PluginCall call) {
+        boolean wasScanning = classicReceiver != null;
+        stopClassicDiscoveryInternal(true);
+        JSObject result = new JSObject();
+        result.put("stopped", wasScanning);
+        call.resolve(result);
+    }
+
+    private void stopClassicDiscoveryInternal(boolean emitComplete) {
+        boolean wasScanning = classicReceiver != null;
+        if (stopClassicRunnable != null) {
+            mainHandler.removeCallbacks(stopClassicRunnable);
+            stopClassicRunnable = null;
+        }
+
+        BluetoothAdapter adapter = activeClassicAdapter;
+        activeClassicAdapter = null;
+        if (adapter != null) {
+            try {
+                if (adapter.isDiscovering()) adapter.cancelDiscovery();
+            } catch (SecurityException | RuntimeException ignored) {
+                // Android may already have stopped discovery or revoked permission.
+            }
+        }
+
+        BroadcastReceiver receiver = classicReceiver;
+        classicReceiver = null;
+        if (receiver != null) {
+            try {
+                getContext().unregisterReceiver(receiver);
+            } catch (IllegalArgumentException ignored) {
+                // The receiver can already have been unregistered by Android lifecycle cleanup.
+            }
+        }
+
+        if (emitComplete && wasScanning) {
+            JSObject state = new JSObject();
+            state.put("state", "complete");
+            state.put("devicesFound", classicSeenAddresses.size());
+            state.put("durationMs", activeClassicDurationMs);
+            state.put("message", classicSeenAddresses.isEmpty()
+                ? "No classic Bluetooth devices were found. Nearby devices must be discoverable during the scan."
+                : "Classic Bluetooth discovery finished.");
+            notifyListeners("classicScanState", state);
+        }
+    }
+
+    private void emitClassicScanError(String message) {
+        JSObject state = new JSObject();
+        state.put("state", "error");
+        state.put("message", message);
+        notifyListeners("classicScanState", state);
+        stopClassicDiscoveryInternal(false);
+    }
+
+    @PluginMethod
+    public void listPairedDevices(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+                requestPermissionForAlias("bluetoothConnect", call, "onPairedDevicesConnectPermission");
+                return;
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+            && getPermissionState("location") != PermissionState.GRANTED) {
+            requestPermissionForAlias("location", call, "onPairedDevicesLocationPermission");
+            return;
+        }
+
+        listPairedDevicesAfterPermissions(call);
+    }
+
+    @PermissionCallback
+    private void onPairedDevicesConnectPermission(PluginCall call) {
+        if (getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+            call.reject("Nearby Devices permission is required to list paired Bluetooth devices.");
+            return;
+        }
+        listPairedDevicesAfterPermissions(call);
+    }
+
+    @PermissionCallback
+    private void onPairedDevicesLocationPermission(PluginCall call) {
+        if (getPermissionState("location") != PermissionState.GRANTED) {
+            call.reject("Location permission is required to list paired devices on this Android version.");
+            return;
+        }
+        listPairedDevicesAfterPermissions(call);
+    }
+
+    @SuppressLint("MissingPermission")
+    private void listPairedDevicesAfterPermissions(PluginCall call) {
+        BluetoothManager manager = (BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
+        BluetoothAdapter adapter = manager != null ? manager.getAdapter() : null;
+        if (adapter == null) {
+            call.reject("Android did not provide a Bluetooth adapter.");
+            return;
+        }
+
+        try {
+            if (!adapter.isEnabled()) {
+                call.reject("Bluetooth is turned off. Enable Bluetooth in Android Settings and retry.");
+                return;
+            }
+
+            JSArray devices = new JSArray();
+            for (BluetoothDevice device : adapter.getBondedDevices()) {
+                if (device == null) continue;
+                String address = device.getAddress();
+                if (address == null || address.trim().isEmpty()) continue;
+                String name = null;
+                try {
+                    name = device.getName();
+                } catch (SecurityException ignored) {
+                    // Address and paired state are still useful when Android withholds the name.
+                }
+
+                JSObject item = new JSObject();
+                item.put("id", address);
+                item.put("address", address);
+                if (name != null && !name.trim().isEmpty()) {
+                    item.put("name", name.replaceAll("[\\p{Cntrl}]", " ").trim());
+                }
+                item.put("transport", "CLASSIC");
+                item.put("source", "REAL");
+                item.put("paired", true);
+                item.put("bondState", device.getBondState());
+                item.put("observedAt", System.currentTimeMillis());
+                devices.put(item);
+            }
+
+            JSObject result = new JSObject();
+            result.put("devices", devices);
+            result.put("count", devices.length());
+            call.resolve(result);
+        } catch (SecurityException error) {
+            call.reject("Android denied access to paired Bluetooth devices. Check Nearby Devices permission.");
+        } catch (RuntimeException error) {
+            call.reject("Could not list paired Bluetooth devices: " + safeMessage(error));
+        }
+    }
+
     @PluginMethod
     public void stopBleScan(PluginCall call) {
         boolean wasScanning = activeScanCallback != null;
@@ -316,12 +648,14 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     @Override
     protected void handleOnPause() {
         stopBleScanInternal(true);
+        stopClassicDiscoveryInternal(true);
         super.handleOnPause();
     }
 
     @Override
     protected void handleOnDestroy() {
         stopBleScanInternal(false);
+        stopClassicDiscoveryInternal(false);
         super.handleOnDestroy();
     }
 }
