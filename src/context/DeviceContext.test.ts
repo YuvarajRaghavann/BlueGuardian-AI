@@ -54,6 +54,42 @@ describe('device discovery source handling', () => {
   });
 });
 
+  it('merges BLE and classic reports with the same combined identity into one device', () => {
+    const emptyState: DeviceState = {
+      devices: [],
+      scan: { state: 'idle', elapsedMs: 0, devicesFound: 0 },
+      simulationMode: false,
+      filter: 'all',
+      sort: 'trust',
+      search: '',
+    };
+    const bleObservation: BluetoothDevice = {
+      ...device,
+      id: 'android-combined:aa:bb:cc',
+      address: 'AA:BB:CC',
+      name: 'Test BLE peripheral',
+      connectionStatus: 'unknown',
+      discoveryTransport: 'COMBINED',
+      discoveryTransports: ['BLE'],
+    };
+    const classicObservation: BluetoothDevice = {
+      ...bleObservation,
+      name: 'Test classic peripheral',
+      rssi: -61,
+      lastSeen: new Date(1000),
+      discoveryTransports: ['CLASSIC'],
+    };
+
+    const afterBle = deviceReducer(emptyState, { type: 'ADD_DEVICE', payload: bleObservation });
+    const afterClassic = deviceReducer(afterBle, { type: 'ADD_DEVICE', payload: classicObservation });
+
+    expect(afterClassic.devices).toHaveLength(1);
+    expect(afterClassic.devices[0].discoveryTransport).toBe('COMBINED');
+    expect(afterClassic.devices[0].discoveryTransports).toEqual(['BLE', 'CLASSIC']);
+    expect(afterClassic.devices[0].connectionStatus).toBe('unknown');
+  });
+});
+
 describe('security action device transitions', () => {
   it('blocks a device without changing trust or risk values', () => {
     const next = deviceReducer(stateWithDevice(device), {
