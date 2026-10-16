@@ -52,7 +52,6 @@ describe('device discovery source handling', () => {
     expect(generated.devices).toHaveLength(1);
     expect(generated.devices[0].discoverySource).toBe('SIMULATED');
   });
-});
 
   it('merges BLE and classic reports with the same combined identity into one device', () => {
     const emptyState: DeviceState = {
