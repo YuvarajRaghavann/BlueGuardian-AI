@@ -13,7 +13,7 @@ import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath
 
-from extract_pcap_windows import FEATURE_COLUMNS, extract_capture
+from extract_tshark_windows import WINDOW_COLUMNS, extract_windows
 
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOAD_URL = "https://data.mendeley.com/public-api/zip/ntmmcw6jj8/download/2"
