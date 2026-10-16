@@ -128,6 +128,41 @@ def main():
         item.pop("body", None)
         report["api_probes"].append(item)
 
+    # The HTML loads the file tree client-side. Inspect only its public JS assets
+    # to find the documented route used by the landing-page Download All button.
+    report["client_script_probes"] = []
+    candidate_scripts = []
+    if isinstance(report.get("page"), dict):
+        for src in report["page"].get("script_srcs", []):
+            if "/datasets/bundle.js" in src or "script-v2.0.5.min.js" in src:
+                if src.startswith("//"):
+                    src = "https:" + src
+                elif src.startswith("/"):
+                    src = "https://data.mendeley.com" + src
+                candidate_scripts.append(src)
+    for url in candidate_scripts[:6]:
+        item = get(url, limit=6 * 1024 * 1024)
+        body = item.pop("body", b"")
+        source = body.decode("utf-8", errors="replace")
+        needles = [
+            "download-all", "file_downloaded", "public-files", "datasets/",
+            "authorization", "access_token", "files?version", "zip/file_downloaded",
+        ]
+        snippets = []
+        for needle in needles:
+            start = 0
+            while len(snippets) < 40:
+                index = source.lower().find(needle.lower(), start)
+                if index < 0:
+                    break
+                snippets.append({
+                    "term": needle,
+                    "snippet": re.sub(r"\\s+", " ", source[max(0, index-140):min(len(source), index+260)]),
+                })
+                start = index + len(needle)
+        item["matching_source_snippets"] = snippets[:40]
+        report["client_script_probes"].append(item)
+
     api_statuses = [item.get("status") for item in report["api_probes"]]
     if any(status == 200 for status in api_statuses):
         report["access_decision"] = "at_least_one_api_endpoint_is_public"
