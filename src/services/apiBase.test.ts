@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import {
   API_BASE_CHANGED_EVENT,
-  getApiBaseConfig,
   normalizeApiBaseUrl,
   setApiBaseUrl,
 } from './apiBase';
