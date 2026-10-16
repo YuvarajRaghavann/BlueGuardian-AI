@@ -501,17 +501,15 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
     @PluginMethod
     public void listPairedDevices(PluginCall call) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
-                requestPermissionForAlias("bluetoothConnect", call, "onPairedDevicesConnectPermission");
-                return;
-            }
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-            && getPermissionState("location") != PermissionState.GRANTED) {
-            requestPermissionForAlias("location", call, "onPairedDevicesLocationPermission");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            && getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+            requestPermissionForAlias("bluetoothConnect", call, "onPairedDevicesConnectPermission");
             return;
         }
 
+        // On Android 11 and older, the app's manifest already declares legacy
+        // BLUETOOTH permission. A location grant is needed for discovery, not
+        // merely reading the system's bonded-device list.
         listPairedDevicesAfterPermissions(call);
     }
 
@@ -519,15 +517,6 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     private void onPairedDevicesConnectPermission(PluginCall call) {
         if (getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
             call.reject("Nearby Devices permission is required to list paired Bluetooth devices.");
-            return;
-        }
-        listPairedDevicesAfterPermissions(call);
-    }
-
-    @PermissionCallback
-    private void onPairedDevicesLocationPermission(PluginCall call) {
-        if (getPermissionState("location") != PermissionState.GRANTED) {
-            call.reject("Location permission is required to list paired devices on this Android version.");
             return;
         }
         listPairedDevicesAfterPermissions(call);
