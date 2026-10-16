@@ -21,13 +21,15 @@ const usableWindow: BleObservationWindowFeatures = {
 };
 
 describe('BlueGuardian temporal BLE-flood model gate', () => {
-  it('does not enable the detector while the model artifact is untrained', () => {
-    expect(getBleFloodModelStatus()).toMatchObject({
-      available: false,
-      status: 'untrained',
-      modelName: 'BlueGuardian BLE Flood Random Forest',
-      modelVersion: '0.0.0-untrained',
-    });
+  it('keeps both untrained and candidate weights disabled until explicit review', () => {
+    const status = getBleFloodModelStatus();
+
+    expect(status.available).toBe(false);
+    expect(['untrained', 'candidate']).toContain(status.status);
+    expect(status.modelName).toBe('BlueGuardian BLE Flood Random Forest');
+    // Version is sourced from the artifact so the test remains valid when the
+    // trained candidate is packaged while deployment is still intentionally disabled.
+    expect(status.modelVersion).toBeTruthy();
   });
 
   it('never emits a threat prediction from an untrained or candidate model', () => {
