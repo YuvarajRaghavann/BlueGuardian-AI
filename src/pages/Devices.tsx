@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { DeviceCard } from '../components/DeviceCard';
 import { DeviceDetailModal } from '../components/DeviceDetailModal';
+import { NativeBleResultsModal } from '../components/NativeBleResultsModal';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { useBluetoothDevices } from '../context/DeviceContext';
@@ -32,6 +33,8 @@ export function Devices() {
   } = useBluetoothDevices();
   const [selectedDevice, setSelectedDevice] =
     useState<null | import('../types').BluetoothDevice>(null);
+  const [nativeResultsOpen, setNativeResultsOpen] = useState(false);
+  const [nativeScanStartedAt, setNativeScanStartedAt] = useState<number | null>(null);
   const [localSearch, setLocalSearch] = useState(state.search);
   const [advertisementWatch, setAdvertisementWatch] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
   const [sourceView, setSourceView] = useState<'real' | 'simulated' | 'all'>('real');
@@ -41,6 +44,26 @@ export function Devices() {
   // The name-filtered option is available when the broad native list is noisy.
   const [pickerMode, setPickerMode] = useState<'known' | 'all'>('all');
   const nativeAndroid = isNativeAndroidApp();
+
+
+  // The native Android scanner does not open Chrome's device chooser. Keep a
+  // dedicated results list limited to observations received during this scan.
+  const nativeScanDevices = useMemo(() => {
+    return state.devices
+      .filter((device) => {
+        if (device.discoverySource !== 'REAL') return false;
+        if (nativeScanStartedAt === null) return true;
+        const seenAt = device.lastSeen instanceof Date
+          ? device.lastSeen.getTime()
+          : Date.parse(String(device.lastSeen));
+        return Number.isFinite(seenAt) && seenAt >= nativeScanStartedAt - 2000;
+      })
+      .sort((a, b) => {
+        const aSeen = a.lastSeen instanceof Date ? a.lastSeen.getTime() : Date.parse(String(a.lastSeen));
+        const bSeen = b.lastSeen instanceof Date ? b.lastSeen.getTime() : Date.parse(String(b.lastSeen));
+        return bSeen - aSeen;
+      });
+  }, [state.devices, nativeScanStartedAt]);
 
   useEffect(() => {
     dispatch({ type: 'SET_SEARCH', payload: localSearch });
@@ -119,6 +142,12 @@ export function Devices() {
   const handleScan = async () => {
     setSourceView('real');
     dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
+    if (nativeAndroid) {
+      setNativeScanStartedAt(Date.now());
+      // Show live results immediately. This also gives the user an explicit
+      // success/empty/error outcome instead of expecting a browser chooser.
+      setNativeResultsOpen(true);
+    }
     await scanRealDevices(pickerMode);
   };
 
@@ -529,12 +558,25 @@ export function Devices() {
               ? sourceView === 'simulated'
                 ? 'Click Generate simulated data to create clearly labelled demo examples. They do not represent nearby hardware.'
                 : sourceView === 'real'
-                  ? 'Click Find all BLE devices and select a real peripheral in Chrome. The chooser returns one selected BLE device per click. Phones and AirPods may not expose a compatible BLE interface to websites.'
+                  ? nativeAndroid
+                    ? 'Tap Scan nearby BLE devices to open the native results dialog. Only actively advertised BLE devices can appear; selecting a result opens its details.'
+                    : 'Click Find all BLE devices and select a real peripheral in Chrome. The chooser returns one selected BLE device per click. Phones and AirPods may not expose a compatible BLE interface to websites.'
                   : 'Choose Find all BLE devices to select a compatible BLE peripheral, or generate simulated examples for UI testing.'
               : 'Adjust your search, filter, or source selection to see other records.'
           }
         />
       )}
+
+      <NativeBleResultsModal
+        open={nativeAndroid && nativeResultsOpen}
+        scan={state.scan}
+        devices={nativeScanDevices}
+        onClose={() => setNativeResultsOpen(false)}
+        onSelect={(device) => {
+          setNativeResultsOpen(false);
+          setSelectedDevice(device);
+        }}
+      />
 
       <DeviceDetailModal
         device={selectedDevice}
