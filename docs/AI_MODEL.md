@@ -69,10 +69,10 @@ All concrete models implement this interface, allowing drop‑in replacement.
 ## 4. Evidence-Based Development Heuristic (src/ml/developmentModel.ts)
 
 * **Name**: BlueGuardian Evidence Heuristic
-* **Version**: 0.3.0-heuristic
+* **Version**: 0.4.0-heuristic
 * **Status**: Development baseline
 
-The hash-based pseudo-random class picker has been removed. The baseline makes a deterministic, explainable decision from explicit evidence such as an suspicious advertised name or corroborating independent indicators; an owner block is policy state, not attack evidence. A new/unknown device is unverified, not malicious solely because manufacturer/type/history is missing. The model returns `INSUFFICIENT_EVIDENCE` when no positive signal is strong enough to support a benign or threat label. One RSSI sample is not treated as spoofing evidence. This remains a rules-based heuristic, **not a trained statistical model**. Its displayed confidence is evidence strength, not a calibrated probability or measured accuracy.
+The hash-based pseudo-random class picker has been removed. The baseline makes a deterministic, explainable decision from explicit evidence such as a suspicious advertised name, connection instability, or corroborating independent indicators; an owner block is policy state, not attack evidence. A trusted device with an independent warning indicator cannot fall through to BENIGN. A new/unknown device is unverified, not malicious solely because manufacturer/type/history is missing. The model returns `INSUFFICIENT_EVIDENCE` when no positive signal is strong enough to support a benign or threat label. One RSSI sample is not treated as spoofing evidence. This remains a rules-based heuristic, **not a trained statistical model**. Its displayed confidence is evidence strength, not a calibrated probability or measured accuracy.
 
 ### Classification Classes (MLThreatClass)
 

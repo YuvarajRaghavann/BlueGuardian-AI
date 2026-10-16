@@ -64,6 +64,31 @@ describe('BlueGuardian false-positive safeguards', () => {
     expect(first.explanation).toContain('not a trained or calibrated model');
   });
 
+
+  it('does not classify a trusted device as benign when connection evidence is unstable', () => {
+    const unstableTrusted = {
+      ...unknownTile,
+      isKnown: true,
+      trusted: true,
+      trustScore: 85,
+      connectionHealth: 'UNSTABLE' as const,
+    };
+    const prediction = new DevelopmentModel().predict(extractDeviceFeatures(unstableTrusted).values);
+    expect(prediction.label).toBe('ANOMALOUS_BEHAVIOR');
+    expect(prediction.label).not.toBe('BENIGN');
+  });
+
+  it('reserves BENIGN for known trusted devices without independent warning signals', () => {
+    const trusted = {
+      ...unknownTile,
+      isKnown: true,
+      trusted: true,
+      trustScore: 85,
+      connectionHealth: 'STABLE' as const,
+    };
+    expect(new DevelopmentModel().predict(extractDeviceFeatures(trusted).values).label).toBe('BENIGN');
+  });
+
   it('does not mistake an owner block decision for proof of malicious behaviour', () => {
     const blocked = { ...unknownTile, blocked: true };
     expect(calculateTrustScore(blocked).riskLevel).toBe('high');

@@ -2,7 +2,7 @@ import type { MLPrediction, MLThreatClass } from '../types/index.js';
 import type { ThreatClassificationModel } from './model.js';
 
 const MODEL_NAME = 'BlueGuardian Evidence Heuristic';
-const MODEL_VERSION = '0.3.0-heuristic';
+const MODEL_VERSION = '0.4.0-heuristic';
 
 const FEATURE_NAMES = [
   'normalizedTrustScore', 'normalizedRSSI', 'knownFlag', 'trustedFlag',
@@ -51,6 +51,16 @@ export class DevelopmentModel implements ThreatClassificationModel {
       confidence = 0.58;
       reasons.push('the advertised name contains a suspicious term');
       reasons.push('a name match alone does not prove malicious behaviour');
+    } else if (securityFlagCountNorm >= 0.66) {
+      label = 'POTENTIAL_UNAUTHORIZED_ACCESS';
+      confidence = 0.68;
+      reasons.push('multiple independent security indicators are present');
+      reasons.push('review the device and gather further evidence before blocking it');
+    } else if (securityFlagCountNorm > 0) {
+      label = 'ANOMALOUS_BEHAVIOR';
+      confidence = 0.45;
+      reasons.push('a connection or other single security indicator needs follow-up');
+      reasons.push('one indicator is not enough to assert malicious behaviour');
     } else if (knownFlag >= 0.5 && trustedFlag >= 0.5 && trustNorm >= 0.7) {
       label = 'BENIGN';
       confidence = 0.8;
