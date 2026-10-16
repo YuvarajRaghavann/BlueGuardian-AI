@@ -7,6 +7,7 @@ on:
       - 'android/phase4-classic-discovery-*'
       - 'android/phase5-combined-scanning-*'
       - 'android/phase6-backend-integration-*'
+      - 'android/phase6-final-ux-*'
   workflow_dispatch:
 
 permissions:
