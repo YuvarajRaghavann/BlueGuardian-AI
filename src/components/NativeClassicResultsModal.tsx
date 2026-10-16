@@ -35,7 +35,7 @@ export function NativeClassicResultsModal({
       ? 'Reading Android’s paired-device list…'
       : devices.length > 0
       ? `Android returned ${devices.length} paired device(s).`
-      : scan.error || 'No paired classic Bluetooth devices were returned.'
+      : scan.error || 'No paired Bluetooth devices were returned.'
     : scanning
       ? `Discovering classic Bluetooth devices… ${devices.length} device(s) found`
       : failed
@@ -137,7 +137,7 @@ export function NativeClassicResultsModal({
                 {loading
                   ? 'Android is checking its system paired-device registry. The permission prompt may need your approval.'
                   : pairedView
-                  ? 'Pair an eligible device in Android Settings, then refresh this list.'
+                  ? 'Pair an eligible Bluetooth device in Android Settings, then refresh this list.'
                   : 'Make the other classic Bluetooth device discoverable or place it in pairing mode before retrying. Devices that only advertise over BLE belong in the separate BLE scan.'}
               </p>
             </div>
