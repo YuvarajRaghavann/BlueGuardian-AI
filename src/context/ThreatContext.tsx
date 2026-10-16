@@ -262,11 +262,13 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
   // browser-side development analysis remains active when no owner token is configured.
   useEffect(() => {
     if (storedThreats === null || deviceState.devices.length === 0) return;
-    if (!ownerToken) {
+    // Keep the current UI useful when the backend is temporarily unavailable.
+    // Re-evaluate local devices so stale ACTIVE alerts can still be cleared safely.
+    if (!ownerToken || !backendReady) {
       refreshThreats(deviceState.devices, dispatch);
       return;
     }
-    if (!backendReady || serverThreatsReadyToken !== ownerToken) return;
+    if (serverThreatsReadyToken !== ownerToken) return;
 
     let cancelled = false;
     const syncAndAssess = async () => {
