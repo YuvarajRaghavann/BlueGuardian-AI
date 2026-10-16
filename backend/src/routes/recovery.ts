@@ -275,10 +275,7 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
         if ((error as { code?: number })?.code === 11000) continue;
         throw error;
       }
-      if (device.recoveryState === 'lost') {
-        device.recoveryState = 'searching';
-        await device.save();
-      }
+      // Candidate reports never change lost/found state automatically; only the owner confirms them.
     }
   }
 

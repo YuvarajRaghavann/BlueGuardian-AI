@@ -171,7 +171,7 @@ describe('recovery API integration', () => {
       confidence: 0.45,
     });
     expect(store.encounters[0].location).toBeUndefined();
-    expect(store.devices[0].recoveryState).toBe('searching');
+    expect(store.devices[0].recoveryState).toBe('lost');
   });
 
   it('rejects community reports that try to attach a location without opt-in', async () => {

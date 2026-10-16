@@ -59,7 +59,7 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
       throw new RecoveryValidationError('Recovery fingerprint must contain an advertised name and service UUID list.');
     }
     const fingerprintName = typeof recoveryFingerprint.name === 'string'
-      ? recoveryFingerprint.name.normalize('NFKC').replace(/\\s+/g, ' ').trim().toLowerCase()
+      ? recoveryFingerprint.name.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase()
       : '';
     const rawUuids = recoveryFingerprint.serviceUuids;
     if (!fingerprintName || fingerprintName.length > 96 || !Array.isArray(rawUuids) ||
