@@ -65,18 +65,6 @@ function installNativeBluetoothPlugin() {
   const requiredEntries = [
     '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
-    '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />',
-    '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />',');
-    const permissionTag = new RegExp(
-      '<uses-permission\\b(?=[^>]*android:name="' + escapedName + '")[^>]*/>',
-      'g',
-    );
-    xml = xml.replace(permissionTag, (tag) => tag.replace(/\\s+android:maxSdkVersion="30"/, ''));
-  }
-
-  const requiredEntries = [
-    '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
-    '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
     '<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />',
     '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />',
