@@ -10,7 +10,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
-import { getModelStatus, availableModels } from '../ml/mlService';
+import { getModelStatus, getCurrentModelMetadata, availableModels } from '../ml/mlService';
 import { useSecurity } from '../context/SecurityContext';
 import { api } from '../services/api';
 import { localDatabase } from '../services/localDatabase';
