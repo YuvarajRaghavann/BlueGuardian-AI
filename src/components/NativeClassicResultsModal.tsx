@@ -37,11 +37,11 @@ export function NativeClassicResultsModal({
       ? `Android returned ${devices.length} paired device(s).`
       : scan.error || 'No paired Bluetooth devices were returned.'
     : scanning
-      ? `Discovering classic Bluetooth devices… ${devices.length} device(s) found`
+      ? `Searching nearby… ${devices.length} device(s) found`
       : failed
         ? scan.error || 'Classic Bluetooth discovery failed.'
         : devices.length > 0
-          ? `Discovery finished. ${devices.length} classic device(s) found.`
+          ? `Found ${devices.length} device(s). Select one to view details.`
           : scan.error || 'No classic Bluetooth devices were discovered.';
 
   return (
@@ -63,10 +63,10 @@ export function NativeClassicResultsModal({
             </div>
             <div>
               <h2 id="native-classic-results-title" className="text-base font-semibold text-[var(--text)]">
-                {pairedView ? 'Paired Bluetooth devices' : 'Classic Bluetooth discovery'}
+                {pairedView ? 'My paired devices' : 'Nearby devices'}
               </h2>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                {pairedView ? 'Android system bonded-device list' : 'Foreground classic discovery · separate from BLE'}
+                {pairedView ? 'Devices saved on this phone' : 'Device search results'}
               </p>
             </div>
           </div>
@@ -94,7 +94,7 @@ export function NativeClassicResultsModal({
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                 {pairedView
                   ? 'These are devices already paired in Android Settings. This list does not mean they are currently connected or nearby.'
-                  : 'Classic discovery only returns devices that respond while discoverable. BLE-only advertisers will not necessarily appear here, and detection does not establish a connection.'}
+                  : 'Only nearby devices that respond during a scan appear here. Detection does not mean a device is connected.'}
               </p>
             </div>
           </div>
