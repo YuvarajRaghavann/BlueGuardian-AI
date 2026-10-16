@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
-import { setOwnerToken } from '../services/ownerSession';
+import { setOwnerToken as setActiveOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
 
 function formatDate(value?: string | null) {
@@ -41,7 +41,7 @@ export function Recovery() {
       const loadedDevices = await api.recovery.listDevices(token);
       // Only publish the credential to the rest of the app after a protected
       // owner request succeeds. The session helper holds it in memory only.
-      setOwnerToken(token);
+      setActiveOwnerToken(token);
       setDevices(loadedDevices);
       setDevicesLoaded(true);
       if (selectedDevice) {
@@ -234,7 +234,7 @@ export function Recovery() {
             onChange={event => {
               // Do not keep using a previously authenticated owner token after
               // the user starts entering a different credential.
-              setOwnerToken(null);
+              setActiveOwnerToken(null);
               setOwnerToken(event.target.value);
               setDevices([]);
               setDevicesLoaded(false);
