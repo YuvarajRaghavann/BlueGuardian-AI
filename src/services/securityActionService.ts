@@ -31,9 +31,19 @@ export function applySecurityActionToDevice(
     case 'TRUST':
     case 'MARK_UNKNOWN': {
       const updated = action === 'TRUST'
-        ? { ...device, trusted: true, isKnown: true }
+        ? { ...device, trusted: true, isKnown: true, blocked: false }
         : { ...device, trusted: false, isKnown: false };
       const trust = calculateTrustScore(updated);
+      if (action === 'TRUST') {
+        // Preserve the explicit user decision. A separate connection attempt
+        // must still pass the connection policy and may still be blocked.
+        return {
+          ...updated,
+          trustScore: trust.score,
+          riskLevel: trust.riskLevel,
+          approvalRequired: false,
+        };
+      }
       return reconcileApprovalState({
         ...updated,
         trustScore: trust.score,
@@ -62,8 +72,11 @@ export function validateAction(
 
   switch (action) {
     case 'TRUST':
-      if (device.trusted) return { valid: false, reason: 'Device already trusted' };
-      if (protection === 'BLOCKED') return { valid: false, reason: 'Cannot trust a blocked device without unblocking first' };
+      if (device.trusted && device.isKnown) return { valid: false, reason: 'Device already trusted' };
+      if (device.blocked) return { valid: false, reason: 'Unblock this device before approving it' };
+      // A risk assessment may be high while review is pending. Trust approval is
+      // a review decision, not a connection attempt, so only an explicit block
+      // prevents recording that decision here.
       return { valid: true };
     case 'MARK_UNKNOWN':
       if (!device.trusted) return { valid: false, reason: 'Device already marked unknown' };
