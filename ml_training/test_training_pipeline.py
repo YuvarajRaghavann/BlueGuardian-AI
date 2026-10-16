@@ -9,6 +9,7 @@ import pandas as pd
 from ml_training.train_ble_flood_model import (
     FEATURE_COLUMNS,
     find_group_split,
+    find_paired_capture_split,
     imputation_values,
     impute,
 )
@@ -37,6 +38,34 @@ class TrainingPipelineTests(unittest.TestCase):
         self.assertTrue(set(groups.iloc[train]).isdisjoint(set(groups.iloc[test])))
         self.assertEqual(set(labels.iloc[train]), {"benign", "ble_flood"})
         self.assertEqual(set(labels.iloc[test]), {"benign", "ble_flood"})
+
+    def test_paired_capture_split_keeps_capture_sessions_disjoint_and_covers_both_labels(self) -> None:
+        groups = pd.Series([
+            "benign_static_1hr",
+            "spam_randomized_6hr_01",
+            "spam_static_mac_100ms_01",
+            "spam_static_mac_20ms",
+            "benign_extended_12hr",
+            "spam_randomized_6hr_02",
+            "spam_static_mac_100ms_02",
+        ])
+        labels = pd.Series([
+            "benign",
+            "ble_flood",
+            "ble_flood",
+            "ble_flood",
+            "benign",
+            "ble_flood",
+            "ble_flood",
+        ])
+
+        train, test = find_paired_capture_split(groups, labels)
+
+        self.assertTrue(set(groups.iloc[train]).isdisjoint(set(groups.iloc[test])))
+        self.assertEqual(set(labels.iloc[train]), {"benign", "ble_flood"})
+        self.assertEqual(set(labels.iloc[test]), {"benign", "ble_flood"})
+        self.assertIn("spam_randomized_6hr_01", set(groups.iloc[train]))
+        self.assertIn("spam_randomized_6hr_02", set(groups.iloc[test]))
 
     def test_missing_rssi_is_imputed_using_training_values_only(self) -> None:
         frame, labels, groups = self._tiny_windows()
