@@ -285,21 +285,26 @@ export async function listNativeAndroidPairedDevices(): Promise<NativeClassicObs
     throw new Error('Paired Bluetooth devices are only available inside the BlueGuardian Android APK.');
   }
 
-  const result = await Promise.race([
-    nativeBluetooth.listPairedDevices(),
-    new Promise<never>((_resolve, reject) => {
-      setTimeout(() => reject(new Error(
-        'Android did not return the paired-device list. Check Nearby Devices permission and native plugin registration.',
-      )), 10000);
-    }),
-  ]);
-  return (Array.isArray(result.devices) ? result.devices : []).map((device) => ({
-    ...device,
-    id: String(device.address || device.id || '').trim(),
-    address: String(device.address || device.id || '').trim(),
-    transport: 'CLASSIC' as const,
-    paired: true,
-    observedAt: typeof device.observedAt === 'number' ? device.observedAt : Date.now(),
-  })).filter((device) => Boolean(device.address));
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      nativeBluetooth.listPairedDevices(),
+      new Promise<never>((_resolve, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error(
+          'Android did not return the paired-device list. Check Nearby Devices permission and native plugin registration.',
+        )), 10000);
+      }),
+    ]);
+    return (Array.isArray(result.devices) ? result.devices : []).map((device) => ({
+      ...device,
+      id: String(device.address || device.id || '').trim(),
+      address: String(device.address || device.id || '').trim(),
+      transport: 'CLASSIC' as const,
+      paired: true,
+      observedAt: typeof device.observedAt === 'number' ? device.observedAt : Date.now(),
+    })).filter((device) => Boolean(device.address));
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
 }
 
