@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import {
   Settings,
   Brain,
@@ -73,7 +73,7 @@ export function SettingsPage() {
     });
   };
 
-  const handleSaveApiBase = (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSaveApiBase = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setApiBaseBusy(true);
     setApiBaseMessage(null);
