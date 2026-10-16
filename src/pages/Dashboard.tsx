@@ -624,7 +624,7 @@ export function Dashboard() {
                   </h2>
                 </div>
 
-                <StatusBadge label="DEMO" variant="warning" />
+                <StatusBadge label="HEURISTIC" variant="warning" />
               </div>
 
               <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
