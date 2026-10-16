@@ -23,9 +23,9 @@ export function NativeClassicResultsModal({
 
   const pairedView = view === 'paired';
   const scanning = !pairedView && scan.state === 'scanning';
-  const failed = scan.state === 'error'
+  const failed = !pairedView && (scan.state === 'error'
     || scan.state === 'permission-denied'
-    || scan.state === 'unsupported';
+    || scan.state === 'unsupported');
 
   const summary = pairedView
     ? devices.length > 0
