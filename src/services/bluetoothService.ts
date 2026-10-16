@@ -131,6 +131,11 @@ export type RequestDeviceResult =
 export interface BluetoothDeviceInfo {
   id: string;
   name?: string;
+  address?: string;
+  rssi?: number;
+  transport?: 'BLE' | 'CLASSIC' | 'PAIRED' | 'WEB';
+  source?: 'native' | 'web';
+  paired?: boolean;
   gatt?: any; // BluetoothRemoteGATTServer not globally typed
   /** Native handle is kept only in memory for optional advertisement watching. Never persist it. */
   nativeDevice?: any;
