@@ -1,0 +1,45 @@
+name: Inspect BLEGuard Public Samples
+
+on:
+  push:
+    branches:
+      - 'ml/blueguardian-trained-threat-model-20261016'
+    paths:
+      - 'ml_training/inspect_bleguard_samples.py'
+      - '.github/workflows/inspect-bleguard-samples.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blueguardian-bleguard-inventory
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: Inspect public workbook schema (no raw data committed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out isolated ML branch
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install workbook reader
+        run: python -m pip install openpyxl==3.1.5
+
+      - name: Download small public BLEGuard sample and inventory schema
+        run: python ml_training/inspect_bleguard_samples.py
+
+      - name: Upload redacted workbook inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: bleguard-public-sample-inventory
+          path: ml_training/reports/bleguard_sample_inventory.json
+          if-no-files-found: error
+          retention-days: 14
