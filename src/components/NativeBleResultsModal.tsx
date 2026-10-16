@@ -31,7 +31,7 @@ export function NativeBleResultsModal({
   const summary = scanning
     ? `Searching nearby… ${devices.length} device(s) found`
     : failed
-      ? scan.error || 'The BLE scan could not be completed.'
+      ? scan.error || 'The device search could not be completed.'
       : devices.length > 0
         ? `Found ${devices.length} device(s). Select one to view details.`
         : scan.error || 'No devices found. Keep Bluetooth on and try again.';
@@ -104,7 +104,7 @@ export function NativeBleResultsModal({
                       <Bluetooth className="h-5 w-5" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-[var(--text)]">{device.name || 'Unknown BLE device'}</p>
+                      <p className="truncate text-sm font-semibold text-[var(--text)]">{device.name || 'Unknown Bluetooth device'}</p>
                       <p className="mt-1 truncate text-xs text-[var(--text-muted)]">
                         {device.type} · {device.address || device.id}
                       </p>
@@ -126,17 +126,17 @@ export function NativeBleResultsModal({
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
               <Bluetooth className="h-8 w-8 text-[var(--text-muted)]" />
               <p className="text-sm font-medium text-[var(--text)]">
-                {scanning ? 'Waiting for the first BLE advertisement' : 'No BLE devices to display'}
+                {scanning ? 'Waiting for nearby devices' : 'No devices to display'}
               </p>
               <p className="max-w-md text-xs leading-5 text-[var(--text-muted)]">
-                Keep the app in the foreground and try a BLE peripheral that is actively advertising. If the scan failed, review the status above and check Android Nearby Devices permission.
+                Keep the app open, bring your device nearby, and make sure Bluetooth is on. If the scan failed, review the message above and check your device permissions.
               </p>
             </div>
           )}
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-3">
-          <span className="text-xs text-[var(--text-muted)]">Foreground BLE discovery</span>
+          <span className="text-xs text-[var(--text-muted)]">Nearby search</span>
           <button
             type="button"
             onClick={onClose}
