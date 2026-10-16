@@ -114,7 +114,7 @@ export function NativeClassicResultsModal({
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-secondary)]">
                         <span>{device.paired ? 'Paired in Android' : 'Discovered nearby'}</span>
                         <span>{typeof device.rssi === 'number' ? `${device.rssi} dBm` : 'RSSI unavailable'}</span>
-                        <span>{device.connectionStatus === 'connected' ? 'Connected' : 'Not connected'}</span>
+                        <span>{device.connectionStatus === 'connected' ? 'Connected' : device.connectionStatus === 'disconnected' ? 'Not connected' : 'Connection not checked'}</span>
                       </div>
                     </div>
                     <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
