@@ -221,12 +221,12 @@ export function Recovery() {
           setError(details || 'No Bluetooth devices were found. Keep the target nearby and advertising, and check Android Bluetooth permissions.');
         } else {
           const scanSummary = scan.ok
-            ? `BLE scan completed with ${scan.devicesFound} advertisement source(s).`
-            : `BLE scan could not complete: ${scan.error}`;
+            ? `Found ${scan.devicesFound} nearby Bluetooth device(s).`
+            : `Could not search for nearby devices: ${scan.error}`;
           setNotice(`Found ${available.length} available or paired Bluetooth device(s). Choose one below. ${scanSummary} ${pairedListError ? 'The paired-device list was unavailable.' : ''}`);
         }
       } catch (caught) {
-        setError(`Native Android Bluetooth selection failed: ${errorMessage(caught)}`);
+        setError(`Could not find nearby devices: ${errorMessage(caught)}`);
       } finally {
         setBusy(false);
       }
@@ -371,7 +371,7 @@ export function Recovery() {
         }, 5000);
 
         observedIdentifier = observed.has(registeredIdentifier) ? registeredIdentifier : null;
-        observationDescription = 'Device address was observed during a foreground Android BLE/classic scan. No GPS coordinates were collected.';
+        observationDescription = 'A nearby Bluetooth signal was verified. No GPS coordinates were collected.';
 
         if (!observedIdentifier) {
           const reasons = [
@@ -634,7 +634,7 @@ export function Recovery() {
           </button>
           {isNativeAndroidApp() && availableNativeDevices.length > 0 && (
             <div className="mt-4 space-y-2" aria-label="Available Android Bluetooth devices">
-              <p className="text-xs text-[var(--text-muted)]">Select a device found in the foreground BLE scan or Android paired-device list.</p>
+              <p className="text-xs text-[var(--text-muted)]">Select a nearby device or one already paired with your phone.</p>
               {availableNativeDevices.map(device => (
                 <button
                   key={device.id}
@@ -738,7 +738,7 @@ export function Recovery() {
         <button type="button" onClick={() => void scanForCommunitySightings()} disabled={busy || !ownerToken.trim()} className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50">
           {busy ? 'Scanning and submitting…' : 'Scan and help nearby owners'}
         </button>
-        {!isNativeAndroidApp() && <p className="mt-2 text-xs text-[var(--text-muted)]">Native Android APK required for nearby BLE scanning. The browser cannot scan passively.</p>}
+        {!isNativeAndroidApp() && <p className="mt-2 text-xs text-[var(--text-muted)]">Community search is available in the Android app.</p>}
       </section>
 
       {selectedDevice && recoveryInfo && (
