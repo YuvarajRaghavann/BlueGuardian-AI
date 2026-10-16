@@ -48,10 +48,33 @@ function installNativeBluetoothPlugin() {
   fs.copyFileSync(activitySource, path.join(nativePackageDir, 'MainActivity.java'));
 
   let xml = fs.readFileSync(androidManifestPath, 'utf8');
+  // Android's classic BluetoothAdapter.startDiscovery() permission contract
+  // includes location unless BLUETOOTH_SCAN is explicitly marked neverForLocation.
+  // This project avoids that flag because it can filter some Bluetooth advertisers.
+  // Request location only when the user explicitly starts classic discovery; no
+  // GPS coordinates are collected by this Bluetooth-discovery feature.
+  for (const permissionName of [
+    'android.permission.ACCESS_COARSE_LOCATION',
+    'android.permission.ACCESS_FINE_LOCATION',
+  ]) {
+    const escapedName = permissionName.replace(/[.*+?^${}()|[\]\\]/g, '\\  let xml = fs.readFileSync(androidManifestPath, 'utf8');
   const requiredEntries = [
     '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
     '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />',
+    '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />',');
+    const permissionTag = new RegExp(
+      '<uses-permission\\b(?=[^>]*android:name="' + escapedName + '")[^>]*/>',
+      'g',
+    );
+    xml = xml.replace(permissionTag, (tag) => tag.replace(/\\s+android:maxSdkVersion="30"/, ''));
+  }
+
+  const requiredEntries = [
+    '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
+    '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
+    '<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />',
+    '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
     '<uses-feature android:name="android.hardware.bluetooth" android:required="false" />',
@@ -65,10 +88,14 @@ function installNativeBluetoothPlugin() {
     const applicationIndex = xml.indexOf('<application');
     if (applicationIndex < 0) throw new Error('Cannot safely add Bluetooth declarations: <application> tag is missing.');
     xml = xml.slice(0, applicationIndex) + '    ' + missingEntries.join('\n    ') + '\n    ' + xml.slice(applicationIndex);
-    fs.writeFileSync(androidManifestPath, xml);
   }
 
-  return 'Native foreground BLE and classic Bluetooth discovery plugin installed; Android permissions and optional Bluetooth hardware features configured.';
+  if (!xml.includes('<application')) {
+    throw new Error('Cannot safely add Bluetooth declarations: <application> tag is missing.');
+  }
+  fs.writeFileSync(androidManifestPath, xml);
+
+  return 'Native foreground BLE and classic Bluetooth discovery plugin installed; Android permissions and optional Bluetooth hardware features configured. Classic discovery requests Nearby Devices plus location permission as required by Android; GPS coordinates are not collected by this feature.';
 }
 
 const nativePluginNote = installNativeBluetoothPlugin();
@@ -108,6 +135,7 @@ const manifest = [
   `Capacitor CLI: ${cli.version}`,
   'Android compile/target SDK intended: 36 / 36',
   'Scope: React/Vite UI, native foreground BLE scan/results dialog, separate native classic Bluetooth discovery, and paired-device listing. Combined scanning and native connection are later phases.',
+  'Classic discovery requires Nearby Devices and Android location permission on supported OS versions; this feature does not collect GPS coordinates.',
   nativePluginNote,
   ...notes,
   '',
