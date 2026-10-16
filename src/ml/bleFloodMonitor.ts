@@ -32,6 +32,9 @@ export function processBleObservationWindow(features: BleObservationWindowFeatur
   }
 
   const now = features.windowEndMs || Date.now();
+  const lastWindowAt = history.length > 0 ? history[history.length - 1].at : 0;
+  // Do not combine evidence across separate scans or long idle gaps.
+  if (lastWindowAt > 0 && now - lastWindowAt > 15_000) history.length = 0;
   history.push({
     at: now,
     positive: prediction.label === 'BLE_FLOOD',
