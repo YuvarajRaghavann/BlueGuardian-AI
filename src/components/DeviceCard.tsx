@@ -130,6 +130,9 @@ export function DeviceCard({
                       : 'warning'
                   }
                 />
+                {device.discoveryTransport === 'CLASSIC' && (
+                  <StatusBadge label={device.paired ? 'PAIRED' : 'CLASSIC'} variant={device.paired ? 'success' : 'info'} />
+                )}
               </div>
 
               <p className="mt-1 truncate text-xs capitalize text-[var(--text-secondary)]">
