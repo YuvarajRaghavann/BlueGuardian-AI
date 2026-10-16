@@ -131,7 +131,7 @@ const manifest = [
   'Scope: React/Vite UI, Firebase email/password sign-in, memory-only Firebase ID/refresh-token handling, native foreground BLE/classic/combined discovery, native Android recovery device selection, runtime-configurable HTTPS backend endpoint in Settings, owner-scoped backend devices/threats/actions/events/recovery calls, and backend/frontend/Android CI validation. The backend is not packaged inside the APK; deploy the Phase 6 backend separately and configure its URL in Settings.',
   'Classic discovery requires Nearby Devices and Android location permission on supported OS versions; this feature does not collect GPS coordinates.',
   'Combined mode scans BLE first and then classic Bluetooth to avoid concurrent permission prompts and adapter discovery sessions. Device merging uses normalized Android-reported address when available; randomized BLE addresses may remain separate.',
-  'Android backend calls require the server CORS allowlist to include the Capacitor WebView origin https://localhost. No production backend hostname or owner token is baked into this APK.',
+  'The default Phase 6 backend URL is configured at build time as https://blueguardian-backend-phase6.onrender.com/api and can be overridden in Settings. The server CORS allowlist must include the Capacitor WebView origin https://localhost. No owner token or secret is baked into this APK.',
   nativePluginNote,
   ...notes,
   '',
