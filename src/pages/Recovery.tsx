@@ -255,7 +255,9 @@ export function Recovery() {
       setSelectedBluetoothDevice(null);
       setRecoveryInfo(null);
       setEncounters([]);
-      setNotice('Device registration was saved by the backend. Its browser-scoped identifier is not a universal hardware identity.');
+      setNotice(selectedBluetoothDevice.source === 'native'
+        ? 'Device registration was saved by the backend using the Android-reported Bluetooth address. Addresses may be randomized and are not guaranteed to be a universal hardware identity.'
+        : 'Device registration was saved by the backend using a browser-scoped identifier, which is not a universal hardware identity.');
       try {
         await loadRecoveryInfo(registered, token);
       } catch (refreshError) {
@@ -397,7 +399,7 @@ export function Recovery() {
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">Device Recovery</h1>
         <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-          Register and manage recovery cases through the authenticated backend. Web Bluetooth requires a user gesture and does not provide continuous community scanning.
+          Register and manage recovery cases through the authenticated backend. Android uses foreground native BLE/classic discovery with system permissions. Browser builds use Web Bluetooth when available; neither mode provides continuous background community scanning.
         </p>
       </header>
 

@@ -6,7 +6,7 @@ Date: 2026-10-16
 
 Phase 6 is isolated on \`android/phase6-backend-integration-20261016\`, based on the Phase 5 combined-discovery source. No changes are made to \`main\` or production.
 
-This phase connects the existing React/Capacitor UI to the existing owner-scoped HTTP API, makes the API base configurable for an installed Android APK, improves owner-session wiring, surfaces backend audit events, and extends CI to run backend tests/build as well as frontend tests/build and Android compilation.
+This phase connects the React/Capacitor UI to the owner-scoped HTTP API, adds Firebase email/password sign-in and server-side ID-token verification, provides native Android foreground Bluetooth selection inside Device Recovery, makes the API base configurable in the installed APK, surfaces backend audit events, and validates frontend, backend, and Android builds in CI.
 
 The backend is **not packaged inside the APK**. A reachable backend deployment, an HTTPS URL, database configuration, and appropriate server-side authentication/CORS configuration are still required for real remote persistence.
 
@@ -21,21 +21,28 @@ The backend is **not packaged inside the APK**. A reachable backend deployment, 
 - Authenticated API calls refresh a Firebase ID token in memory as it nears expiry, without persisting tokens to localStorage or sessionStorage.
 - The backend verifies Firebase ID-token signatures against Google's rotating public JWKs and validates issuer, audience, subject, issue time, authentication time, and expiry. No Firebase service-account private key is required.
 - The owner ID for Firebase-authenticated requests is derived from the verified token subject, so records remain scoped to the authenticated Firebase user.
+- Device Recovery now uses the existing native Android BLE and classic Bluetooth plugin in the installed APK: it merges the paired-device list with nearby BLE scan results for selection, while browser builds retain the Web Bluetooth picker. Presence checks use a foreground BLE/classic scan. This does not add background scanning or location collection.
 - The Events page now reads owner-scoped server audit events when the owner registry is connected, while retaining browser-local/demo fallback when not connected. It does not represent these events as system-wide Android telemetry.
 - The backend environment example documents that Capacitor Android WebView calls use the \`https://localhost\` origin and that the actual backend deployment must allow it via \`BLUEGUARDIAN_CORS_ORIGINS\`.
 - Added tests for API URL normalization, HTTPS requirements, endpoint persistence/reset, change notifications, and actual health requests through the configured endpoint.
 - Android CI now also runs the backend regression suite and TypeScript build.
 
+## Deploy a separate Phase 6 backend to Render
+
+The existing Render service `blueguardian-backend` is attached to `main`; leave it unchanged. This branch contains a `render.yaml` Blueprint for a separate `blueguardian-backend-phase6` test service.
+
+1. In Render, create a **New → Blueprint Instance** connected to this repository and select branch `android/phase6-backend-integration-20261016`. Let Render read the branch's `render.yaml`.
+2. Supply `MONGODB_URI` in Render's secret environment settings. Use the same valid Atlas connection string that worked locally, but never put it in Git or the APK. The Blueprint sets `NODE_ENV=production`, `BLUEGUARDIAN_AUTH_MODE=required`, `FIREBASE_PROJECT_ID=blueguardian-ai-auth`, Node `24.21.0`, and `BLUEGUARDIAN_CORS_ORIGINS=https://localhost`.
+3. Deploy the Blueprint. Render assigns the test service a public HTTPS URL. Open `https://YOUR-PHASE6-URL/api/health`; require `{"status":"ok","database":"connected"}` before testing authentication. If the health check fails, review Render deploy/runtime logs and the Atlas network access list.
+4. In Firebase Console, enable **Authentication → Sign-in method → Email/Password** (your screenshot showed it enabled already).
+5. In the Phase 6 APK, open **Settings → Backend endpoint** and enter the test service's HTTPS origin, e.g. `https://YOUR-PHASE6-URL`. Do not enter a MongoDB URI. BlueGuardian appends `/api`; choose **Save and test backend**.
+6. Open **Device Recovery**, choose **Create account** for a new test user or **Sign in** for an existing Firebase user. Successful Firebase sign-in followed by a successful backend request should load the user's owner-scoped records; a new account is expected to start with an empty list.
+7. Tap **Find native Android devices**, allow Android Nearby Devices (and any version-dependent permission requested by the app), keep a BLE device advertising or choose an already-paired device, and select it from the result list. Register it as lost and verify it appears under **My recovery cases**. Try **Verify present with Bluetooth** only while the device is nearby/discoverable.
+8. The first recovery registration and presence request are real end-to-end tests only after the Phase 6 Render service is deployed with those settings. CI validates code and APK compilation, but it cannot replace testing Bluetooth permission prompts and a physical BLE device on your phone.
+
 ## Configure the installed APK
 
-1. Deploy the Node backend to a reachable HTTPS host, configure its MongoDB connection, and set `FIREBASE_PROJECT_ID=blueguardian-ai-auth` in the hosting environment. Keep `NODE_ENV=production` and `BLUEGUARDIAN_AUTH_MODE=required`.
-2. Include \`https://localhost\` in the deployed backend's \`BLUEGUARDIAN_CORS_ORIGINS\` allowlist for Capacitor Android WebView fetch requests. Include the actual browser frontend origin(s) too if the web app is hosted separately.
-3. Install the Phase 6 APK and open **Settings → Backend endpoint**.
-4. Enter the actual backend URL. BlueGuardian appends \`/api\` automatically if you omit it, then select **Save and test backend**.
-5. In Firebase Console, enable **Authentication → Sign-in method → Email/Password**. Open **Device Recovery** and use **Create account** or **Sign in**. The app requests a Firebase ID token and sends it to the backend, which verifies it before any owner-scoped record can be accessed.
-6. Confirm Settings reports API health and database status. Test a real device observation, owner-scoped assessment, a security action, and the Events page against your own non-production data.
-
-Do not substitute an example URL, publish a token in source control, or use a third-party proxy for protected owner API calls.
+The API endpoint and database are separate: the APK receives only the backend's HTTPS URL, while the MongoDB URI stays in Render's environment. The backend must allow the Capacitor Android WebView origin `https://localhost` in `BLUEGUARDIAN_CORS_ORIGINS`; add the exact browser frontend origin too if testing the hosted web app.
 
 ## Security boundaries and limitations
 
@@ -46,7 +53,7 @@ Do not substitute an example URL, publish a token in source control, or use a th
 - CORS is not authentication. Set the server allowlist to the actual client origins; do not wildcard protected traffic as a substitute.
 - Device/threat/action synchronization happens only when an owner token is established and the owner-scoped device registry loads successfully. If the endpoint is missing or unavailable, the UI retains local data and reports the connection problem.
 - Bluetooth discovery remains foreground-only. Phase 6 does not add native GATT connection, background scan service, automatic device trust, community location collection, or recovery-notification delivery.
-- No backend deployment hostname is known/configured by this branch; none is baked into the APK. No live remote backend, live MongoDB, or physical phone end-to-end test is claimed by CI alone.
+- The existing `blueguardian-backend.onrender.com` service is deployed from `main`; it is not assumed to contain this Phase 6 code. Do not change the existing service while testing this branch. No Phase 6 Render URL is baked into the APK. No live Phase 6 Render/Firebase end-to-end test or physical phone test is claimed by CI alone.
 
 ## Automated acceptance gate
 
