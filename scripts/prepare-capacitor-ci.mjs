@@ -68,7 +68,7 @@ function installNativeBluetoothPlugin() {
     fs.writeFileSync(androidManifestPath, xml);
   }
 
-  return 'Native foreground BLE plugin installed; Android permissions and optional Bluetooth hardware features configured.';
+  return 'Native foreground BLE and classic Bluetooth discovery plugin installed; Android permissions and optional Bluetooth hardware features configured.';
 }
 
 const nativePluginNote = installNativeBluetoothPlugin();
@@ -100,14 +100,14 @@ const capacitorCore = JSON.parse(fs.readFileSync(path.join(root, 'node_modules',
 const capacitorAndroid = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '@capacitor', 'android', 'package.json'), 'utf8'));
 const cli = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '@capacitor', 'cli', 'package.json'), 'utf8'));
 const manifest = [
-  'BlueGuardian Phase 3 native BLE discovery repair build',
+  'BlueGuardian Phase 4 classic Bluetooth discovery build',
   `Commit: ${process.env.GITHUB_SHA ?? 'local'}`,
   `Node: ${process.version}`,
   `Capacitor core: ${capacitorCore.version}`,
   `Capacitor Android: ${capacitorAndroid.version}`,
   `Capacitor CLI: ${cli.version}`,
   'Android compile/target SDK intended: 36 / 36',
-  'Scope: React/Vite UI with live native BLE results dialog and guarded foreground Android BLE discovery. Native GATT connection, classic Bluetooth, and combined scanning remain later phases.',
+  'Scope: React/Vite UI, native foreground BLE scan/results dialog, separate native classic Bluetooth discovery, and paired-device listing. Combined scanning and native connection are later phases.',
   nativePluginNote,
   ...notes,
   '',
