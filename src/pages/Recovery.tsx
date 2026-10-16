@@ -4,6 +4,7 @@ import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type Reco
 import { setOwnerToken as setActiveOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { createFirebaseAccount, getFreshFirebaseIdToken, signInWithEmailPassword, signOutFirebase } from '../services/firebaseAuth';
+import { isNativeAndroidApp, listNativeAndroidPairedDevices, scanNativeAndroidBle, scanNativeAndroidClassic } from '../services/nativeBluetoothService';
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not recorded';
@@ -18,6 +19,7 @@ export function Recovery() {
   const [firebaseSignedInEmail, setFirebaseSignedInEmail] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState('');
   const [selectedBluetoothDevice, setSelectedBluetoothDevice] = useState<BluetoothDeviceInfo | null>(null);
+  const [availableNativeDevices, setAvailableNativeDevices] = useState<BluetoothDeviceInfo[]>([]);
   const [devices, setDevices] = useState<RecoveryDeviceRecord[]>([]);
   const [devicesLoaded, setDevicesLoaded] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<RecoveryDeviceRecord | null>(null);
@@ -126,14 +128,98 @@ export function Recovery() {
   const selectBluetoothDevice = async () => {
     setError(null);
     setNotice(null);
+    setSelectedBluetoothDevice(null);
+    setAvailableNativeDevices([]);
+
+    if (isNativeAndroidApp()) {
+      setBusy(true);
+      try {
+        const records = new Map<string, BluetoothDeviceInfo>();
+        const addRecord = (record: BluetoothDeviceInfo) => {
+          const id = String(record.address || record.id || '').trim();
+          if (!id) return;
+          const key = id.toLowerCase();
+          const existing = records.get(key);
+          records.set(key, {
+            ...existing,
+            ...record,
+            id,
+            address: id,
+            name: record.name?.trim() || existing?.name,
+            rssi: typeof record.rssi === 'number' ? record.rssi : existing?.rssi,
+            uuids: record.uuids ?? existing?.uuids ?? [],
+            source: 'native',
+            paired: Boolean(record.paired || existing?.paired),
+            transport: record.transport ?? existing?.transport ?? 'BLE',
+          });
+        };
+
+        let pairedListError: string | undefined;
+        try {
+          const paired = await listNativeAndroidPairedDevices();
+          for (const device of paired) {
+            addRecord({
+              id: device.address || device.id,
+              address: device.address || device.id,
+              name: device.name,
+              rssi: device.rssi,
+              uuids: [],
+              source: 'native',
+              transport: 'PAIRED',
+              paired: true,
+            });
+          }
+        } catch (caught) {
+          pairedListError = errorMessage(caught);
+        }
+
+        const scan = await scanNativeAndroidBle((observation) => {
+          const id = String(observation.address || observation.id || '').trim();
+          if (!id) return;
+          addRecord({
+            id,
+            address: id,
+            name: observation.name,
+            rssi: observation.rssi,
+            uuids: observation.serviceUuids ?? [],
+            source: 'native',
+            transport: 'BLE',
+            paired: records.get(id.toLowerCase())?.paired ?? false,
+          });
+        }, 8000);
+
+        const available = Array.from(records.values()).sort((a, b) => {
+          if (Boolean(a.paired) !== Boolean(b.paired)) return a.paired ? -1 : 1;
+          if (typeof a.name === 'string' && typeof b.name === 'string') return a.name.localeCompare(b.name);
+          return a.id.localeCompare(b.id);
+        });
+        setAvailableNativeDevices(available);
+
+        if (available.length === 0) {
+          const details = [scan.ok ? scan.message : scan.error, pairedListError].filter(Boolean).join(' ');
+          setError(details || 'No Bluetooth devices were found. Keep the target nearby and advertising, and check Android Bluetooth permissions.');
+        } else {
+          const scanSummary = scan.ok
+            ? `BLE scan completed with ${scan.devicesFound} advertisement source(s).`
+            : `BLE scan could not complete: ${scan.error}`;
+          setNotice(`Found ${available.length} available or paired Bluetooth device(s). Choose one below. ${scanSummary} ${pairedListError ? 'The paired-device list was unavailable.' : ''}`);
+        }
+      } catch (caught) {
+        setError(`Native Android Bluetooth selection failed: ${errorMessage(caught)}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     const result = await requestBluetoothDevice();
     if (result.ok === false) {
       setError(result.error);
       return;
     }
-    setSelectedBluetoothDevice(result.device);
+    setSelectedBluetoothDevice({ ...result.device, source: 'web', transport: 'WEB' });
     setDeviceName(result.device.name ?? '');
-    setNotice(`Selected ${result.device.name ?? 'Bluetooth device'} in the browser picker. This does not provide a location or background scan.`);
+    setNotice(`Selected ${result.device.name ?? 'Bluetooth device'} in the browser picker. Browser IDs are origin-scoped and do not provide location or background scan access.`);
   };
 
   const registerDevice = async () => {
@@ -154,9 +240,10 @@ export function Recovery() {
     setError(null);
     setNotice(null);
     try {
+      const identifier = selectedBluetoothDevice.address || selectedBluetoothDevice.id;
       const registered = await api.recovery.registerDevice(token, {
-        deviceId: selectedBluetoothDevice.id,
-        deviceIdentifier: selectedBluetoothDevice.id,
+        deviceId: identifier,
+        deviceIdentifier: identifier,
         deviceName: name,
         type: 'unknown',
         discoverySource: 'REAL',
@@ -236,23 +323,56 @@ export function Recovery() {
     setError(null);
     setNotice(null);
     try {
-      const result = await requestBluetoothDevice();
-      if (result.ok === false) {
-        setError(result.error);
-        return;
-      }
-      if (result.device.id !== selectedDevice.deviceIdentifier) {
-        setError('The selected browser device identifier does not match this registration. No encounter was submitted.');
-        return;
+      const registeredIdentifier = selectedDevice.deviceIdentifier.trim().toLowerCase();
+      let observedIdentifier: string | null = null;
+      let observationDescription = 'Device selected by the owner in the Web Bluetooth picker.';
+
+      if (isNativeAndroidApp()) {
+        const observed = new Set<string>();
+        const bleOutcome = await scanNativeAndroidBle((observation) => {
+          const id = String(observation.address || observation.id || '').trim().toLowerCase();
+          if (id) observed.add(id);
+        }, 5000);
+
+        const classicOutcome = await scanNativeAndroidClassic((observation) => {
+          const id = String(observation.address || observation.id || '').trim().toLowerCase();
+          if (id) observed.add(id);
+        }, 5000);
+
+        observedIdentifier = observed.has(registeredIdentifier) ? registeredIdentifier : null;
+        observationDescription = 'Device address was observed during a foreground Android BLE/classic scan. No GPS coordinates were collected.';
+
+        if (!observedIdentifier) {
+          const reasons = [
+            !bleOutcome.ok ? bleOutcome.error : bleOutcome.message,
+            !classicOutcome.ok ? classicOutcome.error : classicOutcome.message,
+          ].filter(Boolean);
+          setError(
+            reasons.join(' ')
+              || 'The registered device was not detected in the foreground BLE or classic scan. Keep it nearby and discoverable, then retry. No encounter was submitted.',
+          );
+          return;
+        }
+      } else {
+        const result = await requestBluetoothDevice();
+        if (result.ok === false) {
+          setError(result.error);
+          return;
+        }
+        if (result.device.id.trim().toLowerCase() !== registeredIdentifier) {
+          setError('The selected browser device identifier does not match this registration. No encounter was submitted.');
+          return;
+        }
+        observedIdentifier = result.device.id;
       }
 
       await api.recovery.submitEncounter(token, selectedDevice.deviceId, {
         source: 'REAL',
         simulated: false,
         isTestFixture: false,
-        description: 'Device selected by its owner in the Web Bluetooth picker.',
+        description: observationDescription,
       });
-      setNotice('The backend accepted the encounter and recorded its receive time. No coordinates or signal measurements were available or submitted.');
+      setNotice('The backend accepted the encounter and recorded its receive time. No coordinates were inferred or submitted.');
       try {
         await loadRecoveryInfo(selectedDevice, token);
       } catch (refreshError) {
@@ -361,7 +481,7 @@ export function Recovery() {
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
           <h2 className="text-lg font-semibold text-[var(--text)]">Register a Bluetooth device</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            The browser returns an origin-scoped identifier and device name when available. It does not expose a universal hardware ID, RSSI, or location.
+            Android uses BlueGuardian's native foreground Bluetooth scanner and paired-device list. Browser builds use the browser BLE picker. Neither mode collects GPS coordinates or continuously scans in the background.
           </p>
           <button
             type="button"
@@ -369,12 +489,37 @@ export function Recovery() {
             disabled={busy}
             className="mt-4 min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
           >
-            Select real device
+            {busy ? 'Searching Bluetooth…' : isNativeAndroidApp() ? 'Find native Android devices' : 'Select real device'}
           </button>
+          {isNativeAndroidApp() && availableNativeDevices.length > 0 && (
+            <div className="mt-4 space-y-2" aria-label="Available Android Bluetooth devices">
+              <p className="text-xs text-[var(--text-muted)]">Select a device found in the foreground BLE scan or Android paired-device list.</p>
+              {availableNativeDevices.map(device => (
+                <button
+                  key={device.id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setSelectedBluetoothDevice(device);
+                    setDeviceName(device.name ?? '');
+                    setAvailableNativeDevices([]);
+                    setNotice(`Selected native Android ${device.transport ?? 'Bluetooth'} device ${device.name || 'with no advertised name'}. The app has not connected to or tracked it in the background.`);
+                  }}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border)] p-3 text-left disabled:opacity-50"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block break-words text-sm font-medium text-[var(--text)]">{device.name || 'Bluetooth device name unavailable'}</span>
+                    <span className="mt-1 block break-all text-xs text-[var(--text-muted)]">{device.transport ?? 'BLE'} · {device.paired ? 'Paired' : 'Nearby'} · {device.address || device.id}</span>
+                  </span>
+                  {typeof device.rssi === 'number' && <span className="shrink-0 text-xs text-[var(--text-secondary)]">{device.rssi} dBm</span>}
+                </button>
+              ))}
+            </div>
+          )}
           {selectedBluetoothDevice && (
             <div className="mt-4 space-y-3">
               <p className="break-all text-xs text-[var(--text-muted)]">
-                Selected: {selectedBluetoothDevice.name ?? 'Unnamed Bluetooth device'} · {selectedBluetoothDevice.id}
+                Selected: {selectedBluetoothDevice.name ?? 'Unnamed Bluetooth device'} · {selectedBluetoothDevice.source === 'native' ? `Native Android ${selectedBluetoothDevice.transport ?? 'Bluetooth'} address` : 'Browser-scoped identifier'} · {selectedBluetoothDevice.address || selectedBluetoothDevice.id}
               </p>
               <label className="block text-sm text-[var(--text-secondary)]">
                 Display name
