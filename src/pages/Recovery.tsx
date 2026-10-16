@@ -447,7 +447,13 @@ export function Recovery() {
   };
 
   const scanForCommunitySightings = async () => {
-    const token = await getFreshFirebaseIdToken() ?? ownerToken.trim();
+    let token: string;
+    try {
+      token = await getFreshFirebaseIdToken() ?? ownerToken.trim();
+    } catch (caught) {
+      setError(errorMessage(caught));
+      return;
+    }
     if (!token) {
       setError('Sign in with your Firebase account before submitting a community sighting.');
       return;
