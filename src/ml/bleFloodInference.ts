@@ -127,6 +127,18 @@ export function getBleFloodModelStatus(): BleFloodModelStatus {
       reason: 'No trained tree ensemble is installed.',
     };
   }
+  if (
+    artifact.featureNames.length !== REQUIRED_FEATURES.length
+    || artifact.featureNames.some((name, index) => name !== REQUIRED_FEATURES[index])
+  ) {
+    return {
+      available: false,
+      status: 'invalid',
+      modelName,
+      modelVersion,
+      reason: 'The model feature schema does not match the Android scan-window schema.',
+    };
+  }
   if (artifact.status === 'candidate' || artifact.deploymentStatus === 'disabled_until_explicit_review') {
     return {
       available: false,
