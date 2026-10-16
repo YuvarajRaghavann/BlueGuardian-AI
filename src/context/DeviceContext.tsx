@@ -8,6 +8,7 @@ import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
+import { API_BASE_CHANGED_EVENT } from '../services/apiBase';
 import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
 
 export interface DeviceState {
@@ -290,7 +291,14 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const lastAdvertisementUiUpdateRef = React.useRef<Map<string, number>>(new Map());
   const ownerToken = useOwnerToken();
   const [registryReadyToken, setRegistryReadyToken] = React.useState<string | null>(null);
+  const [apiBaseRevision, setApiBaseRevision] = React.useState(0);
   const backendReady = Boolean(ownerToken && registryReadyToken === ownerToken);
+
+  useEffect(() => {
+    const onApiBaseChanged = () => setApiBaseRevision((revision) => revision + 1);
+    window.addEventListener(API_BASE_CHANGED_EVENT, onApiBaseChanged);
+    return () => window.removeEventListener(API_BASE_CHANGED_EVENT, onApiBaseChanged);
+  }, []);
 
   useEffect(() => () => {
     advertisementWatchRef.current?.();
@@ -352,7 +360,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         if (!cancelled) console.warn('Backend device registry is unavailable; using browser-local records without remote writes.', error);
       });
     return () => { cancelled = true; };
-  }, [ownerToken]);
+  }, [ownerToken, apiBaseRevision]);
 
   /**
    * Run one scan mode explicitly. Keeping simulation and real scans separate
