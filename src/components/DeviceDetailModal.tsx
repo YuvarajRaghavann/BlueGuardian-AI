@@ -163,8 +163,9 @@ export function DeviceDetailModal({
   };
 
   const confirmExecute = () => {
-    if (confirmAction) {
-      executeAction(confirmAction, device, recommendation.explanation);
+    if (!confirmAction) return;
+    const completed = executeAction(confirmAction, device, recommendation.explanation);
+    if (completed) {
       setConfirmAction(null);
     }
   };
