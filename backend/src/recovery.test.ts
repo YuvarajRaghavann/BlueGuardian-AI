@@ -210,3 +210,28 @@ describe('recovery auth and validation', () => {
     expect(record.lastKnownLocation).toBeNull();
   });
 });
+
+
+import { describe as describeFingerprint, expect as expectFingerprint, it as itFingerprint } from 'vitest';
+import { validateRegistrationInput as validateFingerprintRegistration } from './services/recoveryService';
+
+describeFingerprint('community recovery fingerprint validation', () => {
+  itFingerprint('canonicalizes case, whitespace and service UUID order', () => {
+    const first = validateFingerprintRegistration({
+      deviceName: 'Owner earbuds', deviceIdentifier: 'device-a',
+      recoveryFingerprint: { name: '  OWNER   Earbuds ', serviceUuids: ['UUID-B', 'uuid-a', 'uuid-b'] },
+    });
+    const second = validateFingerprintRegistration({
+      deviceName: 'Owner earbuds', deviceIdentifier: 'device-b',
+      recoveryFingerprint: { name: 'owner earbuds', serviceUuids: ['UUID-A', 'uuid-b'] },
+    });
+    expectFingerprint(first.recoveryFingerprintHash).toBe(second.recoveryFingerprintHash);
+  });
+
+  itFingerprint('rejects fingerprints without service UUIDs to avoid weak name-only matching', () => {
+    expectFingerprint(() => validateFingerprintRegistration({
+      deviceName: 'Earbuds', deviceIdentifier: 'device-a',
+      recoveryFingerprint: { name: 'Earbuds', serviceUuids: [] },
+    })).toThrow(/service UUID/i);
+  });
+});

@@ -105,3 +105,12 @@ Dashboard sample recovery cards and unlabelled sample event fallbacks have been 
 - Define owner-scoped schemas/queries and verified identity before syncing the browser-local Devices, Threats, Events, or Action history to backend persistence.
 - Complete Android Gradle dependency resolution and test Android runtime permissions/scanning on supported hardware.
 - Keep browser discovery and Android background scanning separate; neither constitutes verified recovery until tested with the actual devices and lifecycle conditions.
+
+
+## Community BLE candidate reports (foreground opt-in)
+
+The Android app submits batches of nearby BLE advertisements to `/api/recovery/community/sightings`. This endpoint requires a verified Firebase ID token (or the development participant token in test/development mode) and is rate-limited. It accepts only observations with an advertised name and at least one service UUID, canonicalizes those fields, and stores a SHA-256 fingerprint on recovery-enabled device records. It never uses a Bluetooth MAC address as the cross-phone identity key.
+
+When an observation matches a currently lost/searching fingerprint, the server stores an owner-scoped `REAL` encounter marked as an **unverified community candidate**, with low confidence and no automatic transition to found/recovered. The response does not disclose whether any owner/device matched or return owner/device IDs. Reports expire under the existing 30-day encounter TTL. GPS is optional and is accepted only when the participant explicitly sets `shareLocation: true`; without that flag the server rejects supplied coordinates. The client submits no location by default.
+
+This is a practical candidate-reporting layer, not universal tracking: Bluetooth names/service UUID combinations can collide, many earbuds expose no stable public service UUIDs, and Android address randomization prevents treating MACs as durable identity. A matching report must be confirmed by the owner. It works only while the helper opens BlueGuardian and runs a foreground scan; it is not background crowd tracking. For devices that advertise insufficient metadata, this workflow intentionally sends no candidate rather than inventing a match.
