@@ -7,12 +7,15 @@ import {
   AlertTriangle,
   SlidersHorizontal,
   Radar,
+  Radio,
+  List,
   Bug,
   Database,
 } from 'lucide-react';
 import { DeviceCard } from '../components/DeviceCard';
 import { DeviceDetailModal } from '../components/DeviceDetailModal';
 import { NativeBleResultsModal } from '../components/NativeBleResultsModal';
+import { NativeClassicResultsModal } from '../components/NativeClassicResultsModal';
 import { EmptyState } from '../components/EmptyState';
 import { LoadingSpinner } from '../components/LoadingSpinner';
 import { useBluetoothDevices } from '../context/DeviceContext';
@@ -27,6 +30,8 @@ export function Devices() {
     dispatch,
     scanSimulatedDevices,
     scanRealDevices,
+    scanClassicDevices,
+    loadPairedDevices,
     startWatchingPermittedBleDevices,
     stopWatchingPermittedBleDevices,
     clearSimulatedDevices,
@@ -35,6 +40,9 @@ export function Devices() {
     useState<null | import('../types').BluetoothDevice>(null);
   const [nativeResultsOpen, setNativeResultsOpen] = useState(false);
   const [nativeScanStartedAt, setNativeScanStartedAt] = useState<number | null>(null);
+  const [classicResultsOpen, setClassicResultsOpen] = useState(false);
+  const [pairedResultsOpen, setPairedResultsOpen] = useState(false);
+  const [classicScanStartedAt, setClassicScanStartedAt] = useState<number | null>(null);
   const [localSearch, setLocalSearch] = useState(state.search);
   const [advertisementWatch, setAdvertisementWatch] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
   const [sourceView, setSourceView] = useState<'real' | 'simulated' | 'all'>('real');
@@ -51,7 +59,7 @@ export function Devices() {
   const nativeScanDevices = useMemo(() => {
     return state.devices
       .filter((device) => {
-        if (device.discoverySource !== 'REAL') return false;
+        if (device.discoverySource !== 'REAL' || device.discoveryTransport === 'CLASSIC') return false;
         if (nativeScanStartedAt === null) return true;
         const seenAt = device.lastSeen instanceof Date
           ? device.lastSeen.getTime()
@@ -64,6 +72,24 @@ export function Devices() {
         return bSeen - aSeen;
       });
   }, [state.devices, nativeScanStartedAt]);
+
+  
+  const nativeClassicDevices = useMemo(() => state.devices
+    .filter((device) => {
+      if (device.discoverySource !== 'REAL' || device.discoveryTransport !== 'CLASSIC') return false;
+      if (classicScanStartedAt === null) return true;
+      const seenAt = device.lastSeen instanceof Date
+        ? device.lastSeen.getTime()
+        : Date.parse(String(device.lastSeen));
+      return Number.isFinite(seenAt) && seenAt >= classicScanStartedAt - 2000;
+    })
+    .sort((a, b) => {
+      const aSeen = a.lastSeen instanceof Date ? a.lastSeen.getTime() : Date.parse(String(a.lastSeen));
+      const bSeen = b.lastSeen instanceof Date ? b.lastSeen.getTime() : Date.parse(String(b.lastSeen));
+      return bSeen - aSeen;
+    }), [state.devices, classicScanStartedAt]);
+
+  const nativePairedDevices = useMemo(() => nativeClassicDevices.filter((device) => device.paired), [nativeClassicDevices]);
 
   useEffect(() => {
     dispatch({ type: 'SET_SEARCH', payload: localSearch });
@@ -149,6 +175,24 @@ export function Devices() {
       setNativeResultsOpen(true);
     }
     await scanRealDevices(pickerMode);
+  };
+
+  const handleClassicScan = async () => {
+    setSourceView('real');
+    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
+    setClassicScanStartedAt(Date.now());
+    setPairedResultsOpen(false);
+    setClassicResultsOpen(true);
+    await scanClassicDevices();
+  };
+
+  const handleLoadPairedDevices = async () => {
+    setSourceView('real');
+    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
+    setPairedResultsOpen(true);
+    setClassicResultsOpen(false);
+    // Paired devices are read from Android's bonded-device registry, not scanned.
+    await loadPairedDevices();
   };
 
   const handleGenerateSimulated = async () => {
@@ -242,6 +286,39 @@ export function Devices() {
                 : nativeAndroid ? 'Scan nearby BLE devices' : pickerMode === 'known' ? 'Select named BLE device' : 'Select BLE device'}
             </button>
 
+            {nativeAndroid && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handleClassicScan()}
+                  disabled={isScanning}
+                  className={cn(
+                    'inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-md)] border px-4 text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40',
+                    isScanning
+                      ? 'cursor-not-allowed border-[var(--border)] bg-[var(--surface-raised)] text-[var(--text-muted)]'
+                      : 'border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/15'
+                  )}
+                >
+                  <Radio className={cn('h-4 w-4', state.scan.transport === 'ANDROID_CLASSIC_SCAN' && isScanning && 'animate-pulse')} />
+                  {state.scan.transport === 'ANDROID_CLASSIC_SCAN' && isScanning ? 'Discovering classic…' : 'Scan classic'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleLoadPairedDevices()}
+                  disabled={isScanning}
+                  className={cn(
+                    'inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-md)] border px-4 text-sm font-semibold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40',
+                    isScanning
+                      ? 'cursor-not-allowed border-[var(--border)] bg-[var(--surface-raised)] text-[var(--text-muted)]'
+                      : 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'
+                  )}
+                >
+                  <List className="h-4 w-4" />
+                  Paired devices
+                </button>
+              </>
+            )}
+
             <button
               type="button"
               onClick={() => void handleGenerateSimulated()}
@@ -267,7 +344,7 @@ export function Devices() {
             <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Native Android BLE scanner' : 'Browser Bluetooth capability'}</p>
             <p className="text-xs leading-5 text-[var(--text-secondary)]">
               {nativeAndroid
-                ? 'The Android APK uses Android BluetoothLeScanner to receive real nearby BLE advertisements during a foreground scan. It reports only fields the phone exposes, such as a reported name, signal strength, and advertised service UUIDs. Classic Bluetooth and combined scanning are planned for later phases.'
+                ? 'The Android APK uses Android BluetoothLeScanner for a separate foreground BLE scan. Phase 4 also offers a separate classic Bluetooth discovery action and a system paired-device list. Classic discovery finds only currently discoverable classic devices; it does not find every BLE advertiser or connect to devices. Combined scanning is reserved for Phase 5.'
                 : "The real scan path uses Chrome's Web Bluetooth chooser, which returns one selected BLE peripheral per click, not a complete nearby-device list. BlueGuardian then attempts GATT connection and service inspection. Stored real records may be from earlier selections; they are not proof that a device is currently nearby. The diagnostics help identify the stage where access failed. Simulated examples are kept separate and are no longer written into the physical-device database."}
             </p>
           </div>
@@ -411,7 +488,11 @@ export function Devices() {
                     ? `Simulated sample data generated · ${state.scan.devicesFound} sample device(s) · no hardware scan performed`
                     : state.scan.transport === 'ANDROID_BLE_SCAN'
                       ? `Android BLE scan complete · ${state.scan.devicesFound} device(s) observed${state.scan.error ? ` · ${state.scan.error}` : ''}`
-                      : state.scan.error
+                      : state.scan.transport === 'ANDROID_CLASSIC_SCAN'
+                        ? `Classic Bluetooth discovery complete · ${state.scan.devicesFound} device(s) found${state.scan.error ? ` · ${state.scan.error}` : ''}`
+                        : state.scan.transport === 'ANDROID_PAIRED_DEVICES'
+                          ? `Paired-device list loaded · ${state.scan.devicesFound} paired device(s)${state.scan.error ? ` · ${state.scan.error}` : ''}`
+                          : state.scan.error
                         ? `Real device selected · ${state.scan.error}`
                         : `Real BLE selection complete · ${state.scan.devicesFound} device(s) selected`)}
                 {state.scan.state === 'unsupported' &&
@@ -574,6 +655,22 @@ export function Devices() {
         onClose={() => setNativeResultsOpen(false)}
         onSelect={(device) => {
           setNativeResultsOpen(false);
+          setSelectedDevice(device);
+        }}
+      />
+
+      <NativeClassicResultsModal
+        open={nativeAndroid && (classicResultsOpen || pairedResultsOpen)}
+        view={pairedResultsOpen ? 'paired' : 'scan'}
+        scan={state.scan}
+        devices={pairedResultsOpen ? nativePairedDevices : nativeClassicDevices}
+        onClose={() => {
+          setClassicResultsOpen(false);
+          setPairedResultsOpen(false);
+        }}
+        onSelect={(device) => {
+          setClassicResultsOpen(false);
+          setPairedResultsOpen(false);
           setSelectedDevice(device);
         }}
       />
