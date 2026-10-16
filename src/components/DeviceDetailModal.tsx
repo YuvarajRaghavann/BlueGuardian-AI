@@ -84,6 +84,7 @@ export function DeviceDetailModal({
   );
   const [confirmAction, setConfirmAction] =
     useState<SecurityActionType | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (device) setAssessment(calculateTrustScore(device));
@@ -159,12 +160,15 @@ export function DeviceDetailModal({
       return;
     }
 
-    executeAction(type, device, recommendation.explanation);
+    const completed = executeAction(type, device, recommendation.explanation);
+    setActionError(completed ? null : 'This action was not applied. Check the device state and try again.');
   };
 
   const confirmExecute = () => {
-    if (confirmAction) {
-      executeAction(confirmAction, device, recommendation.explanation);
+    if (!confirmAction) return;
+    const completed = executeAction(confirmAction, device, recommendation.explanation);
+    setActionError(completed ? null : 'This action was not applied. The device may already be in that state.');
+    if (completed) {
       setConfirmAction(null);
     }
   };
@@ -656,6 +660,7 @@ export function DeviceDetailModal({
 
               {/* Actions */}
               <div className="border-t border-[var(--border)] pt-4">
+                {actionError && <p role="alert" className="mb-3 rounded-lg border border-[var(--danger)]/25 bg-[var(--danger)]/10 px-3 py-2 text-xs leading-5 text-[var(--danger)]">{actionError}</p>}
                 <div className="flex flex-wrap gap-2">
                   {allowedActions.map((act) => (
                     <button
