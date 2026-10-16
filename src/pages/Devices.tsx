@@ -42,6 +42,7 @@ export function Devices() {
   const [nativeScanStartedAt, setNativeScanStartedAt] = useState<number | null>(null);
   const [classicResultsOpen, setClassicResultsOpen] = useState(false);
   const [pairedResultsOpen, setPairedResultsOpen] = useState(false);
+  const [pairedDevicesLoading, setPairedDevicesLoading] = useState(false);
   const [classicScanStartedAt, setClassicScanStartedAt] = useState<number | null>(null);
   const [localSearch, setLocalSearch] = useState(state.search);
   const [advertisementWatch, setAdvertisementWatch] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
@@ -191,8 +192,13 @@ export function Devices() {
     dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
     setPairedResultsOpen(true);
     setClassicResultsOpen(false);
-    // Paired devices are read from Android's bonded-device registry, not scanned.
-    await loadPairedDevices();
+    setPairedDevicesLoading(true);
+    try {
+      // Paired devices are read from Android's bonded-device registry, not scanned.
+      await loadPairedDevices();
+    } finally {
+      setPairedDevicesLoading(false);
+    }
   };
 
   const handleGenerateSimulated = async () => {
@@ -663,6 +669,7 @@ export function Devices() {
         open={nativeAndroid && (classicResultsOpen || pairedResultsOpen)}
         view={pairedResultsOpen ? 'paired' : 'scan'}
         scan={state.scan}
+        loadingPaired={pairedResultsOpen && pairedDevicesLoading}
         devices={pairedResultsOpen ? nativePairedDevices : nativeClassicDevices}
         onClose={() => {
           setClassicResultsOpen(false);
