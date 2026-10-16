@@ -163,3 +163,20 @@ a {
 ::view-transition-new(root) {
   animation-duration: 180ms;
 }
+
+
+.discovery-progress {
+  animation: discovery-progress 1.65s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+
+@keyframes discovery-progress {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .discovery-progress {
+    animation: none !important;
+    transform: translateX(0);
+  }
+}
