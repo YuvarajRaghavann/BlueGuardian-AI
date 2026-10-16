@@ -81,6 +81,8 @@ export interface BluetoothScanState {
   devicesFound: number;
   /** Distinguishes genuine browser observations from generated demo records in UI status. */
   source?: DiscoverySource;
+  /** Identifies the scanner implementation used for this scan. */
+  transport?: 'WEB_BLE_SELECTION' | 'ANDROID_BLE_SCAN';
   error?: string;
 }
 

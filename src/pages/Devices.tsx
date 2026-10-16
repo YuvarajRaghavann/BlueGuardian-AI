@@ -18,6 +18,7 @@ import { useBluetoothDevices } from '../context/DeviceContext';
 import { cn } from '../utils/cn';
 import { needsManualApproval } from '../utils/connectionPolicy';
 import { diagnoseBluetoothEnvironment, type BluetoothEnvironmentDiagnostics } from '../services/bluetoothService';
+import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 
 export function Devices() {
   const {
@@ -39,6 +40,7 @@ export function Devices() {
   // Default to the broad chooser for troubleshooting phones/audio accessories.
   // The name-filtered option is available when the broad native list is noisy.
   const [pickerMode, setPickerMode] = useState<'known' | 'all'>('all');
+  const nativeAndroid = isNativeAndroidApp();
 
   useEffect(() => {
     dispatch({ type: 'SET_SEARCH', payload: localSearch });
@@ -179,7 +181,7 @@ export function Devices() {
         </div>
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="flex min-h-10 flex-col justify-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+          <label className={cn('flex min-h-10 flex-col justify-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text-secondary)]', nativeAndroid && 'hidden')}>
             <span className="font-medium">Bluetooth picker results</span>
             <select
               value={pickerMode}
@@ -207,10 +209,8 @@ export function Devices() {
             >
               <Bluetooth className={cn('h-4 w-4', isScanning && 'animate-spin')} />
               {isScanning
-                ? 'Opening Bluetooth chooser…'
-                : pickerMode === 'known'
-                  ? 'Select named BLE device'
-                  : 'Select BLE device'}
+                ? nativeAndroid ? 'Scanning nearby BLE advertisements…' : 'Opening Bluetooth chooser…'
+                : nativeAndroid ? 'Scan nearby BLE devices' : pickerMode === 'known' ? 'Select named BLE device' : 'Select BLE device'}
             </button>
 
             <button
@@ -235,14 +235,16 @@ export function Devices() {
         <div className="flex items-start gap-3">
           <Bluetooth className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-sm font-semibold text-[var(--text)]">Browser Bluetooth capability</p>
+            <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Native Android BLE scanner' : 'Browser Bluetooth capability'}</p>
             <p className="text-xs leading-5 text-[var(--text-secondary)]">
-              The real scan path uses Chrome's Web Bluetooth chooser, which returns one selected BLE peripheral per click, not a complete nearby-device list. BlueGuardian then attempts GATT connection and service inspection. Stored real records may be from earlier selections; they are not proof that a device is currently nearby. The diagnostics help identify the stage where access failed. Simulated examples are kept separate and are no longer written into the physical-device database.
+              {nativeAndroid
+                ? 'The Android APK uses Android BluetoothLeScanner to receive real nearby BLE advertisements during a foreground scan. It reports only fields the phone exposes, such as a reported name, signal strength, and advertised service UUIDs. Classic Bluetooth and combined scanning are planned for later phases.'
+                : "The real scan path uses Chrome's Web Bluetooth chooser, which returns one selected BLE peripheral per click, not a complete nearby-device list. BlueGuardian then attempts GATT connection and service inspection. Stored real records may be from earlier selections; they are not proof that a device is currently nearby. The diagnostics help identify the stage where access failed. Simulated examples are kept separate and are no longer written into the physical-device database."}
             </p>
           </div>
         </div>
 
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--bg)]/60 p-3">
+        <div className={cn("rounded-lg border border-[var(--border)] bg-[var(--bg)]/60 p-3", nativeAndroid && 'hidden')}>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3">
               <Bug className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
@@ -296,7 +298,7 @@ export function Devices() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-3 rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/5 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className={cn("flex flex-col gap-3 rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/5 p-3 sm:flex-row sm:items-center sm:justify-between", nativeAndroid && 'hidden')}>
           <div className="flex-1">
             <p className="text-sm font-semibold text-[var(--text)]">Previously authorized BLE watch</p>
             <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
@@ -322,12 +324,20 @@ export function Devices() {
           </button>
         </div>
 
-        <div className="flex items-start gap-3 rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/5 px-3 py-3">
+        <div className={cn("flex items-start gap-3 rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/5 px-3 py-3", nativeAndroid && 'hidden')}>
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
           <p className="text-xs leading-5 text-[var(--text-secondary)]">
             <strong>Classic Bluetooth limitation:</strong> browser JavaScript cannot enumerate or scan classic Bluetooth devices, control Windows pairing, or perform full audio pairing. Use Windows Settings → Bluetooth &amp; devices for AirPods audio pairing. A native Windows/Android application is required for broader BLE and classic Bluetooth discovery. <strong>Generate simulated data</strong> creates sample records only.
           </p>
         </div>
+        {nativeAndroid && (
+          <div className="flex items-start gap-3 rounded-lg border border-[var(--accent)]/25 bg-[var(--accent)]/5 px-3 py-3">
+            <Bluetooth className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
+            <p className="text-xs leading-5 text-[var(--text-secondary)]">
+              <strong>Android native BLE discovery:</strong> scans run only while the app is in the foreground and require Nearby Devices permission. Classic Bluetooth and combined scanning are planned for later phases. Normal AirPods audio pairing remains controlled by Android Settings.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Scan state */}
@@ -364,13 +374,17 @@ export function Devices() {
             <div>
               <p className="text-sm font-medium text-[var(--text)]">
                 {state.scan.state === 'scanning' &&
-                  `Scanning for Bluetooth devices… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`}
+                  (nativeAndroid
+                    ? `Scanning nearby BLE advertisements… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
+                    : `Opening Bluetooth chooser… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`)}
                 {state.scan.state === 'complete' &&
                   (state.scan.source === 'SIMULATED'
                     ? `Simulated sample data generated · ${state.scan.devicesFound} sample device(s) · no hardware scan performed`
-                    : state.scan.error
-                      ? `Real device selected · ${state.scan.error}`
-                      : `Real BLE selection complete · ${state.scan.devicesFound} device(s) selected`)}
+                    : state.scan.transport === 'ANDROID_BLE_SCAN'
+                      ? `Android BLE scan complete · ${state.scan.devicesFound} device(s) observed${state.scan.error ? ` · ${state.scan.error}` : ''}`
+                      : state.scan.error
+                        ? `Real device selected · ${state.scan.error}`
+                        : `Real BLE selection complete · ${state.scan.devicesFound} device(s) selected`)}
                 {state.scan.state === 'unsupported' &&
                   `Web Bluetooth not supported: ${state.scan.error}`}
                 {state.scan.state === 'permission-denied' &&

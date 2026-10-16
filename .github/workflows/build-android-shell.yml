@@ -40,7 +40,10 @@ jobs:
       - name: Install Android 16 SDK packages
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
-      - name: Install the locked web dependencies
+      - name: Refresh npm lockfile for native bridge dependency
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Install the refreshed web dependencies
         run: npm ci --no-audit --no-fund
 
       - name: Install pinned Capacitor 8 packages for this cloud build
@@ -48,6 +51,9 @@ jobs:
 
       - name: Build the existing React/Vite UI
         run: npm run build
+
+      - name: Run existing frontend regression tests
+        run: npm test -- --reporter=dot
 
       - name: Generate Capacitor Android project
         run: npx cap add android

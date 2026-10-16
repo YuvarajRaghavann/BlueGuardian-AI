@@ -7,6 +7,10 @@ const appGradlePath = path.join(root, 'android', 'app', 'build.gradle');
 const gradleKtsPath = path.join(root, 'android', 'app', 'build.gradle.kts');
 const buildInfoPath = path.join(root, 'android-build-info.txt');
 
+const nativeSourceDir = path.join(root, 'native', 'android');
+const androidManifestPath = path.join(root, 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
+const nativePackageDir = path.join(root, 'android', 'app', 'src', 'main', 'java', 'com', 'blueguardian', 'hybrid');
+
 function setGradleValue(text, key, value) {
   // Capacitor Android templates commonly declare SDK values in variables.gradle.
   const patterns = [
@@ -28,6 +32,46 @@ function setGradleValue(text, key, value) {
 if (!fs.existsSync(path.join(root, 'android', 'app'))) {
   throw new Error('Capacitor Android platform is missing. Run `npx cap add android` before this script.');
 }
+
+function installNativeBluetoothPlugin() {
+  const pluginSource = path.join(nativeSourceDir, 'BlueGuardianBluetoothPlugin.java');
+  const activitySource = path.join(nativeSourceDir, 'MainActivity.java');
+  if (!fs.existsSync(pluginSource) || !fs.existsSync(activitySource)) {
+    throw new Error('Native Bluetooth source files are missing from native/android.');
+  }
+  if (!fs.existsSync(androidManifestPath)) {
+    throw new Error('Generated AndroidManifest.xml was not found.');
+  }
+
+  fs.mkdirSync(nativePackageDir, { recursive: true });
+  fs.copyFileSync(pluginSource, path.join(nativePackageDir, 'BlueGuardianBluetoothPlugin.java'));
+  fs.copyFileSync(activitySource, path.join(nativePackageDir, 'MainActivity.java'));
+
+  let xml = fs.readFileSync(androidManifestPath, 'utf8');
+  const requiredEntries = [
+    '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
+    '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
+    '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />',
+    '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />',
+    '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
+    '<uses-feature android:name="android.hardware.bluetooth" android:required="false" />',
+    '<uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />',
+  ];
+  const missingEntries = requiredEntries.filter((entry) => {
+    const nameMatch = entry.match(/android:name="([^"]+)"/);
+    return nameMatch ? !xml.includes('android:name="' + nameMatch[1] + '"') : true;
+  });
+  if (missingEntries.length > 0) {
+    const applicationIndex = xml.indexOf('<application');
+    if (applicationIndex < 0) throw new Error('Cannot safely add Bluetooth declarations: <application> tag is missing.');
+    xml = xml.slice(0, applicationIndex) + '    ' + missingEntries.join('\n    ') + '\n    ' + xml.slice(applicationIndex);
+    fs.writeFileSync(androidManifestPath, xml);
+  }
+
+  return 'Native foreground BLE plugin installed; Android permissions and optional Bluetooth hardware features configured.';
+}
+
+const nativePluginNote = installNativeBluetoothPlugin();
 
 let notes = [];
 if (fs.existsSync(variablesPath)) {
@@ -63,7 +107,8 @@ const manifest = [
   `Capacitor Android: ${capacitorAndroid.version}`,
   `Capacitor CLI: ${cli.version}`,
   'Android compile/target SDK intended: 36 / 36',
-  'Scope: React/Vite web UI shell only; native BLE/classic scanner integration is a later phase.',
+  'Scope: React/Vite UI plus foreground native Android BLE discovery; classic Bluetooth and combined scanning remain later phases.',
+  nativePluginNote,
   ...notes,
   '',
 ].join('\n');

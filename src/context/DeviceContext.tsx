@@ -8,6 +8,7 @@ import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
+import { isNativeAndroidApp, scanNativeAndroidBle } from '../services/nativeBluetoothService';
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -345,6 +346,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         elapsedMs: 0,
         devicesFound: 0,
         source: mode === 'simulated' ? 'SIMULATED' : 'REAL',
+        transport: mode === 'simulated' ? undefined : (isNativeAndroidApp() ? 'ANDROID_BLE_SCAN' : 'WEB_BLE_SELECTION'),
         error: undefined,
       },
     });
@@ -368,6 +370,77 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         dispatch({
           type: 'SET_SCAN_STATE',
           payload: { state: 'complete', devicesFound: newDevices.length, error: undefined },
+        });
+        return;
+      }
+
+      if (isNativeAndroidApp()) {
+        diagnosticStage = 'Android native BLE discovery';
+        console.info('[BlueGuardian][BLE] Using Android BluetoothLeScanner for a bounded foreground scan.');
+
+        const nativeResult = await scanNativeAndroidBle((observation) => {
+          const physicalId = String(observation.address || observation.id || '').trim();
+          if (!physicalId) return;
+
+          const observedAt = new Date(typeof observation.observedAt === 'number' ? observation.observedAt : Date.now());
+          const deviceName = resolveBluetoothDisplayName(observation.name);
+          const services: BluetoothDevice['services'] = (observation.serviceUuids ?? []).map((uuid) => ({
+            uuid,
+            characteristics: [],
+          }));
+
+          const device: BluetoothDevice = {
+            id: 'android-ble:' + physicalId.toLowerCase(),
+            name: deviceName,
+            type: inferDeviceType(deviceName, undefined, services),
+            address: observation.address,
+            rssi: typeof observation.rssi === 'number' ? observation.rssi : undefined,
+            trusted: false,
+            trustScore: 0,
+            riskLevel: 'high',
+            connectionStatus: 'unknown',
+            firstSeen: observedAt,
+            lastSeen: observedAt,
+            isKnown: false,
+            services,
+            discoverySource: 'REAL',
+            gattConnected: false,
+            connectionHealth: 'UNAVAILABLE',
+          };
+
+          const assessment = assessDeviceSecurity(device);
+          device.trustScore = assessment.trustScore;
+          device.riskLevel = assessment.trustRiskLevel;
+          const guardedDevice = applySecurityPolicy(device);
+          dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
+          void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
+            console.warn('Android BLE observation was received but could not be saved locally.', error);
+          });
+        }, 12000);
+
+        if (nativeResult.ok === false) {
+          const permissionFailure = /permission|denied|not allowed/i.test(nativeResult.error);
+          dispatch({
+            type: 'SET_SCAN_STATE',
+            payload: {
+              state: permissionFailure ? 'permission-denied' : 'error',
+              source: 'REAL',
+              transport: 'ANDROID_BLE_SCAN',
+              error: nativeResult.error,
+            },
+          });
+          return;
+        }
+
+        dispatch({
+          type: 'SET_SCAN_STATE',
+          payload: {
+            state: 'complete',
+            source: 'REAL',
+            transport: 'ANDROID_BLE_SCAN',
+            devicesFound: nativeResult.devicesFound,
+            error: nativeResult.message,
+          },
         });
         return;
       }
