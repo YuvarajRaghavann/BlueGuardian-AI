@@ -1,6 +1,5 @@
-import { useState } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useCallback, useEffect, useRef } from 'react';
 import { MotionConfig } from 'framer-motion';
 import { Menu } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
@@ -13,6 +12,7 @@ export function DashboardLayout() {
   const navigate = useNavigate();
   const historyStack = useRef<string[]>([]);
   const currentPath = useRef(location.pathname + location.search + location.hash);
+  const skipNextLocationPush = useRef(false);
   const navOpenRef = useRef(mobileNavOpen);
 
   useEffect(() => {
@@ -21,7 +21,12 @@ export function DashboardLayout() {
 
   useEffect(() => {
     const nextPath = location.pathname + location.search + location.hash;
-    if (historyStack.current[historyStack.current.length - 1] !== nextPath) {
+    if (skipNextLocationPush.current) {
+      skipNextLocationPush.current = false;
+      if (historyStack.current[historyStack.current.length - 1] !== nextPath) {
+        historyStack.current[historyStack.current.length - 1] = nextPath;
+      }
+    } else if (historyStack.current[historyStack.current.length - 1] !== nextPath) {
       historyStack.current.push(nextPath);
       if (historyStack.current.length > 40) historyStack.current.shift();
     }
@@ -38,6 +43,7 @@ export function DashboardLayout() {
       stack.pop();
       const previousPath = stack[stack.length - 1];
       if (previousPath && previousPath !== currentPath.current) {
+        skipNextLocationPush.current = true;
         navigate(previousPath);
         return;
       }
@@ -61,8 +67,12 @@ export function DashboardLayout() {
       if (stack.length > 1) {
         stack.pop();
         const previousPath = stack[stack.length - 1];
-        if (previousPath) navigate(previousPath, { replace: true });
+        if (previousPath) {
+          skipNextLocationPush.current = true;
+          navigate(previousPath, { replace: true });
+        }
       } else if (location.pathname !== '/dashboard') {
+        skipNextLocationPush.current = true;
         navigate('/dashboard', { replace: true });
       } else {
         window.history.pushState({ blueGuardian: true }, '', currentPath.current);
