@@ -205,6 +205,7 @@ def main() -> int:
         "--report-output", str(report_path),
         "--seed", "42",
         "--test-size", "0.25",
+        "--split-profile", "paired-capture-family",
         "--minimum-windows-per-class", "10",
         "--minimum-sessions-per-class", "2",
         "--decision-threshold", "0.5",
