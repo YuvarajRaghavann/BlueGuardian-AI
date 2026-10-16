@@ -54,12 +54,9 @@ export function evaluateBluetoothConnection(
   const rssiRisk = evaluateRssiRisk(context.rssi ?? device.rssi);
   const fastPairFlow = Boolean(context.isFastPair || context.isQuickConnect);
 
-  if (device.riskLevel === 'high') {
-    return device.trusted && device.isKnown ? 'REQUIRE_APPROVAL' : 'BLOCK';
-  }
-
-  if (device.trustScore <= 25 || rssiRisk === 'BLOCK') {
-    return 'BLOCK';
+  // Derived risk and a single strong RSSI sample are review signals, not a verified block.
+  if (device.riskLevel === 'high' || device.trustScore <= 25 || rssiRisk === 'BLOCK') {
+    return 'REQUIRE_APPROVAL';
   }
 
   if (device.trusted && device.isKnown && device.trustScore >= 60 && !suspiciousName) {

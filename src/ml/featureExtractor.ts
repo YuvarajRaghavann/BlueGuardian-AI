@@ -6,50 +6,38 @@ export interface FeatureVector {
 }
 
 /**
- * Extract a deterministic numerical feature vector from a BluetoothDevice.
- * Feature order (must match model expectations):
- * 0. normalizedTrustScore (0-1)
- * 1. normalizedRSSI (0-1) where -30dBm -> 1, -100dBm -> 0
- * 2. knownFlag (0 or 1)
- * 3. trustedFlag (0 or 1)
- * 4. blockedFlag (0 or 1)  // riskLevel === 'high' && !trusted
- * 5. serviceCountNorm (0-1)  // services count / 10 capped
- * 6. securityFlagCountNorm (0-1) // simple heuristic count / 5 capped
- * 7. suspiciousNameFlag (0 or 1)
- * 8. connectionStatusFlag (0-1) // connected=1, connecting=0.5, others=0
- * 9. deviceTypeRisk (0-1) // mapping per type
- * 10. discoverySourceFlag (0 or 1) // REAL=1, SIMULATED=0
+ * Stable 11-feature vector for the development heuristic.
+ * Missing address/manufacturer, unknown status and one RSSI measurement are
+ * not independent evidence of malicious behaviour.
  */
 export function extractDeviceFeatures(device: BluetoothDevice): FeatureVector {
   const trustNorm = Math.max(0, Math.min(1, device.trustScore / 100));
-
-  // RSSI normalization: assume usable range -30 .. -100 dBm
-  const rssi = device.rssi ?? -65;
-  const rssiNorm = Math.max(0, Math.min(1, (rssi + 100) / 70)); // -30 => 1, -100 => 0
+  const rssi = device.rssi;
+  const rssiNorm = typeof rssi === 'number'
+    ? Math.max(0, Math.min(1, (rssi + 100) / 70))
+    : 0.5;
 
   const knownFlag = device.isKnown ? 1 : 0;
   const trustedFlag = device.trusted ? 1 : 0;
-  const blockedFlag = (!device.trusted && device.riskLevel === 'high') ? 1 : 0;
-
+  const blockedFlag = device.blocked ? 1 : 0;
   const serviceCountNorm = Math.min(1, device.services.length / 10);
+  const suspiciousNameFlag = isSuspiciousName(device.name);
 
-  // simple security flag count: unknown + high risk + no address + unknown connection
-  let secFlags = 0;
-  if (!device.isKnown) secFlags++;
-  if (device.riskLevel === 'high') secFlags++;
-  if (!device.address) secFlags++;
-  if (device.connectionStatus === 'unknown') secFlags++;
-  const securityFlagCountNorm = Math.min(1, secFlags / 5);
-
-  const suspiciousNameFlag = isSuspiciousName(device.name) ? 1 : 0;
+  const independentIndicators = [
+    blockedFlag === 1,
+    suspiciousNameFlag,
+    device.connectionHealth === 'UNSTABLE',
+    device.connectionHealth === 'DEGRADED',
+  ];
+  const securityFlagCountNorm = independentIndicators.filter(Boolean).length / independentIndicators.length;
 
   const connectionMap: Record<string, number> = {
     connected: 1,
     connecting: 0.5,
-    disconnected: 0,
-    unknown: 0,
+    disconnected: 0.25,
+    unknown: 0.5,
   };
-  const connectionStatusFlag = connectionMap[device.connectionStatus] ?? 0;
+  const connectionStatusFlag = connectionMap[device.connectionStatus] ?? 0.5;
 
   const deviceTypeRiskMap: Record<DeviceType, number> = {
     smartphone: 0.1,
@@ -57,54 +45,34 @@ export function extractDeviceFeatures(device: BluetoothDevice): FeatureVector {
     headphones: 0.15,
     smartwatch: 0.1,
     laptop: 0.05,
-    iot: 0.6,
-    unknown: 0.8,
+    iot: 0.4,
+    unknown: 0.35,
   };
-  const deviceTypeRisk = deviceTypeRiskMap[device.type] ?? 0.5;
-
+  const deviceTypeRisk = deviceTypeRiskMap[device.type] ?? 0.35;
   const discoverySourceFlag = device.discoverySource === 'REAL' ? 1 : 0;
 
-  const values = [
-    trustNorm,
-    rssiNorm,
-    knownFlag,
-    trustedFlag,
-    blockedFlag,
-    serviceCountNorm,
-    securityFlagCountNorm,
-    suspiciousNameFlag,
-    connectionStatusFlag,
-    deviceTypeRisk,
-    discoverySourceFlag,
-  ];
-
-  const featureNames = [
-    'normalizedTrustScore',
-    'normalizedRSSI',
-    'knownFlag',
-    'trustedFlag',
-    'blockedFlag',
-    'serviceCountNorm',
-    'securityFlagCountNorm',
-    'suspiciousNameFlag',
-    'connectionStatusFlag',
-    'deviceTypeRisk',
-    'discoverySourceFlag',
-  ];
-
-  return { values, featureNames };
+  return {
+    values: [
+      trustNorm, rssiNorm, knownFlag, trustedFlag, blockedFlag,
+      serviceCountNorm, securityFlagCountNorm, suspiciousNameFlag ? 1 : 0,
+      connectionStatusFlag, deviceTypeRisk, discoverySourceFlag,
+    ],
+    featureNames: [
+      'normalizedTrustScore',
+      'normalizedRSSI',
+      'knownFlag',
+      'trustedFlag',
+      'explicitlyBlockedFlag',
+      'serviceCountNorm',
+      'independentSecurityIndicatorCountNorm',
+      'suspiciousNameFlag',
+      'connectionStatusFlag',
+      'deviceTypeRisk',
+      'discoverySourceFlag',
+    ],
+  };
 }
 
 function isSuspiciousName(name: string): boolean {
-  const patterns = [
-    /unknown/i,
-    /free\s*wifi/i,
-    /hack/i,
-    /attack/i,
-    /spoof/i,
-    /test/i,
-    /^device\s*\d+$/i,
-    /^bt[-_]?\d+$/i,
-  ];
-  return patterns.some((re) => re.test(name));
+  return /free\s*wifi|hack|attack|spoof|malware|phishing/i.test(name);
 }

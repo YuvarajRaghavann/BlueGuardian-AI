@@ -25,25 +25,25 @@ The ML layer classifies Bluetooth security behaviour into meaningful threat cate
 
 ---
 
-## 2. Feature Vector (`src/ml/featureExtractor.ts`)
+## 2. Feature Vector (src/ml/featureExtractor.ts)
 
-Deterministic 11‑dimensional numeric vector extracted from a `BluetoothDevice`.
+The feature vector remains 11 dimensions for interface compatibility. The semantics now avoid treating missing metadata as attack evidence.
 
-| Index | Feature | Normalisation / Range | Description |
-|------|---------|----------------------|-------------|
-| 0 | `normalizedTrustScore` | 0‑1 | `trustScore / 100` |
-| 1 | `normalizedRSSI` | 0‑1 | Linear map of RSSI from –30 dBm (1) to –100 dBm (0) |
-| 2 | `knownFlag` | 0/1 | `device.isKnown` |
-| 3 | `trustedFlag` | 0/1 | `device.trusted` |
-| 4 | `blockedFlag` | 0/1 | `!trusted && riskLevel === 'high'` |
-| 5 | `serviceCountNorm` | 0‑1 | `min(1, services.length / 10)` |
-| 6 | `securityFlagCountNorm` | 0‑1 | Count of (unknown, high‑risk, no address, unknown connection) / 5 |
-| 7 | `suspiciousNameFlag` | 0/1 | Regex match against known suspicious patterns |
-| 8 | `connectionStatusFlag` | 0‑1 | connected = 1, connecting = 0.5, else = 0 |
-| 9 | `deviceTypeRisk` | 0‑1 | Fixed per `DeviceType` (smartphone 0.1 … unknown 0.8) |
-|10| `discoverySourceFlag` | 0/1 | REAL = 1, SIMULATED = 0 |
+| Index | Feature | Range | Meaning |
+|------|---------|-------|---------|
+| 0 | normalizedTrustScore | 0-1 | Trust score / 100 |
+| 1 | normalizedRSSI | 0-1 | Single observed RSSI value; not standalone spoofing evidence |
+| 2 | knownFlag | 0/1 | Owner history |
+| 3 | trustedFlag | 0/1 | Explicit trust setting |
+| 4 | explicitlyBlockedFlag | 0/1 | BlueGuardian block flag only |
+| 5 | serviceCountNorm | 0-1 | Normalized number of observed services; absence is not proof of attack |
+| 6 | independentSecurityIndicatorCountNorm | 0-1 | Explicit block, suspicious name, unstable connection, degraded connection / 4 |
+| 7 | suspiciousNameFlag | 0/1 | Obvious suspicious-term heuristic; not ground truth |
+| 8 | connectionStatusFlag | 0-1 | Reported connection state, with unknown kept neutral |
+| 9 | deviceTypeRisk | 0-1 | Low-weight prior; unknown type is neutral, not high threat |
+| 10 | discoverySourceFlag | 0/1 | REAL=1, SIMULATED=0 |
 
-The order **must** stay identical for any future model.
+Keep this order stable for model compatibility. These are engineering features, not proof that a device is malicious.
 
 ---
 
@@ -66,24 +66,24 @@ All concrete models implement this interface, allowing drop‑in replacement.
 
 ---
 
-## 4. Development Model (`src/ml/developmentModel.ts`)
+## 4. Evidence-Based Development Heuristic (src/ml/developmentModel.ts)
 
-* **Name**: `BlueGuardian Development Classifier`
-* **Version**: `0.1.0-demo`
-* **Status**: `DEMO` (see `MLModelStatus`)
+* **Name**: BlueGuardian Evidence Heuristic
+* **Version**: 0.2.0-heuristic
+* **Status**: Development baseline
 
-Deterministic, rule‑based pseudo‑ML that maps the feature vector to one of six classes using weighted heuristics and a fixed hash‑based tie‑breaker. **No randomness**, same input → same output. Clearly labelled *development* everywhere (UI badges, logs, documentation). Not a trained statistical model.
+The hash-based pseudo-random class picker has been removed. The baseline makes a deterministic, explainable decision from explicit evidence such as an explicit in-app block, a suspicious advertised name, or corroborating independent indicators. A new/unknown device is unverified, not malicious solely because manufacturer/type/history is missing. One RSSI sample is not treated as spoofing evidence. This remains a rules-based heuristic, **not a trained statistical model**. Its displayed confidence is evidence strength, not a calibrated probability or measured accuracy.
 
-### Classification Classes (`MLThreatClass`)
+### Classification Classes (MLThreatClass)
 
 | Class | Meaning |
 |-------|---------|
-| `BENIGN` | No notable risk indicators |
-| `SUSPICIOUS` | Low trust / unknown device / suspicious name |
-| `POTENTIAL_SPOOFING` | Unusually strong RSSI, high device‑type risk |
-| `POTENTIAL_UNAUTHORIZED_ACCESS` | Unknown, untrusted, many security flags |
-| `ANOMALOUS_BEHAVIOR` | Unusual signal, unknown connection state |
-| `HIGH_RISK_DEVICE` | Blocked / high‑risk flag, very low trust |
+| BENIGN | No strong positive threat evidence in this observation; unknown devices may still require manual approval |
+| SUSPICIOUS | An advertised name contains a suspicious term; not proof of an attack |
+| POTENTIAL_SPOOFING | Reserved class; a single RSSI snapshot is not sufficient to assert spoofing |
+| POTENTIAL_UNAUTHORIZED_ACCESS | Multiple independent indicators support additional review |
+| ANOMALOUS_BEHAVIOR | Reserved for stronger behavioral/temporal evidence |
+| HIGH_RISK_DEVICE | Explicitly blocked device or other corroborated high-risk evidence |
 
 ---
 
@@ -105,23 +105,9 @@ Simple map `key → ModelConstructor`. `registerModel`, `getModel`, `listModels`
 
 ---
 
-## 7. Security Assessment Integration (`src/utils/securityAssessment.ts`)
+## 7. Security Assessment Integration
 
-Combines three scores:
-
-```
-finalThreatScore = 0.60 * ruleBasedThreatScore + 0.40 * mlRiskScore
-```
-
-* **Rule weight (0.60)** and **ML weight (0.40)** are **development integration weighting** – not scientifically validated.
-* `mlRiskScore` maps ML class × confidence to 0‑100.
-* Final severity derived from final score (same thresholds as rule engine).
-* `confidence` = weighted avg of rule certainty (ruleScore/100) and ML confidence.
-* All reasons (rule + ML) merged for explainability.
-
-Output `SecurityAssessment` feeds `ThreatContext` to create enriched `Threat` objects (now carry optional `mlPrediction`, `finalClassification`, `confidence`, `modelName`, `modelVersion`).
-
----
+The existing rule/heuristic blend remains development integration logic. Its weights and thresholds have not been trained or empirically calibrated, so its values must not be described as validated attack probability or model accuracy. Unknown/new devices still go through an approval gate, but are not pushed into the active Threats list solely for being unknown.
 
 ## 8. Explainability
 
@@ -182,18 +168,19 @@ These are **UI interpretation thresholds only**, not statistically validated.
 
 ---
 
-## 13. Replacing with a Real Trained Model (Future)
+## 13. Replacing the Heuristic with a Trained Model
 
-1. Train a model (e.g. TensorFlow.js, ONNX Runtime Web, or server‑side API) on a curated Bluetooth‑telemetry dataset with ground‑truth threat labels.
-2. Export model artefacts.
-3. Implement a new class `RealModel implements ThreatClassificationModel` that loads artefacts and runs `predict`.
-4. Register via `registerModel('production', RealModel)` in `modelRegistry`.
-5. Call `initializeModel('production')` at startup (or via Settings UI).
-6. All UI, assessment logic, and context remain unchanged – they depend only on the interface.
+The current BlueGuardian Evidence Heuristic is not trained, and no real-world accuracy/precision/recall/F1 numbers are available. Do not claim top accuracy until the model has been trained and evaluated on independent labeled observations.
 
-No retraining of the development model, no fake metrics, no hard‑coded assumptions beyond the feature contract.
+1. Collect lawful, curated Bluetooth telemetry with independent ground-truth labels for benign device families, controlled lab attacks, and ambiguous/unknown cases. Do not label every unknown device as malicious.
+2. Freeze a documented feature schema and label policy. Record collection conditions and which values are unavailable on particular Android versions or device families.
+3. Split by physical device/family and collection session to reduce train/test leakage; fit preprocessing and tune thresholds on training/validation data, then keep an untouched test set.
+4. Compare simple baselines before complex models. Report per-class precision, recall, F1, false-positive rate, confusion matrix, calibration, and device-family slices. Accuracy alone can hide a model that flags most ordinary devices.
+5. Select a threshold that meets a predefined false-positive budget while retaining high recall for validated attack classes.
+6. Export trained model artifacts and implement a real classifier that satisfies the ThreatClassificationModel interface.
+7. Register the implementation in modelRegistry.ts and enable it only after held-out evaluation passes acceptance criteria. Keep the heuristic as a transparent fallback.
 
----
+Synthetic data may validate a training pipeline and code path, but it cannot establish real-world Bluetooth threat-detection accuracy.
 
 ## 14. Current Limitations
 

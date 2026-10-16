@@ -3,6 +3,7 @@ import type { BluetoothDevice, BluetoothScanState, DeviceType } from '../types';
 import { generateSimulatedDevices } from '../services/bluetoothSimulator';
 import { isBluetoothSupported, requestBluetoothDevice, connectAndDiscover, readStandardCharacteristics, normalizeBluetoothName, resolveBluetoothDisplayName, getPreviouslyGrantedBluetoothDevices, watchBluetoothAdvertisements, type BluetoothPickerMode, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
+import { calculateTrustScore } from '../utils/trustScore';
 import { evaluateSecureBluetoothProfile, needsManualApproval } from '../utils/connectionPolicy';
 import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
@@ -42,40 +43,33 @@ type Action =
 function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
   const normalizedDevice: BluetoothDevice = {
     ...device,
-    // Repair legacy placeholder names in IndexedDB/API records whenever they are loaded.
     name: resolveBluetoothDisplayName(device.name, undefined, device.manufacturer),
   };
-  const profile = evaluateSecureBluetoothProfile(normalizedDevice, {
-    rssi: normalizedDevice.rssi,
-    fileName: normalizedDevice.name,
-    deviceType: normalizedDevice.type,
+
+  // Recompute derived values instead of inheriting scores caused by the old
+  // circular rule (unknown -> high risk -> low trust -> blocked).
+  const baselineTrust = calculateTrustScore(normalizedDevice);
+  const scoredDevice: BluetoothDevice = normalizedDevice.blocked
+    ? { ...normalizedDevice, riskLevel: 'high' }
+    : { ...normalizedDevice, trustScore: baselineTrust.score, riskLevel: baselineTrust.riskLevel };
+
+  const profile = evaluateSecureBluetoothProfile(scoredDevice, {
+    rssi: scoredDevice.rssi,
+    fileName: scoredDevice.name,
+    deviceType: scoredDevice.type,
   });
 
-  if (profile.connectionDecision === 'BLOCK') {
-    return { ...normalizedDevice, blocked: true, approvalRequired: false, riskLevel: 'high', trustScore: Math.min(device.trustScore, 25) };
+  if (scoredDevice.blocked || profile.connectionDecision === 'BLOCK') {
+    return { ...scoredDevice, blocked: true, approvalRequired: false, riskLevel: 'high' };
   }
 
-  if (profile.connectionDecision === 'REQUIRE_APPROVAL') {
-    return {
-      ...normalizedDevice,
-      trusted: false,
-      isKnown: false,
-      approvalRequired: true,
-      riskLevel: 'medium',
-      trustScore: Math.min(device.trustScore, 45),
-    };
-  }
-
-  if (profile.wearableMode === 'RESTRICTED') {
-    return {
-      ...normalizedDevice,
-      approvalRequired: needsManualApproval(normalizedDevice),
-      riskLevel: 'medium',
-      trustScore: Math.min(device.trustScore, 55),
-    };
-  }
-
-  return { ...normalizedDevice, approvalRequired: needsManualApproval(normalizedDevice) };
+  // Approval is a connection gate, not evidence of maliciousness.
+  return {
+    ...scoredDevice,
+    approvalRequired: profile.connectionDecision === 'REQUIRE_APPROVAL'
+      || profile.wearableMode === 'RESTRICTED'
+      || needsManualApproval(scoredDevice),
+  };
 }
 
 export function deviceReducer(state: DeviceState, action: Action): DeviceState {

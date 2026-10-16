@@ -23,6 +23,7 @@ const categoryIcons: Record<ThreatCategory, typeof AlertCircle> = {
   RAPID_DEVICE_APPEARANCE: Cpu,
   UNUSUAL_SIGNAL: Wifi,
   REPEATED_CONNECTION: Link,
+  UNSTABLE_CONNECTION: WifiOff,
   BLOCKED_DEVICE: UserX,
   SPOOFING_SUSPECTED: WifiOff,
   OTHER: AlertCircle,

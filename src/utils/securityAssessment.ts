@@ -60,10 +60,8 @@ export function assessDeviceSecurity(device: BluetoothDevice): SecurityAssessmen
   // Final classification label
   const finalClassification = mlPrediction.confidence > 0 ? mlPrediction.label : rule.category;
 
-  // Confidence overall: weighted average of rule certainty (heuristic) and ML confidence
-  // Rule certainty approximated by (rule.threatScore / 100)
-  const ruleCertainty = rule.threatScore / 100;
-  const overallConfidence = Math.min(1, RULE_WEIGHT * ruleCertainty + ML_WEIGHT * mlPrediction.confidence);
+  // Heuristic confidence is evidence strength, not a calibrated attack probability.
+  const overallConfidence = mlPrediction.confidence;
 
   // Reasons
   const reasons = combineReasons(rule.reasons, mlPrediction);

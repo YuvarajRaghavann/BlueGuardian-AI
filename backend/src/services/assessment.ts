@@ -19,8 +19,8 @@ function toBluetoothDevice(record: Record<string, any>): BluetoothDevice {
     rssi: record.rssi,
     trusted: Boolean(record.trusted),
     blocked: Boolean(record.blocked),
-    trustScore: record.trustScore ?? 0,
-    riskLevel: riskLevels.includes(record.riskLevel) ? record.riskLevel : 'high',
+    trustScore: typeof record.trustScore === 'number' && Number.isFinite(record.trustScore) ? record.trustScore : 60,
+    riskLevel: riskLevels.includes(record.riskLevel) ? record.riskLevel : 'medium',
     connectionStatus: connectionStatuses.includes(record.connectionStatus)
       ? record.connectionStatus
       : record.gattConnected ? 'connected' : 'unknown',
@@ -65,8 +65,8 @@ export async function assessDevice(record: Record<string, any>, ownerId?: string
   const severityFromScore = (s: number) => s >= 75 ? 'critical' : s >= 50 ? 'high' : s >= 20 ? 'medium' : 'low';
   const finalSeverity = severityFromScore(finalScore);
   const finalClassification = ml.confidence > 0 ? ml.label : rule.category;
-  const ruleCertainty = rule.threatScore / 100;
-  const overallConfidence = Math.min(1, RULE_WEIGHT * ruleCertainty + ML_WEIGHT * ml.confidence);
+  // The development heuristic returns evidence strength, not measured accuracy.
+  const overallConfidence = ml.confidence;
 
   const assessment = {
     deviceId: device.id,

@@ -53,6 +53,37 @@ describe('device discovery source handling', () => {
     expect(generated.devices[0].discoverySource).toBe('SIMULATED');
   });
 
+  it('does not convert an unverified high-risk-derived observation into an explicit block', () => {
+    const emptyState: DeviceState = {
+      devices: [],
+      scan: { state: 'idle', elapsedMs: 0, devicesFound: 0 },
+      simulationMode: false,
+      filter: 'all',
+      sort: 'trust',
+      search: '',
+    };
+    const unknown: BluetoothDevice = {
+      ...device,
+      id: 'unverified-observation',
+      name: 'Tile',
+      type: 'unknown',
+      address: 'C0:AD:19:44:DF:7F',
+      trusted: false,
+      trustScore: 0,
+      riskLevel: 'high',
+      connectionStatus: 'unknown',
+      connectionHealth: 'UNAVAILABLE',
+      blocked: false,
+      isKnown: false,
+      services: [{ uuid: '0000feed-0000-1000-8000-00805f9b34fb', characteristics: [] }],
+    };
+    const next = deviceReducer(emptyState, { type: 'ADD_DEVICE', payload: unknown });
+    expect(next.devices[0].blocked).toBe(false);
+    expect(next.devices[0].approvalRequired).toBe(true);
+    expect(next.devices[0].trustScore).toBeGreaterThanOrEqual(60);
+    expect(next.devices[0].riskLevel).not.toBe('high');
+  });
+
   it('merges BLE and classic reports with the same combined identity into one device', () => {
     const emptyState: DeviceState = {
       devices: [],

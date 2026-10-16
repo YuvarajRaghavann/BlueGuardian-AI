@@ -86,7 +86,11 @@ function threatReducer(state: ThreatState, action: Action): ThreatState {
     case 'CLEAR_RESOLVED':
       return { ...state, threats: state.threats.filter(t => t.status !== 'RESOLVED' && t.status !== 'DISMISSED') };
     case 'REFRESH_ANALYSIS': {
-      const merged = deduplicateThreats([...state.threats, ...action.payload.threats]).map(threat => {
+      const analyzedDeviceIds = new Set(action.payload.assessments.map(item => item.deviceId));
+      const history = state.threats.filter(threat =>
+        !analyzedDeviceIds.has(threat.deviceId) || threat.status !== 'ACTIVE',
+      );
+      const merged = deduplicateThreats([...history, ...action.payload.threats]).map(threat => {
         const previous = state.threats.find(
           current => current.deviceId === threat.deviceId && current.category === threat.category,
         );
@@ -105,6 +109,15 @@ function threatReducer(state: ThreatState, action: Action): ThreatState {
   }
 }
 
+function isActionableThreat(assessment: ReturnType<typeof assessDeviceSecurity>): boolean {
+  const codes = new Set(assessment.reasons.map(reason => reason.code));
+  const explicitlyBlocked = codes.has('BLOCKED_DEVICE');
+  const corroboratedSuspicion = assessment.finalThreatScore >= 35
+    && codes.has('SUSPICIOUS_NAME')
+    && codes.has('UNSTABLE_CONNECTION');
+  return assessment.finalThreatScore >= 50 || explicitlyBlocked || corroboratedSuspicion;
+}
+
 function createAnalysisPayload(devices: BluetoothDevice[]): {
   threats: Threat[];
   assessments: StoredAssessment[];
@@ -114,7 +127,9 @@ function createAnalysisPayload(devices: BluetoothDevice[]): {
 
   for (const device of devices) {
     const assessment = assessDeviceSecurity(device);
-    threats.push(assessmentToThreat(device, assessment));
+    if (isActionableThreat(assessment)) {
+      threats.push(assessmentToThreat(device, assessment));
+    }
     assessments.push({
       deviceId: device.id,
       assessment,
