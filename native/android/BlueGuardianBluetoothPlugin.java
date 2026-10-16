@@ -327,7 +327,19 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             return;
         }
 
+        // Stop only a discovery session owned by this plugin. Do not cancel
+        // another app's active discovery session behind the user's back.
         stopClassicDiscoveryInternal(false);
+        try {
+            if (adapter.isDiscovering()) {
+                call.reject("Another classic Bluetooth discovery session is already active. Wait briefly and retry.");
+                return;
+            }
+        } catch (SecurityException error) {
+            call.reject("Android denied the classic discovery state check. Check Nearby Devices permission.");
+            return;
+        }
+
         classicSeenAddresses.clear();
         Integer requestedDuration = call.getInt("durationMs");
         activeClassicDurationMs = requestedDuration == null
