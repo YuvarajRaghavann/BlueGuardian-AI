@@ -3,6 +3,7 @@ import {
   createFirebaseAccount,
   getFreshFirebaseIdToken,
   hasFirebaseSession,
+  sendFirebasePasswordResetEmail,
   signInWithEmailPassword,
   signOutFirebase,
 } from './firebaseAuth';
@@ -95,6 +96,27 @@ describe('Firebase Auth REST client', () => {
 
     await expect(signInWithEmailPassword('owner@example.com', 'correct-password'))
       .rejects.toThrow(/Enable it in Firebase Console/);
+  });
+
+  it('requests a Firebase password reset without storing credentials', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ email: 'owner@example.com' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(sendFirebasePasswordResetEmail(' Owner@Example.com ')).resolves.toBe('owner@example.com');
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/accounts:sendOobCode?key=');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toEqual({
+      requestType: 'PASSWORD_RESET',
+      email: 'owner@example.com',
+    });
+  });
+
+  it('exposes safe Firebase error codes for API-key diagnostics', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
+      error: { message: 'API_KEY_SERVICE_BLOCKED : Requests to this API are blocked.' },
+    }, false)));
+
+    await expect(signInWithEmailPassword('owner@example.com', 'correct-password'))
+      .rejects.toThrow(/Identity Toolkit or Secure Token.*Firebase code: API_KEY_SERVICE_BLOCKED/);
   });
 
   it('clears the in-memory session on sign out', async () => {
