@@ -42,6 +42,26 @@ describe('security action device transitions', () => {
     expect(next.riskLevel).toBe(device.riskLevel);
   });
 
+  it('keeps a device approved even if its previous assessment required review', () => {
+    const pending = {
+      ...device,
+      trusted: false,
+      isKnown: false,
+      riskLevel: 'medium' as const,
+      trustScore: 45,
+      approvalRequired: true,
+    };
+    const next = deviceReducer(stateWithDevice(pending), {
+      type: 'MARK_TRUSTED',
+      payload: pending.id,
+    }).devices[0];
+
+    expect(next.trusted).toBe(true);
+    expect(next.isKnown).toBe(true);
+    expect(next.blocked).not.toBe(true);
+    expect(next.approvalRequired).toBe(false);
+  });
+
   it('unblocks without changing the device trust state', () => {
     const blockedDevice = { ...device, blocked: true };
     const next = deviceReducer(stateWithDevice(blockedDevice), {
