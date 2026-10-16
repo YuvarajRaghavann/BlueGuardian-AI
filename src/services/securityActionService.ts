@@ -19,7 +19,7 @@ function reconcileApprovalState(device: BluetoothDevice): BluetoothDevice {
     return next;
   }
 
-  next.approvalRequired = needsManualApproval(next);
+  next.approvalRequired = needsManualApproval({ ...next, approvalRequired: false });
   return next;
 }
 
