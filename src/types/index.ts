@@ -65,7 +65,7 @@ export interface BluetoothDevice {
   services: GattServiceInfo[];
   discoverySource: DiscoverySource;
   /** Physical discovery transport; discovery never implies connection. */
-  discoveryTransport?: 'BLE' | 'CLASSIC';
+  discoveryTransport?: 'BLE' | 'CLASSIC' | 'PAIRED';
   /** True only when Android reports the device is bonded/paired. */
   paired?: boolean;
   gattConnected?: boolean;
