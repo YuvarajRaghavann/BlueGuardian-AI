@@ -227,7 +227,7 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
     location,
   }).location;
 
-  const fingerprintHashes = new Set<string>();
+  const fingerprintHashes = new Map<string, { hasServiceUuids: boolean }>();
   for (const observation of observations) {
     const registration = validateRegistrationInput({
       deviceName: typeof observation?.name === 'string' ? observation.name : '',
@@ -238,11 +238,13 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
       },
       discoverySource: 'REAL',
     });
-    if (registration.recoveryFingerprintHash) fingerprintHashes.add(registration.recoveryFingerprintHash);
+    if (registration.recoveryFingerprintHash) fingerprintHashes.set(registration.recoveryFingerprintHash, {
+      hasServiceUuids: Array.isArray(observation?.serviceUuids) && observation.serviceUuids.length > 0,
+    });
   }
 
   const timeBucket = Math.floor(Date.now() / 60_000);
-  for (const fingerprintHash of fingerprintHashes) {
+  for (const [fingerprintHash, fingerprint] of fingerprintHashes) {
     const matches = await Device.find({
       recoveryEnabled: true,
       recoveryState: { $in: ['lost', 'searching'] },
@@ -262,9 +264,11 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
         ownerId: device.ownerId,
         deduplicationKey,
         source: 'REAL',
-        confidence: 0.45,
+        confidence: fingerprint.hasServiceUuids ? 0.45 : 0.2,
         location: locationPayload,
-        description: 'Community BLE fingerprint candidate. This is an unverified lead; confirm the device before marking it found.',
+        description: fingerprint.hasServiceUuids
+          ? 'Community BLE name + service UUID candidate. This is an unverified lead; confirm the device before marking it found.'
+          : 'Low-confidence community BLE name-only candidate. Advertised names can collide; confirm the physical device before marking it found.',
         simulated: false,
         isTestFixture: false,
         observedAt: new Date(),
