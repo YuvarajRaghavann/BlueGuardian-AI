@@ -1,0 +1,54 @@
+name: Train BLE Flood Model on Published Captures
+
+on:
+  push:
+    branches:
+      - 'ml/blueguardian-trained-threat-model-20261016'
+    paths:
+      - 'ml_training/run_public_ble_training.py'
+      - 'ml_training/extract_pcap_windows.py'
+      - 'ml_training/train_ble_flood_model.py'
+      - 'ml_training/requirements.txt'
+      - '.github/workflows/train-ble-flood-model.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blueguardian-ble-real-data-training
+  cancel-in-progress: false
+
+jobs:
+  train:
+    name: Train and evaluate on real published BLE captures
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Check out isolated ML branch
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ml_training/requirements.txt
+
+      - name: Install training dependencies
+        run: python -m pip install -r ml_training/requirements.txt
+
+      - name: Run real-data feature extraction, training and grouped holdout evaluation
+        run: python -u ml_training/run_public_ble_training.py
+
+      - name: Upload evaluation report, aggregate features and disabled candidate weights
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blueguardian-ble-flood-real-data-candidate
+          path: |
+            ml_training/reports/ble_flood_evaluation.json
+            ml_training/processed/ble_windows.csv
+            src/ml/generated/bleFloodModel.json
+          if-no-files-found: warn
+          retention-days: 30
