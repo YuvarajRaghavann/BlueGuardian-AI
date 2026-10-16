@@ -310,7 +310,9 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
   }, [deviceState.devices, storedThreats, ownerToken, backendReady, serverThreatsReadyToken]);
 
   useEffect(() => {
-    if (!ownerToken || !backendReady) return;
+    // Wait until the IndexedDB threat history has hydrated before merging the
+    // backend snapshot. Otherwise a slow local read can overwrite fresh server data.
+    if (!ownerToken || !backendReady || storedThreats === null) return;
     let cancelled = false;
     api.getThreatSnapshot(ownerToken, deviceState.devices)
       .then(snapshot => {
@@ -328,7 +330,7 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
         if (!cancelled) console.warn('Could not load owner-scoped backend threats; automatic backend assessment is paused until the owner data can be loaded.', error);
       });
     return () => { cancelled = true; };
-  }, [ownerToken, backendReady]);
+  }, [ownerToken, backendReady, storedThreats]);
 
   const refreshThreatAnalysis = (devices: BluetoothDevice[]) => {
     if (!ownerToken) {
