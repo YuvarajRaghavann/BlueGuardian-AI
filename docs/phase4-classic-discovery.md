@@ -45,7 +45,7 @@ After the APK exists, physical-device acceptance should confirm:
 6. If a system discovery session races with startup, BlueGuardian must not cancel that session unless its own start call succeeded.
 7. Discovered/paired devices remain marked unconnected unless a later approved phase implements and verifies connection handling.
 
-Passing CI proves build integration, not real-radio hardware behavior. Phase 5 should not begin until Phase 4's source/build acceptance passes and the classic discovery behavior has been reviewed.
+Passing CI proves build integration, not real-radio hardware behavior. The Phase 5 implementation may be developed on an isolated branch after the Phase 4 source/build gate, but Phase 4 must not be considered physically accepted or released until the repair APK is installed and classic discovery is reviewed on the target handset.
 
 
 ## Phase 4 device-reported startup failure follow-up
