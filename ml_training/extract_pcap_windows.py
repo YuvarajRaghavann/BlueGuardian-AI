@@ -151,8 +151,13 @@ def extract_capture(path: Path, label: str, session_id: str, window_seconds: flo
     ble_count = 0
     missing_address_count = 0
     seen_packets = 0
+    debug_packet_shapes: list[dict[str, Any]] = []
+    reader_class = "unknown"
+    reader_linktype: Any = None
 
     with PcapReader(str(path)) as reader:
+        reader_class = type(reader).__name__
+        reader_linktype = getattr(reader, "linktype", None)
         for packet in reader:
             seen_packets += 1
             if max_packets and seen_packets > max_packets:
@@ -161,6 +166,15 @@ def extract_capture(path: Path, label: str, session_id: str, window_seconds: flo
                     "use a larger explicit limit rather than silently truncating."
                 )
             layers = packet_layers(packet)
+            if len(debug_packet_shapes) < 5:
+                debug_packet_shapes.append({
+                    "layers": [type(layer).__name__ for layer in layers],
+                    "field_names": {
+                        type(layer).__name__: list(getattr(layer, "fields", {}).keys())
+                        for layer in layers[:8]
+                    },
+                    "timestamp_available": hasattr(packet, "time"),
+                })
             if not is_ble_advertisement(packet, layers):
                 continue
             try:
@@ -190,8 +204,10 @@ def extract_capture(path: Path, label: str, session_id: str, window_seconds: flo
 
     if not buckets:
         raise ValueError(
-            f"No BLE advertising packets were decoded from {path}. Check the capture link type "
-            "and Scapy's Bluetooth dissection before training."
+            f"No BLE advertising packets were decoded from {path}. "
+            f"Reader={reader_class}, linktype={reader_linktype!r}, "
+            f"first_packet_shapes={debug_packet_shapes!r}. "
+            "Check the capture link type and Scapy's Bluetooth dissection before training."
         )
     if ble_count == 0:
         raise ValueError(f"No BLE advertising packets found in {path}")
