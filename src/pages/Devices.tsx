@@ -78,162 +78,81 @@ export function Devices() {
       });
   }, [state.devices, nativeScanStartedAt]);
 
-  
-  const nativeClassicDevices = useMemo(() => state.devices
-    .filter((device) => {
-      if (device.discoverySource !== 'REAL' || (device.discoveryTransport !== 'CLASSIC' && device.discoveryTransport !== 'PAIRED')) return false;
-      if (classicScanStartedAt === null) return true;
-      const seenAt = device.lastSeen instanceof Date
-        ? device.lastSeen.getTime()
-        : Date.parse(String(device.lastSeen));
-      return Number.isFinite(seenAt) && seenAt >= classicScanStartedAt - 2000;
-    })
-    .sort((a, b) => {
-      const aSeen = a.lastSeen instanceof Date ? a.lastSeen.getTime() : Date.parse(String(a.lastSeen));
-      const bSeen = b.lastSeen instanceof Date ? b.lastSeen.getTime() : Date.parse(String(b.lastSeen));
-      return bSeen - aSeen;
-    }), [state.devices, classicScanStartedAt]);
+  const classicScanDevices = useMemo(() => {
+    return state.devices
+      .filter((device) => {
+        if (device.discoverySource !== 'REAL' || (device.discoveryTransport !== 'CLASSIC' && device.discoveryTransport !== 'PAIRED')) return false;
+        if (classicScanStartedAt === null) return true;
+        const seenAt = device.lastSeen instanceof Date
+          ? device.lastSeen.getTime()
+          : Date.parse(String(device.lastSeen));
+        return Number.isFinite(seenAt) && seenAt >= classicScanStartedAt - 2000;
+      })
+      .sort((a, b) => {
+        const aSeen = a.lastSeen instanceof Date ? a.lastSeen.getTime() : Date.parse(String(a.lastSeen));
+        const bSeen = b.lastSeen instanceof Date ? b.lastSeen.getTime() : Date.parse(String(b.lastSeen));
+        return bSeen - aSeen;
+      });
+  }, [state.devices, classicScanStartedAt]);
 
-  const nativeCombinedDevices = useMemo(() => state.devices
-    .filter((device) => {
-      if (device.discoverySource !== 'REAL' || device.discoveryTransport !== 'COMBINED') return false;
-      if (combinedScanStartedAt === null) return true;
-      const seenAt = device.lastSeen instanceof Date
-        ? device.lastSeen.getTime()
-        : Date.parse(String(device.lastSeen));
-      return Number.isFinite(seenAt) && seenAt >= combinedScanStartedAt - 2000;
-    })
-    .sort((a, b) => {
-      const aSeen = a.lastSeen instanceof Date ? a.lastSeen.getTime() : Date.parse(String(a.lastSeen));
-      const bSeen = b.lastSeen instanceof Date ? b.lastSeen.getTime() : Date.parse(String(b.lastSeen));
-      return bSeen - aSeen;
-    }), [state.devices, combinedScanStartedAt]);
-
-  const nativePairedDevices = useMemo(() => nativeClassicDevices.filter((device) => device.paired), [nativeClassicDevices]);
+  const combinedScanDevices = useMemo(() => {
+    return state.devices
+      .filter((device) => {
+        if (device.discoverySource !== 'REAL') return false;
+        if (combinedScanStartedAt === null) return true;
+        const seenAt = device.lastSeen instanceof Date
+          ? device.lastSeen.getTime()
+          : Date.parse(String(device.lastSeen));
+        return Number.isFinite(seenAt) && seenAt >= combinedScanStartedAt - 2000;
+      })
+      .sort((a, b) => {
+        const aSeen = a.lastSeen instanceof Date ? a.lastSeen.getTime() : Date.parse(String(a.lastSeen));
+        const bSeen = b.lastSeen instanceof Date ? b.lastSeen.getTime() : Date.parse(String(b.lastSeen));
+        return bSeen - aSeen;
+      });
+  }, [state.devices, combinedScanStartedAt]);
 
   useEffect(() => {
     dispatch({ type: 'SET_SEARCH', payload: localSearch });
   }, [localSearch, dispatch]);
 
-  const realDeviceCount = state.devices.filter(device => device.discoverySource !== 'SIMULATED').length;
-  const simulatedDeviceCount = state.devices.filter(device => device.discoverySource === 'SIMULATED').length;
-
-  // Never mix demo records into the default real-hardware view. Simulation data
-  // is visible only when the user explicitly selects Simulated or All records.
-  const sourceFilteredDevices = useMemo(() => {
-    if (sourceView === 'simulated') return state.devices.filter(device => device.discoverySource === 'SIMULATED');
-    if (sourceView === 'real') return state.devices.filter(device => device.discoverySource !== 'SIMULATED');
-    return [...state.devices];
-  }, [state.devices, sourceView]);
-
-  const filteredDevices = useMemo(() => {
-    let arr = [...sourceFilteredDevices];
-
-    if (localSearch) {
-      const q = localSearch.toLowerCase();
-      arr = arr.filter(
-        d =>
-          d.name.toLowerCase().includes(q) ||
-          d.manufacturer?.toLowerCase().includes(q) ||
-          d.type.includes(q)
-      );
-    }
-
-    switch (state.filter) {
-      case 'trusted':
-        arr = arr.filter(d => d.trusted);
-        break;
-      case 'unknown':
-        arr = arr.filter(d => !d.trusted);
-        break;
-      case 'review':
-        arr = arr.filter(d => needsManualApproval(d));
-        break;
-      case 'high-risk':
-        arr = arr.filter(d => d.riskLevel === 'high');
-        break;
-      case 'connected':
-        arr = arr.filter(d => d.connectionStatus === 'connected');
-        break;
-      case 'nearby':
-        arr = arr.filter(d => typeof d.rssi === 'number' && d.rssi > -70);
-        break;
-    }
-
-    arr.sort((a, b) => {
-      switch (state.sort) {
-        case 'trust':
-          return b.trustScore - a.trustScore;
-        case 'signal':
-          if (a.rssi === undefined) return b.rssi === undefined ? 0 : 1;
-          if (b.rssi === undefined) return -1;
-          return b.rssi - a.rssi;
-        case 'lastSeen':
-          return b.lastSeen.getTime() - a.lastSeen.getTime();
-        case 'risk': {
-          const riskOrder = { high: 3, medium: 2, low: 1, trusted: 0 };
-          return riskOrder[b.riskLevel] - riskOrder[a.riskLevel];
-        }
-        default:
-          return 0;
-      }
+  const visibleDevices = useMemo(() => {
+    const sourceFiltered = state.devices.filter(device => {
+      if (sourceView === 'real') return device.discoverySource === 'REAL';
+      if (sourceView === 'simulated') return device.discoverySource === 'SIMULATED';
+      return true;
     });
+    const q = localSearch.trim().toLowerCase();
+    if (!q) return sourceFiltered;
+    return sourceFiltered.filter(device =>
+      device.name.toLowerCase().includes(q)
+      || device.address.toLowerCase().includes(q)
+      || device.type.toLowerCase().includes(q)
+    );
+  }, [state.devices, sourceView, localSearch]);
 
-    return arr;
-  }, [sourceFilteredDevices, localSearch, state.filter, state.sort]);
-
-  // Keep real Bluetooth and demo data as two explicit actions. This avoids
-  // accidentally showing only sample data when the old Simulation Mode toggle
-  // was left enabled from an earlier session.
   const handleScan = async () => {
-    setCombinedResultsOpen(false);
-    setClassicResultsOpen(false);
-    setPairedResultsOpen(false);
-    setSourceView('real');
-    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
-    if (nativeAndroid) {
-      setNativeScanStartedAt(Date.now());
-      // Show live results immediately. This also gives the user an explicit
-      // success/empty/error outcome instead of expecting a browser chooser.
-      setNativeResultsOpen(true);
-    }
+    setNativeScanStartedAt(Date.now());
+    setNativeResultsOpen(nativeAndroid);
     await scanRealDevices(pickerMode);
   };
 
   const handleClassicScan = async () => {
-    setCombinedResultsOpen(false);
-    setNativeResultsOpen(false);
-    setPairedResultsOpen(false);
-    setSourceView('real');
-    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
     setClassicScanStartedAt(Date.now());
-    setPairedResultsOpen(false);
     setClassicResultsOpen(true);
     await scanClassicDevices();
   };
 
   const handleCombinedScan = async () => {
-    setNativeResultsOpen(false);
-    setClassicResultsOpen(false);
-    setPairedResultsOpen(false);
-    setSourceView('real');
-    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
     setCombinedScanStartedAt(Date.now());
     setCombinedResultsOpen(true);
     await scanCombinedDevices();
   };
 
   const handleLoadPairedDevices = async () => {
-    setCombinedResultsOpen(false);
-    setNativeResultsOpen(false);
-    setClassicResultsOpen(false);
-    setSourceView('real');
-    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
-    setPairedResultsOpen(true);
-    setClassicResultsOpen(false);
     setPairedDevicesLoading(true);
+    setPairedResultsOpen(true);
     try {
-      // Paired devices are read from Android's bonded-device registry, not scanned.
       await loadPairedDevices();
     } finally {
       setPairedDevicesLoading(false);
@@ -241,21 +160,7 @@ export function Devices() {
   };
 
   const handleGenerateSimulated = async () => {
-    setCombinedResultsOpen(false);
-    setNativeResultsOpen(false);
-    setClassicResultsOpen(false);
-    setPairedResultsOpen(false);
-    setSourceView('simulated');
-    // Keep the general-purpose scan entry point in real mode. Demo generation
-    // is explicit and must not switch future scans elsewhere in the app to fake data.
-    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
     await scanSimulatedDevices();
-  };
-
-  const handleClearSimulated = () => {
-    clearSimulatedDevices();
-    setSourceView('real');
-    dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
   };
 
   const handleRunDiagnostics = async () => {
@@ -297,8 +202,8 @@ export function Devices() {
             Devices
           </h1>
 
-          <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-            Discover nearby Bluetooth Low Energy (BLE) devices, review their actual reported names, and assess available connection details.
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+            Find nearby devices, check their trust status, and keep the devices you care about close at hand.
           </p>
         </div>
 
@@ -408,11 +313,11 @@ export function Devices() {
         <div className="flex items-start gap-3">
           <Bluetooth className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Native Android Bluetooth discovery' : 'Browser Bluetooth capability'}</p>
+            <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Your nearby devices' : 'Connect to a nearby device'}</p>
             <p className="text-xs leading-5 text-[var(--text-secondary)]">
               {nativeAndroid
-                ? 'BlueGuardian searches nearby Bluetooth devices in one guided scan, combining BLE advertisements with discoverable classic devices. Results are merged when Android reports the same device address. Scanning does not connect to a device; pairing and connections remain under your control.'
-                : "The real scan path uses Chrome's Web Bluetooth chooser, which returns one selected BLE peripheral per click, not a complete nearby-device list. BlueGuardian then attempts GATT connection and service inspection. Stored real records may be from earlier selections; they are not proof that a device is currently nearby. The diagnostics help identify the stage where access failed. Simulated examples are kept separate and are no longer written into the physical-device database."}
+                ? 'Scan for nearby Bluetooth devices, review the results, and choose a device to inspect its details. BlueGuardian will not pair or connect without your action.'
+                : 'Choose a nearby device, then review its available details and security status. Simulated examples are kept separate from real device observations.'}
             </p>
           </div>
         </div>
@@ -453,298 +358,124 @@ export function Devices() {
               </div>
               <div className="rounded-md border border-[var(--border)] p-2.5">
                 <span className="text-[var(--text-muted)]">Previously granted device list</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.grantedDeviceListApi ? 'Supported' : 'Not exposed'}</p>
+                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.getDevicesApi ? 'Available' : 'Not available'}</p>
               </div>
               <div className="rounded-md border border-[var(--border)] p-2.5">
-                <span className="text-[var(--text-muted)]">Advertisement watch API</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.advertisementWatchApi ? 'Exposed' : 'Not exposed'}</p>
+                <span className="text-[var(--text-muted)]">Advertisement watch</span>
+                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.watchAdvertisementsApi ? 'Available' : 'Not available'}</p>
               </div>
-              <div className="rounded-md border border-[var(--border)] p-2.5">
-                <span className="text-[var(--text-muted)]">API object</span>
-                <p className="mt-1 font-semibold text-[var(--text)]">{diagnostics.webBluetoothApi ? 'Present' : 'Missing'}</p>
-              </div>
-              {diagnostics.availabilityNote && <p className="sm:col-span-2 lg:col-span-3 leading-5 text-[var(--text-secondary)]">{diagnostics.availabilityNote}</p>}
             </div>
           )}
-          <p className="mt-3 text-[11px] leading-5 text-[var(--text-muted)]">
-            For detailed scan-stage messages, open Chrome DevTools with F12 → Console and search for <code>[BlueGuardian][BLE]</code>. No device ID or address is intentionally logged.
-          </p>
         </div>
-
-        <div className={cn("flex flex-col gap-3 rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/5 p-3 sm:flex-row sm:items-center sm:justify-between", nativeAndroid && 'hidden')}>
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-[var(--text)]">Previously authorized BLE watch</p>
-            <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-              Starts listening for real advertisement packets from previously authorized devices only. It cannot discover new devices, and support varies by browser/device.
-            </p>
-            {advertisementWatch.message && (
-              <p role="status" className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{advertisementWatch.message}</p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={() => void handleToggleAdvertisementWatch()}
-            disabled={isScanning}
-            className={cn(
-              'inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-[var(--radius-md)] border px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-              advertisementWatch.active
-                ? 'border-[var(--danger)]/30 bg-[var(--danger)]/10 text-[var(--danger)] hover:bg-[var(--danger)]/15'
-                : 'border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/15'
-            )}
-          >
-            <Radar className={cn('h-4 w-4', advertisementWatch.active && 'animate-pulse')} />
-            {advertisementWatch.active ? 'Stop BLE watch' : 'Watch permitted BLE devices'}
-          </button>
-        </div>
-
-        <div className={cn("flex items-start gap-3 rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/5 px-3 py-3", nativeAndroid && 'hidden')}>
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
-          <p className="text-xs leading-5 text-[var(--text-secondary)]">
-            <strong>Classic Bluetooth limitation:</strong> browser JavaScript cannot enumerate or scan classic Bluetooth devices, control Windows pairing, or perform full audio pairing. Use Windows Settings → Bluetooth &amp; devices for AirPods audio pairing. A native Windows/Android application is required for broader BLE and classic Bluetooth discovery. <strong>Generate simulated data</strong> creates sample records only.
-          </p>
-        </div>
-        {nativeAndroid && (
-          <div className="flex items-start gap-3 rounded-lg border border-[var(--accent)]/25 bg-[var(--accent)]/5 px-3 py-3">
-            <Bluetooth className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
-            <p className="text-xs leading-5 text-[var(--text-secondary)]">
-              <strong>Android native Bluetooth discovery:</strong> BLE and classic scans run only while the app is in the foreground. BLE uses Nearby Devices permission; classic discovery may also request Location permission because Android requires it for this scan API. BlueGuardian does not collect GPS coordinates from this permission. The guided scan runs BLE first and then classic discovery; devices remain unconnected until you choose to pair or connect through Android. Normal AirPods audio pairing remains controlled by Android Settings.
-            </p>
-          </div>
-        )}
       </section>
 
-      {/* Scan state */}
-      {state.scan.state !== 'idle' && (
-        <div
-          className={cn(
-            'flex flex-col gap-3 rounded-[var(--radius-md)] border p-4 sm:flex-row sm:items-center sm:justify-between',
-            state.scan.state === 'scanning' &&
-              'border-[var(--accent)]/30 bg-[var(--accent-soft)]',
-            state.scan.state === 'complete' &&
-              'border-[var(--success)]/30 bg-[var(--success)]/10',
-            (state.scan.state === 'unsupported' ||
-              state.scan.state === 'permission-denied') &&
-              'border-[var(--warning)]/30 bg-[var(--warning)]/10',
-            state.scan.state === 'error' &&
-              'border-[var(--danger)]/30 bg-[var(--danger)]/10'
-          )}
-        >
+      <section className="space-y-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
-            {state.scan.state === 'scanning' && <LoadingSpinner size="sm" />}
-            {state.scan.state === 'complete' && (
-              <Bluetooth className="h-5 w-5 text-[var(--success)]" />
-            )}
-            {state.scan.state === 'unsupported' && (
-              <Cpu className="h-5 w-5 text-[var(--warning)]" />
-            )}
-            {state.scan.state === 'permission-denied' && (
-              <AlertTriangle className="h-5 w-5 text-[var(--warning)]" />
-            )}
-            {state.scan.state === 'error' && (
-              <AlertTriangle className="h-5 w-5 text-[var(--danger)]" />
-            )}
-
+            <Search className="h-4 w-4 text-[var(--accent)]" />
             <div>
-              <p className="text-sm font-medium text-[var(--text)]">
-                {state.scan.state === 'scanning' &&
-                  (nativeAndroid
-                    ? state.scan.transport === 'ANDROID_COMBINED_SCAN'
-                      ? (state.scan.scanStage === 'CLASSIC'
-                        ? `Combined scan · classic discovery… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
-                        : `Combined scan · BLE discovery… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`)
-                      : state.scan.transport === 'ANDROID_CLASSIC_SCAN'
-                        ? `Discovering classic Bluetooth devices… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
-                        : `Scanning nearby BLE advertisements… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
-                    : `Opening Bluetooth chooser… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`)}
-                {state.scan.state === 'complete' &&
-                  (state.scan.source === 'SIMULATED'
-                    ? `Simulated sample data generated · ${state.scan.devicesFound} sample device(s) · no hardware scan performed`
-                    : state.scan.transport === 'ANDROID_BLE_SCAN'
-                      ? `Android BLE scan complete · ${state.scan.devicesFound} device(s) observed${state.scan.error ? ` · ${state.scan.error}` : ''}`
-                      : state.scan.transport === 'ANDROID_CLASSIC_SCAN'
-                        ? `Classic Bluetooth discovery complete · ${state.scan.devicesFound} device(s) found${state.scan.error ? ` · ${state.scan.error}` : ''}`
-                        : state.scan.transport === 'ANDROID_COMBINED_SCAN'
-                          ? `Combined BLE + classic scan complete · ${state.scan.devicesFound} unique device(s)${state.scan.error ? ` · ${state.scan.error}` : ''}`
-                          : state.scan.transport === 'ANDROID_PAIRED_DEVICES'
-                          ? `Paired-device list loaded · ${state.scan.devicesFound} paired device(s)${state.scan.error ? ` · ${state.scan.error}` : ''}`
-                          : state.scan.error
-                        ? `Real device selected · ${state.scan.error}`
-                        : `Real BLE selection complete · ${state.scan.devicesFound} device(s) selected`)}
-                {state.scan.state === 'unsupported' &&
-                  `Web Bluetooth not supported: ${state.scan.error}`}
-                {state.scan.state === 'permission-denied' &&
-                  (/cancel|abort|dismiss/i.test(state.scan.error ?? '')
-                    ? 'Bluetooth device picker cancelled. No device was added. Use Generate simulated data to test without Bluetooth.'
-                    : `Bluetooth permission denied: ${state.scan.error}`)}
-                {state.scan.state === 'error' &&
-                  `Scan failed: ${state.scan.error}`}
-              </p>
+              <h2 className="text-lg font-semibold text-[var(--text)]">Discovered devices</h2>
+              <p className="text-xs text-[var(--text-secondary)]">{visibleDevices.length} device(s) in your current view</p>
             </div>
           </div>
-
-          {state.scan.state === 'complete' && (
-            <button
-              onClick={() =>
-                dispatch({
-                  type: 'SET_SCAN_STATE',
-                  payload: { state: 'idle' },
-                })
-              }
-              className="text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
-            >
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* Controls */}
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-4">
-        <div className="flex flex-col gap-3 lg:flex-row">
-          <div className="relative min-w-0 flex-1">
-            <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
+          <div className="flex flex-col gap-2 sm:flex-row">
             <input
-              type="text"
-              placeholder="Search by device, manufacturer or type…"
+              type="search"
               value={localSearch}
-              onChange={e => setLocalSearch(e.target.value)}
-              className="h-11 w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] pl-10 pr-4 text-sm text-[var(--text)] outline-none transition-all duration-200 placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]/60 focus:ring-2 focus:ring-[var(--accent)]/15"
+              onChange={event => setLocalSearch(event.target.value)}
+              placeholder="Search device name, address, or type"
+              aria-label="Search devices"
+              className="min-h-10 min-w-0 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] sm:min-w-64"
             />
-          </div>
-
-          <div className="flex flex-col gap-3 sm:flex-row">
-            <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
-              <SlidersHorizontal className="h-3.5 w-3.5" />
-              Filters
-            </div>
-
             <select
-              value={state.filter}
-              onChange={e =>
-                dispatch({
-                  type: 'SET_FILTER',
-                  payload: e.target.value as any,
-                })
-              }
-              className="h-11 min-w-36 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-all duration-200 focus:border-[var(--accent)]/60 focus:ring-2 focus:ring-[var(--accent)]/15"
+              value={sourceView}
+              onChange={event => setSourceView(event.target.value as 'real' | 'simulated' | 'all')}
+              aria-label="Device source"
+              className="min-h-10 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
             >
+              <option value="real">Real observations</option>
+              <option value="simulated">Simulated examples</option>
               <option value="all">All devices</option>
-              <option value="trusted">Trusted</option>
-              <option value="unknown">Unknown</option>
-              <option value="review">Needs review</option>
-              <option value="high-risk">High risk</option>
-              <option value="connected">Connected</option>
-              <option value="nearby">Nearby</option>
-            </select>
-
-            <select
-              value={state.sort}
-              onChange={e =>
-                dispatch({
-                  type: 'SET_SORT',
-                  payload: e.target.value as any,
-                })
-              }
-              className="h-11 min-w-40 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg)] px-3 text-sm text-[var(--text)] outline-none transition-all duration-200 focus:border-[var(--accent)]/60 focus:ring-2 focus:ring-[var(--accent)]/15"
-            >
-              <option value="trust">Trust score ↓</option>
-              <option value="signal">Signal strength ↓</option>
-              <option value="lastSeen">Last seen ↓</option>
-              <option value="risk">Risk level ↓</option>
             </select>
           </div>
         </div>
-      </section>
 
-      {/* Results and source isolation */}
-      <section className="space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-[var(--text)]">
-              {filteredDevices.length} {sourceView === 'simulated' ? 'simulated ' : sourceView === 'real' ? 'real ' : ''}device{filteredDevices.length === 1 ? '' : 's'} shown
-            </p>
-            <p className="text-xs text-[var(--text-muted)]">
-              {realDeviceCount} real hardware record(s) · {simulatedDeviceCount} simulated sample record(s) in this session
-            </p>
+        {state.scan.state === 'error' && (
+          <div role="alert" className="rounded-lg border border-[var(--danger)]/25 bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">
+            {state.scan.error ?? 'The Bluetooth scan failed. Check permissions and try again.'}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => setSourceView('real')} aria-pressed={sourceView === 'real'} className={cn('rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors', sourceView === 'real' ? 'border-[var(--accent)]/50 bg-[var(--accent)]/15 text-[var(--accent)]' : 'border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]')}>
-              Real devices ({realDeviceCount})
-            </button>
-            <button type="button" onClick={() => setSourceView('simulated')} aria-pressed={sourceView === 'simulated'} className={cn('rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors', sourceView === 'simulated' ? 'border-[var(--warning)]/50 bg-[var(--warning)]/10 text-[var(--warning)]' : 'border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]')}>
-              Simulated ({simulatedDeviceCount})
-            </button>
-            <button type="button" onClick={() => setSourceView('all')} aria-pressed={sourceView === 'all'} className={cn('rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors', sourceView === 'all' ? 'border-[var(--accent)]/50 bg-[var(--accent)]/15 text-[var(--accent)]' : 'border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]')}>
-              All records ({state.devices.length})
-            </button>
-            {simulatedDeviceCount > 0 && (
-              <button type="button" onClick={handleClearSimulated} className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]">
-                <Database className="h-3.5 w-3.5" /> Clear simulated
-              </button>
-            )}
+        )}
+
+        {state.scan.state === 'permission-denied' && (
+          <div role="alert" className="rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/10 p-3 text-sm text-[var(--warning)]">
+            Bluetooth permission was not granted. Allow the requested permission in Android settings, then try again.
           </div>
-        </div>
-        {sourceView === 'simulated' && simulatedDeviceCount > 0 && (
-          <p className="rounded-lg border border-[var(--warning)]/25 bg-[var(--warning)]/5 px-3 py-2 text-xs leading-5 text-[var(--text-secondary)]">
-            These are generated examples, not nearby hardware. They are kept in memory only and are not saved as physical device observations.
-          </p>
+        )}
+
+        {visibleDevices.length === 0 ? (
+          <EmptyState
+            icon={Bluetooth}
+            title={state.scan.state === 'scanning' ? 'Searching nearby devices' : 'No devices found'}
+            description={state.scan.state === 'scanning'
+              ? 'Keep Bluetooth turned on and stay close to the device you want to find.'
+              : sourceView === 'simulated'
+                ? 'Generate simulated examples to preview the interface. These are not physical devices.'
+                : 'Turn Bluetooth on, make the device discoverable, and search again.'}
+            action={state.scan.state === 'scanning' ? undefined : { label: nativeAndroid ? 'Search again' : 'Select a device', onClick: () => void (nativeAndroid ? handleCombinedScan() : handleScan()) }}
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {visibleDevices.map(device => (
+              <DeviceCard key={device.id} device={device} onClick={() => setSelectedDevice(device)} />
+            ))}
+          </div>
+        )}
+
+        {visibleDevices.some(device => device.discoverySource === 'SIMULATED') && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-3">
+            <p className="text-xs text-[var(--text-secondary)]">Sample devices are only for preview and never represent a confirmed physical device.</p>
+            <button type="button" onClick={() => clearSimulatedDevices()} className="text-xs font-semibold text-[var(--warning)]">Clear sample data</button>
+          </div>
         )}
       </section>
 
-      {filteredDevices.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredDevices.map(device => (
-            <DeviceCard
-              key={device.id}
-              device={device}
-              onClick={() => setSelectedDevice(device)}
-            />
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          icon={Bluetooth}
-          title={
-            sourceFilteredDevices.length === 0
-              ? sourceView === 'simulated' ? 'No simulated records' : sourceView === 'real' ? 'No real hardware records yet' : 'No devices discovered'
-              : 'No devices match the current filters'
-          }
-          description={
-            sourceFilteredDevices.length === 0
-              ? sourceView === 'simulated'
-                ? 'Click Generate simulated data to create clearly labelled demo examples. They do not represent nearby hardware.'
-                : sourceView === 'real'
-                  ? nativeAndroid
-                    ? 'Tap Scan nearby BLE devices to open the native results dialog. Only actively advertised BLE devices can appear; selecting a result opens its details.'
-                    : 'Click Find all BLE devices and select a real peripheral in Chrome. The chooser returns one selected BLE device per click. Phones and AirPods may not expose a compatible BLE interface to websites.'
-                  : 'Choose Find all BLE devices to select a compatible BLE peripheral, or generate simulated examples for UI testing.'
-              : 'Adjust your search, filter, or source selection to see other records.'
-          }
-        />
-      )}
+      <section className="grid gap-4 xl:grid-cols-3">
+        <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-[var(--success)]" /><h2 className="font-semibold text-[var(--text)]">Trust and safety</h2></div>
+          <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">Review each device before trusting it. Security indicators are guidance based on the information available, not a guarantee that a device is safe.</p>
+        </article>
+        <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="flex items-center gap-2"><Radio className="h-4 w-4 text-[var(--accent)]" /><h2 className="font-semibold text-[var(--text)]">Connection control</h2></div>
+          <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">Choosing a device opens its details. You remain in control of pairing, connecting, and approving trusted devices.</p>
+        </article>
+        <article className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
+          <div className="flex items-center gap-2"><Database className="h-4 w-4 text-[var(--accent)]" /><h2 className="font-semibold text-[var(--text)]">Device history</h2></div>
+          <p className="mt-2 text-sm leading-6 text-[var(--text-secondary)]">Review recent observations and trust decisions to understand what changed over time.</p>
+        </article>
+      </section>
 
       <NativeBleResultsModal
-        open={nativeAndroid && nativeResultsOpen}
+        open={nativeResultsOpen}
         scan={state.scan}
         devices={nativeScanDevices}
         onClose={() => setNativeResultsOpen(false)}
-        onSelect={(device) => {
+        onSelect={device => {
           setNativeResultsOpen(false);
           setSelectedDevice(device);
         }}
       />
 
       <NativeClassicResultsModal
-        open={nativeAndroid && (classicResultsOpen || pairedResultsOpen)}
+        open={classicResultsOpen || pairedResultsOpen}
         view={pairedResultsOpen ? 'paired' : 'scan'}
+        loadingPaired={pairedDevicesLoading}
         scan={state.scan}
-        loadingPaired={pairedResultsOpen && pairedDevicesLoading}
-        devices={pairedResultsOpen ? nativePairedDevices : nativeClassicDevices}
+        devices={pairedResultsOpen ? state.devices.filter(device => device.discoveryTransport === 'PAIRED') : classicScanDevices}
         onClose={() => {
           setClassicResultsOpen(false);
           setPairedResultsOpen(false);
         }}
-        onSelect={(device) => {
+        onSelect={device => {
           setClassicResultsOpen(false);
           setPairedResultsOpen(false);
           setSelectedDevice(device);
@@ -752,11 +483,11 @@ export function Devices() {
       />
 
       <NativeCombinedResultsModal
-        open={nativeAndroid && combinedResultsOpen}
+        open={combinedResultsOpen}
         scan={state.scan}
-        devices={nativeCombinedDevices}
+        devices={combinedScanDevices}
         onClose={() => setCombinedResultsOpen(false)}
-        onSelect={(device) => {
+        onSelect={device => {
           setCombinedResultsOpen(false);
           setSelectedDevice(device);
         }}
@@ -764,6 +495,7 @@ export function Devices() {
 
       <DeviceDetailModal
         device={selectedDevice}
+        open={selectedDevice !== null}
         onClose={() => setSelectedDevice(null)}
       />
     </div>
