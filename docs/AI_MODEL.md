@@ -37,7 +37,7 @@ The feature vector remains 11 dimensions for interface compatibility. The semant
 | 3 | trustedFlag | 0/1 | Explicit trust setting |
 | 4 | explicitlyBlockedFlag | 0/1 | BlueGuardian block flag only |
 | 5 | serviceCountNorm | 0-1 | Normalized number of observed services; absence is not proof of attack |
-| 6 | independentSecurityIndicatorCountNorm | 0-1 | Explicit block, suspicious name, unstable connection, degraded connection / 4 |
+| 6 | independentSecurityIndicatorCountNorm | 0-1 | Suspicious name, unstable connection, degraded connection / 3 |
 | 7 | suspiciousNameFlag | 0/1 | Obvious suspicious-term heuristic; not ground truth |
 | 8 | connectionStatusFlag | 0-1 | Reported connection state, with unknown kept neutral |
 | 9 | deviceTypeRisk | 0-1 | Low-weight prior; unknown type is neutral, not high threat |
@@ -72,7 +72,7 @@ All concrete models implement this interface, allowing drop‑in replacement.
 * **Version**: 0.2.0-heuristic
 * **Status**: Development baseline
 
-The hash-based pseudo-random class picker has been removed. The baseline makes a deterministic, explainable decision from explicit evidence such as an explicit in-app block, a suspicious advertised name, or corroborating independent indicators. A new/unknown device is unverified, not malicious solely because manufacturer/type/history is missing. One RSSI sample is not treated as spoofing evidence. This remains a rules-based heuristic, **not a trained statistical model**. Its displayed confidence is evidence strength, not a calibrated probability or measured accuracy.
+The hash-based pseudo-random class picker has been removed. The baseline makes a deterministic, explainable decision from explicit evidence such as an suspicious advertised name or corroborating independent indicators; an owner block is policy state, not attack evidence. A new/unknown device is unverified, not malicious solely because manufacturer/type/history is missing. The model returns `INSUFFICIENT_EVIDENCE` when no positive signal is strong enough to support a benign or threat label. One RSSI sample is not treated as spoofing evidence. This remains a rules-based heuristic, **not a trained statistical model**. Its displayed confidence is evidence strength, not a calibrated probability or measured accuracy.
 
 ### Classification Classes (MLThreatClass)
 

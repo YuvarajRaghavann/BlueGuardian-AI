@@ -41,7 +41,7 @@ export class DevelopmentModel implements ThreatClassificationModel {
       reasons.push('the device is blocked by owner policy; this decision alone is not evidence of malicious behaviour');
     }
 
-    if (securityFlagCountNorm >= 0.75 && suspiciousNameFlag >= 0.5) {
+    if (securityFlagCountNorm >= 0.66 && suspiciousNameFlag >= 0.5) {
       label = 'POTENTIAL_UNAUTHORIZED_ACCESS';
       confidence = 0.76;
       reasons.push('multiple independent security indicators are present');
@@ -56,7 +56,7 @@ export class DevelopmentModel implements ThreatClassificationModel {
       confidence = 0.8;
       reasons.push('the device is known and explicitly trusted');
       reasons.push('no independent threat indicator is present in the supplied features');
-    } else if (trustNorm < 0.25 && securityFlagCountNorm >= 0.75) {
+    } else if (trustNorm < 0.25 && securityFlagCountNorm >= 0.66) {
       label = 'POTENTIAL_UNAUTHORIZED_ACCESS';
       confidence = 0.65;
       reasons.push('low trust is accompanied by multiple independent security indicators');

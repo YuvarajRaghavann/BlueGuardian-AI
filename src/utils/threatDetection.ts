@@ -82,6 +82,7 @@ export function analyzeDeviceThreat(device: BluetoothDevice): ThreatAnalysis {
 
   const severity = scoreToSeverity(threatScore);
   let recommendedAction = 'No immediate threat evidence detected. Keep normal approval controls enabled.';
+  if (device.blocked) recommendedAction = 'Keep this device blocked according to owner policy; the block itself is not proof of an attack. Review independent signals separately.';
   if (severity === 'critical') recommendedAction = 'Multiple strong indicators are present. Keep the device isolated and review the evidence.';
   else if (severity === 'high') recommendedAction = 'Keep this device blocked and review the available evidence.';
   else if (severity === 'medium') recommendedAction = 'Review the device and gather another observation before making a security decision.';
