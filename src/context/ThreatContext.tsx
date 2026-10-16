@@ -294,7 +294,10 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
       if (changed && !cancelled) {
         try {
           const snapshot = await api.getThreatSnapshot(ownerToken, deviceState.devices);
-          if (!cancelled) dispatch({ type: 'MERGE_SERVER_THREATS', payload: snapshot });
+          if (!cancelled) {
+            backendAssessedDeviceIds.current = new Set(snapshot.assessedDeviceIds);
+            dispatch({ type: 'MERGE_SERVER_THREATS', payload: snapshot });
+          }
         } catch (error) {
           if (!cancelled) console.warn('Backend threats could not be refreshed.', error);
         }
