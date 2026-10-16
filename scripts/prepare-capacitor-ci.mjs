@@ -72,13 +72,16 @@ function installNativeBluetoothPlugin() {
     '<uses-feature android:name="android.hardware.bluetooth" android:required="false" />',
     '<uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />',
   ];
+
   const missingEntries = requiredEntries.filter((entry) => {
     const nameMatch = entry.match(/android:name="([^"]+)"/);
     return nameMatch ? !xml.includes('android:name="' + nameMatch[1] + '"') : true;
   });
   if (missingEntries.length > 0) {
     const applicationIndex = xml.indexOf('<application');
-    if (applicationIndex < 0) throw new Error('Cannot safely add Bluetooth declarations: <application> tag is missing.');
+    if (applicationIndex < 0) {
+      throw new Error('Cannot safely add Bluetooth declarations: <application> tag is missing.');
+    }
     xml = xml.slice(0, applicationIndex) + '    ' + missingEntries.join('\n    ') + '\n    ' + xml.slice(applicationIndex);
   }
 
@@ -89,7 +92,6 @@ function installNativeBluetoothPlugin() {
 
   return 'Native foreground BLE and classic Bluetooth discovery plugin installed; Android permissions and optional Bluetooth hardware features configured. Classic discovery requests Nearby Devices plus location permission as required by Android; GPS coordinates are not collected by this feature.';
 }
-
 const nativePluginNote = installNativeBluetoothPlugin();
 
 let notes = [];
