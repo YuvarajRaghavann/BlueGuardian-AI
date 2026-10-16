@@ -121,15 +121,16 @@ const capacitorCore = JSON.parse(fs.readFileSync(path.join(root, 'node_modules',
 const capacitorAndroid = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '@capacitor', 'android', 'package.json'), 'utf8'));
 const cli = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '@capacitor', 'cli', 'package.json'), 'utf8'));
 const manifest = [
-  'BlueGuardian Phase 4 classic Bluetooth discovery build',
+  'BlueGuardian Phase 5 combined Bluetooth discovery build',
   `Commit: ${process.env.GITHUB_SHA ?? 'local'}`,
   `Node: ${process.version}`,
   `Capacitor core: ${capacitorCore.version}`,
   `Capacitor Android: ${capacitorAndroid.version}`,
   `Capacitor CLI: ${cli.version}`,
   'Android compile/target SDK intended: 36 / 36',
-  'Scope: React/Vite UI, native foreground BLE scan/results dialog, separate native classic Bluetooth discovery, and paired-device listing. Combined scanning and native connection are later phases.',
+  'Scope: Existing React/Vite UI, native foreground BLE scan, native classic inquiry, a single sequential combined scan action with normalized-address deduplication, and separate paired-device listing. No native device connection or background scan is included.',
   'Classic discovery requires Nearby Devices and Android location permission on supported OS versions; this feature does not collect GPS coordinates.',
+  'Combined mode scans BLE first and then classic Bluetooth to avoid concurrent permission prompts and adapter discovery sessions. Device merging uses normalized Android-reported address when available; randomized BLE addresses may remain separate.',
   nativePluginNote,
   ...notes,
   '',
