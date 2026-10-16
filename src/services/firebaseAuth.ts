@@ -47,7 +47,7 @@ function extractFirebaseErrorCode(message: string | undefined): string | undefin
   if (!message) return undefined;
   // Firebase normally returns a code such as INVALID_LOGIN_CREDENTIALS.
   // Some API-key restriction failures append explanatory text after a colon.
-  const candidate = message.trim().split(/[:\\s]/, 1)[0]?.toUpperCase();
+  const candidate = message.trim().split(/[:\s]/, 1)[0]?.toUpperCase();
   return candidate && /^[A-Z0-9_]+$/.test(candidate) ? candidate : undefined;
 }
 
