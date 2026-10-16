@@ -176,6 +176,7 @@ export interface RecoveryInfo {
 // ===== PHASE 4: AI/ML Types =====
 
 export type MLThreatClass =
+  | 'INSUFFICIENT_EVIDENCE'
   | 'BENIGN'
   | 'SUSPICIOUS'
   | 'POTENTIAL_SPOOFING'

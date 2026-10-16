@@ -639,12 +639,24 @@ export function Recovery() {
               Last observation
             </div>
             {recoveryInfo.lastObservationAt ? (
-              <p className="mt-2 text-sm text-[var(--text)]">
-                {formatDate(recoveryInfo.lastObservationAt)}
-                {recoveryInfo.simulated ? ' · SIMULATED' : ' · REAL browser selection'}
-              </p>
+              <div className="mt-2 space-y-1">
+                <p className="text-sm text-[var(--text)]">
+                  {formatDate(recoveryInfo.lastObservationAt)}
+                  {recoveryInfo.simulated ? ' · SIMULATED' : ' · REAL Bluetooth observation'}
+                </p>
+                {recoveryInfo.lastKnownLocation ? (
+                  <p className="text-sm text-[var(--success)]">
+                    {recoveryInfo.lastKnownLocation.address
+                      ?? `${recoveryInfo.lastKnownLocation.lat}, ${recoveryInfo.lastKnownLocation.lng}`}
+                  </p>
+                ) : (
+                  <p className="text-xs leading-5 text-[var(--text-muted)]">
+                    Location unavailable. This observation confirms Bluetooth presence only; GPS is not collected by the current recovery workflow.
+                  </p>
+                )}
+              </div>
             ) : (
-              <p className="mt-2 text-sm text-[var(--text-muted)]">No encounter recorded. No location has been inferred.</p>
+              <p className="mt-2 text-sm text-[var(--text-muted)]">No encounter recorded yet. A location will appear only when a real, consented location is actually collected and saved.</p>
             )}
           </div>
 

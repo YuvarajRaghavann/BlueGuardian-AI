@@ -57,7 +57,7 @@ describe('BlueGuardian false-positive safeguards', () => {
     const model = new DevelopmentModel();
     const first = model.predict(features);
     const second = model.predict(features);
-    expect(first.label).toBe('BENIGN');
+    expect(first.label).toBe('INSUFFICIENT_EVIDENCE');
     expect(first.label).toBe(second.label);
     expect(first.confidence).toBe(second.confidence);
     expect(first.modelName).toBe('BlueGuardian Evidence Heuristic');

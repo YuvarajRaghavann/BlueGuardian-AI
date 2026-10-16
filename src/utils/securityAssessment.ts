@@ -9,6 +9,7 @@ const ML_WEIGHT = 0.4; // Development integration weighting
 function mlClassToRiskScore(label: MLThreatClass, confidence: number): number {
   // Map ML class to a 0-100 risk contribution
   const base: Record<MLThreatClass, number> = {
+    INSUFFICIENT_EVIDENCE: 0,
     BENIGN: 0,
     SUSPICIOUS: 30,
     POTENTIAL_SPOOFING: 60,

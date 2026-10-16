@@ -33,8 +33,8 @@ export class DevelopmentModel implements ThreatClassificationModel {
     const securityFlagCountNorm = safe[6];
     const suspiciousNameFlag = safe[7];
 
-    let label: MLThreatClass = 'BENIGN';
-    let confidence = 0.62;
+    let label: MLThreatClass = 'INSUFFICIENT_EVIDENCE';
+    let confidence = 0.35;
     const reasons: string[] = [];
 
     if (blockedFlag >= 0.5) {
@@ -61,9 +61,10 @@ export class DevelopmentModel implements ThreatClassificationModel {
       confidence = 0.65;
       reasons.push('low trust is accompanied by multiple independent security indicators');
     } else {
-      label = 'BENIGN';
-      confidence = 0.62;
+      label = 'INSUFFICIENT_EVIDENCE';
+      confidence = 0.35;
       reasons.push('no strong positive threat indicator is present in this single observation');
+      reasons.push('there is not enough evidence to verify that the device is benign');
       if (knownFlag < 0.5 || trustedFlag < 0.5) {
         reasons.push('the device is not yet explicitly trusted; retain manual approval until the owner verifies it');
       }

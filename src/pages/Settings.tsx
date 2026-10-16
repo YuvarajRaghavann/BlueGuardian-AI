@@ -135,35 +135,35 @@ export function SettingsPage() {
       available: false,
       icon: Lock,
       title: 'Require connection approval',
-      description: 'Unknown and medium-risk devices must be explicitly approved before pairing.',
+      description: 'Requires Android system-level integration; this app cannot intercept every system pairing flow.',
     },
     {
       key: 'enforceFastPairApproval' as const,
       available: false,
       icon: Bell,
       title: 'Protect Fast Pair / quick-connect',
-      description: 'Disable silent auto-approval for nearby devices with weak trust or risky profiles.',
+      description: 'Fast Pair is controlled by Android and Google Play services; a regular app cannot disable or intercept it globally.',
     },
     {
       key: 'blockUnknownFileTransfers' as const,
       available: false,
       icon: Eye,
       title: 'Block unknown file transfers',
-      description: 'Reject file exchanges from untrusted devices or suspicious payload types.',
+      description: 'Android owns Bluetooth file-transfer prompts; global rejection needs privileged system integration.',
     },
     {
       key: 'enableRssiGuard' as const,
       available: false,
       icon: RefreshCw,
       title: 'Enable RSSI anomaly guard',
-      description: 'Flag sudden proximity spikes or unusual signal patterns as suspicious.',
+      description: 'Needs repeated native RSSI observations and calibrated thresholds; a single reading is not enough.',
     },
     {
       key: 'restrictWearablesToAudio' as const,
       available: false,
       icon: Cpu,
       title: 'Restrict wearables to audio-only mode',
-      description: 'Limit headphones and wearables to the safest profile unless explicitly trusted.',
+      description: 'Bluetooth profile negotiation is controlled by Android and the accessory; this app cannot globally restrict it.',
     },
     {
       key: 'showLowConfidenceWarnings' as const,
@@ -402,7 +402,7 @@ export function SettingsPage() {
             </h2>
 
             <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Active controls affect browser UI behavior. Bluetooth pairing and file-transfer enforcement require native platform support and are not available in this web client.
+              Enabled controls change BlueGuardian's own decisions and UI. The disabled items below require Android/OS privileges that a normal app or browser does not have; enabling a checkbox would falsely imply system-wide protection.
             </p>
           </div>
         </div>
@@ -430,7 +430,7 @@ export function SettingsPage() {
                     </p>
                     {!item.available && (
                       <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-[var(--warning)]">
-                        Not enforced in this browser
+                        Requires system-level Android support
                       </p>
                     )}
                   </div>

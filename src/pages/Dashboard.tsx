@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Activity,
   AlertTriangle,
@@ -26,12 +26,16 @@ import type { BluetoothDevice } from '../types';
 import { needsManualApproval } from '../utils/connectionPolicy';
 import { visibleEvents } from '../utils/visibleEvents';
 import { getCurrentModelMetadata } from '../ml/mlService';
+import { NativeBleResultsModal } from '../components/NativeBleResultsModal';
+import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 
 export function Dashboard() {
   const { state, dispatch: deviceDispatch, scanRealDevices, scanSimulatedDevices } = useBluetoothDevices();
   const { state: threatState } = useThreats();
   const { state: securityState, executeAction } = useSecurity();
   const modelMetadata = getCurrentModelMetadata();
+  const navigate = useNavigate();
+  const [nativeDiscoveryOpen, setNativeDiscoveryOpen] = useState(false);
   const [pendingApproval, setPendingApproval] = useState<BluetoothDevice | null>(null);
   const [pendingAction, setPendingAction] = useState<'TRUST' | 'BLOCK' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -201,7 +205,10 @@ export function Dashboard() {
         <div className="relative z-10 flex shrink-0 flex-col gap-2 sm:flex-row">
           <button
             type="button"
-            onClick={() => void scanRealDevices()}
+            onClick={() => {
+              if (isNativeAndroidApp()) setNativeDiscoveryOpen(true);
+              void scanRealDevices();
+            }}
             disabled={scanActive}
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(59,156,255,0.16)] transition-all hover:-translate-y-0.5 hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -675,6 +682,16 @@ export function Dashboard() {
           />
         </div>
       </section>
+      <NativeBleResultsModal
+        open={nativeDiscoveryOpen && isNativeAndroidApp()}
+        scan={state.scan}
+        devices={state.devices.filter((device) => device.discoverySource === 'REAL')}
+        onClose={() => setNativeDiscoveryOpen(false)}
+        onSelect={() => {
+          setNativeDiscoveryOpen(false);
+          navigate('/devices');
+        }}
+      />
     </div>
   );
 }
