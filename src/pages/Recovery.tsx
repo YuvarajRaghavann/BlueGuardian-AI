@@ -786,10 +786,16 @@ export function Recovery() {
                   {recoveryInfo.simulated ? ' · SIMULATED' : ' · REAL Bluetooth observation'}
                 </p>
                 {recoveryInfo.lastKnownLocation ? (
-                  <p className="text-sm text-[var(--success)]">
-                    {recoveryInfo.lastKnownLocation.address
-                      ?? `${recoveryInfo.lastKnownLocation.lat}, ${recoveryInfo.lastKnownLocation.lng}`}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--success)]">
+                    <span>{recoveryInfo.lastKnownLocation.address
+                      ?? `${recoveryInfo.lastKnownLocation.lat}, ${recoveryInfo.lastKnownLocation.lng}`}</span>
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${recoveryInfo.lastKnownLocation.lat},${recoveryInfo.lastKnownLocation.lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="font-semibold underline underline-offset-2"
+                    >Open map</a>
+                  </div>
                 ) : (
                   <p className="text-xs leading-5 text-[var(--text-muted)]">
                     Location unavailable. This observation confirms Bluetooth presence only; GPS is not collected by the current recovery workflow.
@@ -814,9 +820,15 @@ export function Recovery() {
                       {encounter.simulated || encounter.isTestFixture ? ' · SIMULATED TEST DATA' : ''}
                     </p>
                     {encounter.location && (
-                      <p className="mt-1 text-xs text-[var(--text-muted)]">
-                        {encounter.location.address ?? `${encounter.location.lat}, ${encounter.location.lng}`}
-                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[var(--text-muted)]">
+                        <span>{encounter.location.address ?? `${encounter.location.lat}, ${encounter.location.lng}`}</span>
+                        <a
+                          href={`https://www.google.com/maps/search/?api=1&query=${encounter.location.lat},${encounter.location.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-semibold text-[var(--accent)] underline underline-offset-2"
+                        >Open map</a>
+                      </div>
                     )}
                     {encounter.description && <p className="mt-1 text-xs text-[var(--text-secondary)]">{encounter.description}</p>}
                   </li>
