@@ -31,6 +31,7 @@ export function Dashboard() {
   const { state, dispatch: deviceDispatch, scanRealDevices, scanSimulatedDevices } = useBluetoothDevices();
   const { state: threatState } = useThreats();
   const { state: securityState, executeAction } = useSecurity();
+  const modelMetadata = getCurrentModelMetadata();
   const [pendingApproval, setPendingApproval] = useState<BluetoothDevice | null>(null);
   const [pendingAction, setPendingAction] = useState<'TRUST' | 'BLOCK' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
