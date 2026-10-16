@@ -630,6 +630,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const registerCombinedObservation = (
     observation: NativeBleObservation | NativeClassicObservation,
     transport: 'BLE' | 'CLASSIC',
+    transportHistory: Map<string, Set<'BLE' | 'CLASSIC'>>,
   ) => {
     const address = String(observation.address || observation.id || '').trim();
     if (!address) return;
@@ -638,6 +639,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       typeof observation.observedAt === 'number' ? observation.observedAt : Date.now(),
     );
     const deviceName = resolveBluetoothDisplayName(observation.name);
+    const identityKey = address.toLowerCase();
+    const seenTransports = transportHistory.get(identityKey) ?? new Set<'BLE' | 'CLASSIC'>();
+    seenTransports.add(transport);
+    transportHistory.set(identityKey, seenTransports);
     const serviceUuids = transport === 'BLE' && 'serviceUuids' in observation && Array.isArray(observation.serviceUuids)
       ? observation.serviceUuids
       : [];
@@ -665,7 +670,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       services,
       discoverySource: 'REAL',
       discoveryTransport: 'COMBINED',
-      discoveryTransports: [transport],
+      discoveryTransports: Array.from(seenTransports),
       paired,
       gattConnected: false,
       connectionHealth: 'UNAVAILABLE',
@@ -754,6 +759,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
     const startedAt = Date.now();
     const observedIdentities = new Set<string>();
+    const combinedTransportHistory = new Map<string, Set<'BLE' | 'CLASSIC'>>();
     const messages: string[] = [];
     let bleError: string | undefined;
     let classicError: string | undefined;
@@ -783,7 +789,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         const bleResult = await scanNativeAndroidBle((observation) => {
           const identity = String(observation.address || observation.id || '').trim().toLowerCase();
           if (identity) observedIdentities.add(identity);
-          registerCombinedObservation(observation, 'BLE');
+          registerCombinedObservation(observation, 'BLE', combinedTransportHistory);
         }, 9000);
 
         if (bleResult.ok === false) {
@@ -804,7 +810,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         const classicResult = await scanNativeAndroidClassic((observation) => {
           const identity = String(observation.address || observation.id || '').trim().toLowerCase();
           if (identity) observedIdentities.add(identity);
-          registerCombinedObservation(observation, 'CLASSIC');
+          registerCombinedObservation(observation, 'CLASSIC', combinedTransportHistory);
         }, 9000);
 
         if (classicResult.ok === false) {
