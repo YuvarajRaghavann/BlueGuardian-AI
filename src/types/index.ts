@@ -89,6 +89,8 @@ export interface BluetoothScanState {
   source?: DiscoverySource;
   /** Identifies the scanner implementation used for this scan. */
   transport?: 'WEB_BLE_SELECTION' | 'ANDROID_BLE_SCAN' | 'ANDROID_CLASSIC_SCAN' | 'ANDROID_PAIRED_DEVICES' | 'ANDROID_COMBINED_SCAN';
+  /** Current half of the sequential combined Android discovery pass. */
+  scanStage?: 'BLE' | 'CLASSIC';
   error?: string;
 }
 
