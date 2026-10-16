@@ -113,7 +113,12 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
     case 'SET_SEARCH':
       return { ...state, search: action.payload };
     case 'MARK_TRUSTED': {
-      return updateDevice(state, action.payload, device => applySecurityActionToDevice(device, 'TRUST') ?? device);
+      return updateDevice(state, action.payload, device => {
+        const updated = applySecurityActionToDevice(device, 'TRUST') ?? device;
+        // Do not immediately run the newly approved device back through the
+        // discovery gate. Future connection attempts still evaluate policy.
+        return { ...updated, trusted: true, isKnown: true, blocked: false, approvalRequired: false };
+      });
     }
     case 'MARK_UNKNOWN': {
       return updateDevice(state, action.payload, device => applySecurityActionToDevice(device, 'MARK_UNKNOWN') ?? device);
