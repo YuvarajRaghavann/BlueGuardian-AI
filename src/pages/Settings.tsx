@@ -18,6 +18,7 @@ import { getApiBaseConfig, setApiBaseUrl, type ApiBaseConfig } from '../services
 
 export function SettingsPage() {
   const modelStatus = getModelStatus();
+  const modelMetadata = getCurrentModelMetadata();
   const models = availableModels();
   const [backendHealth, setBackendHealth] = useState<{ status: string; database: string } | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
