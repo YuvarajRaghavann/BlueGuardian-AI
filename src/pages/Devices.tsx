@@ -6,7 +6,13 @@ import {
   AlertTriangle,
   SlidersHorizontal,
   Radar,
+  ScanLine,
+  ShieldCheck,
+  Sparkles,
+  CircleHelp,
+  CheckCircle2,
 } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { DeviceCard } from '../components/DeviceCard';
 import { DeviceDetailModal } from '../components/DeviceDetailModal';
 import { EmptyState } from '../components/EmptyState';
@@ -20,6 +26,7 @@ export function Devices() {
   const [selectedDevice, setSelectedDevice] =
     useState<null | import('../types').BluetoothDevice>(null);
   const [localSearch, setLocalSearch] = useState(state.search);
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     dispatch({ type: 'SET_SEARCH', payload: localSearch });
@@ -89,54 +96,88 @@ export function Devices() {
 
   return (
     <div className="space-y-6">
-      {/* Page header */}
-      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-accent">
-            <Radar className="h-3.5 w-3.5" />
-            Bluetooth intelligence
+      {/* Discovery hero: one obvious scan action, supporting controls stay out of the way. */}
+      <motion.section
+        initial={reduceMotion ? false : { opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.42, ease: [0.22, 1, 0.36, 1] }}
+        className="relative isolate overflow-hidden rounded-[28px] border border-white/[0.09] bg-[linear-gradient(135deg,rgba(24,42,65,0.98),rgba(11,17,28,0.96)_56%,rgba(13,26,43,0.98))] p-5 shadow-[0_24px_90px_rgba(0,0,0,0.2)] sm:p-7"
+      >
+        <div aria-hidden="true" className="pointer-events-none absolute -right-12 -top-20 h-64 w-64 rounded-full bg-[var(--accent)]/15 blur-3xl" />
+        <div aria-hidden="true" className="pointer-events-none absolute bottom-0 right-1/4 h-24 w-48 rounded-full bg-cyan-400/[0.07] blur-3xl" />
+        <div className="relative grid gap-6 lg:grid-cols-[minmax(0,1fr)_240px] lg:items-center">
+          <div>
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-sky-300/15 bg-sky-300/[0.07] px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-sky-200">
+              <span className={cn("h-1.5 w-1.5 rounded-full bg-sky-300", isScanning && "animate-pulse")} />
+              Nearby device intelligence
+            </div>
+            <h1 className="max-w-xl text-3xl font-semibold tracking-[-0.04em] text-white sm:text-4xl">
+              Your Bluetooth, <span className="bg-gradient-to-r from-sky-300 via-blue-400 to-cyan-200 bg-clip-text text-transparent">under your control.</span>
+            </h1>
+            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300 sm:text-base">
+              Discover devices, inspect their security signals, and decide which ones deserve your trust.
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+              <motion.button
+                type="button"
+                onClick={handleScan}
+                disabled={isScanning}
+                whileHover={reduceMotion ? undefined : { y: -2, scale: 1.01 }}
+                whileTap={reduceMotion ? undefined : { scale: 0.985 }}
+                className={cn(
+                  "group inline-flex min-h-12 items-center justify-center gap-2.5 rounded-2xl px-5 text-sm font-semibold text-white shadow-[0_10px_35px_rgba(42,145,255,0.24)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950",
+                  isScanning ? "cursor-wait bg-slate-700" : "bg-gradient-to-r from-blue-500 via-blue-500 to-sky-400 hover:from-blue-400 hover:to-cyan-300"
+                )}
+              >
+                <span className="relative flex h-5 w-5 items-center justify-center">
+                  {isScanning ? <Radar className="h-5 w-5 animate-spin" /> : <ScanLine className="h-5 w-5 transition-transform duration-300 group-hover:rotate-12" />}
+                  {isScanning && <span className="absolute inset-0 animate-ping rounded-full border border-white/60" />}
+                </span>
+                {isScanning ? 'Searching nearby…' : 'Find nearby devices'}
+              </motion.button>
+              <p className="flex items-center gap-2 text-xs text-slate-400">
+                <ShieldCheck className="h-4 w-4 text-emerald-300" />
+                No device is trusted automatically
+              </p>
+            </div>
           </div>
-
-          <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">
-            Devices
-          </h1>
-
-          <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-            Discover, monitor and evaluate nearby Bluetooth devices.
-          </p>
+          <div className="relative mx-auto flex aspect-square w-full max-w-[220px] items-center justify-center lg:mx-0">
+            <div className={cn("absolute inset-3 rounded-full border border-sky-300/15", isScanning && "animate-pulse")} />
+            <div className={cn("absolute inset-7 rounded-full border border-sky-300/20", isScanning && "discovery-orbit")} />
+            <div className={cn("absolute inset-12 rounded-full border border-blue-300/20", isScanning && "discovery-orbit discovery-orbit-delayed")} />
+            <div className="absolute inset-5 rounded-full bg-sky-400/[0.06] blur-2xl" />
+            <div className="relative flex h-20 w-20 items-center justify-center rounded-[26px] border border-sky-200/20 bg-gradient-to-br from-sky-300/20 to-blue-500/10 shadow-[0_0_70px_rgba(56,189,248,0.16)]">
+              <Bluetooth className="h-9 w-9 text-sky-200" strokeWidth={1.6} />
+            </div>
+            <span className="absolute right-3 top-8 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900/90 text-cyan-200 shadow-lg"><RadioIcon /></span>
+            <span className="absolute bottom-8 left-3 flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-slate-900/90 text-emerald-200 shadow-lg"><ShieldCheck className="h-4 w-4" /></span>
+          </div>
         </div>
+        <div className="relative mt-6 grid grid-cols-3 gap-2 border-t border-white/[0.08] pt-5 sm:gap-4">
+          <QuickStat label="Discovered" value={state.devices.length} icon={<Bluetooth className="h-4 w-4" />} />
+          <QuickStat label="Trusted" value={state.devices.filter((device) => device.trusted && !device.blocked).length} icon={<CheckCircle2 className="h-4 w-4" />} />
+          <QuickStat label="Needs review" value={state.devices.filter((device) => !device.blocked && needsManualApproval(device)).length} icon={<CircleHelp className="h-4 w-4" />} />
+        </div>
+      </motion.section>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <label className="flex min-h-10 items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text-secondary)]">
+      <section className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight text-white">Your devices</h2>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">Select a device to explore its details and security status.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)]/80 px-3 text-xs text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)]">
             <input
               type="checkbox"
               checked={state.simulationMode}
-              onChange={e =>
-                dispatch({
-                  type: 'TOGGLE_SIMULATION',
-                  payload: e.target.checked,
-                })
-              }
+              onChange={e => dispatch({ type: 'TOGGLE_SIMULATION', payload: e.target.checked })}
               className="h-4 w-4 accent-[var(--accent)]"
             />
-            Simulation mode
+            Demo data
           </label>
-
-          <button
-            onClick={handleScan}
-            disabled={isScanning}
-            className={cn(
-              'inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-md)] px-4 text-sm font-semibold transition-all',
-              isScanning
-                ? 'cursor-not-allowed bg-[var(--surface-raised)] text-[var(--text-muted)]'
-                : 'bg-[var(--accent)] text-white shadow-[0_8px_24px_rgba(59,156,255,0.18)] hover:bg-[var(--accent-strong)] active:scale-[0.98]'
-            )}
-          >
-            <Bluetooth className={cn('h-4 w-4', isScanning && 'animate-spin')} />
-            {isScanning ? 'Scanning…' : 'Scan devices'}
-          </button>
+          {state.simulationMode && <span className="rounded-full border border-amber-400/20 bg-amber-400/10 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-amber-300">Simulated</span>}
         </div>
-      </header>
+      </section>
 
       {/* Scan state */}
       {state.scan.state !== 'idle' && (
@@ -279,15 +320,25 @@ export function Devices() {
       </div>
 
       {filteredDevices.length > 0 ? (
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {filteredDevices.map(device => (
-            <DeviceCard
-              key={device.id}
-              device={device}
-              onClick={() => setSelectedDevice(device)}
-            />
-          ))}
-        </div>
+        <motion.div
+          layout
+          className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+        >
+          <AnimatePresence mode="popLayout">
+            {filteredDevices.map((device, index) => (
+              <motion.div
+                key={device.id}
+                layout
+                initial={reduceMotion ? false : { opacity: 0, y: 14, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={reduceMotion ? undefined : { opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.28, delay: reduceMotion ? 0 : Math.min(index * 0.035, 0.2) }}
+              >
+                <DeviceCard device={device} onClick={() => setSelectedDevice(device)} />
+              </motion.div>
+            ))}
+          </AnimatePresence>
+        </motion.div>
       ) : (
         <EmptyState
           icon={Bluetooth}
@@ -309,5 +360,27 @@ export function Devices() {
         onClose={() => setSelectedDevice(null)}
       />
     </div>
+  );
+}
+
+
+function QuickStat({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-white/[0.07] bg-black/10 p-3 sm:gap-3 sm:px-4">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-sky-200">{icon}</span>
+      <span className="min-w-0">
+        <span className="block text-xl font-semibold tracking-tight text-white tabular-nums">{value}</span>
+        <span className="block truncate text-[10px] font-medium uppercase tracking-wider text-slate-400 sm:text-[11px]">{label}</span>
+      </span>
+    </div>
+  );
+}
+
+function RadioIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="h-4 w-4" aria-hidden="true">
+      <circle cx="12" cy="12" r="2.2" />
+      <path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M4.8 4.8a10.2 10.2 0 0 0 0 14.4M19.2 4.8a10.2 10.2 0 0 1 0 14.4" strokeLinecap="round" />
+    </svg>
   );
 }
