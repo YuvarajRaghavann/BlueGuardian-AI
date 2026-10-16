@@ -8,7 +8,7 @@ import { localDatabase } from '../services/localDatabase';
 import { applySecurityActionToDevice } from '../services/securityActionService';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
-import { isNativeAndroidApp, scanNativeAndroidBle } from '../services/nativeBluetoothService';
+import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeClassicObservation } from '../services/nativeBluetoothService';
 
 export interface DeviceState {
   devices: BluetoothDevice[];
@@ -123,6 +123,8 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
         ...(existing.type === 'unknown' && incoming.type !== 'unknown' ? { type: incoming.type } : {}),
         manufacturer: existing.manufacturer ?? incoming.manufacturer,
         services: incoming.services.length > 0 ? incoming.services : existing.services,
+        discoveryTransport: incoming.discoveryTransport ?? existing.discoveryTransport,
+        paired: incoming.paired ?? existing.paired,
         rssi: typeof incoming.rssi === 'number' ? incoming.rssi : existing.rssi,
         lastSeen: incoming.lastSeen,
         ...(shouldRefreshConnection ? {
@@ -218,6 +220,10 @@ const DeviceContext = createContext<{
   scanSimulatedDevices: () => Promise<void>;
   /** Explicitly scans a real Bluetooth device and may open the browser picker. */
   scanRealDevices: (pickerMode?: BluetoothPickerMode) => Promise<void>;
+  /** Runs native Android classic discovery as a separate foreground scan. */
+  scanClassicDevices: () => Promise<void>;
+  /** Loads system-bonded devices separately; this is not a live scan or connection. */
+  loadPairedDevices: () => Promise<number>;
   addMockDevices: () => void;
   /** Remove only in-memory simulated/demo records; physical observations are untouched. */
   clearSimulatedDevices: () => void;
@@ -561,6 +567,151 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     }
   };
 
+
+  const registerClassicObservation = (observation: NativeClassicObservation, pairedOverride?: boolean) => {
+    const address = String(observation.address || observation.id || '').trim();
+    if (!address) return;
+
+    const observedAt = new Date(
+      typeof observation.observedAt === 'number' ? observation.observedAt : Date.now(),
+    );
+    const deviceName = resolveBluetoothDisplayName(observation.name);
+    const paired = pairedOverride ?? Boolean(observation.paired);
+    const device: BluetoothDevice = {
+      // A transport-specific stable key keeps Phase 4 classic records separate
+      // from BLE observations until the explicit Phase 5 combined/dedup pass.
+      id: 'android-classic:' + address.toLowerCase(),
+      name: deviceName,
+      type: inferDeviceType(deviceName),
+      address,
+      rssi: typeof observation.rssi === 'number' ? observation.rssi : undefined,
+      trusted: false,
+      trustScore: 0,
+      riskLevel: 'high',
+      connectionStatus: paired ? 'disconnected' : 'unknown',
+      firstSeen: observedAt,
+      lastSeen: observedAt,
+      isKnown: paired,
+      services: [],
+      discoverySource: 'REAL',
+      discoveryTransport: 'CLASSIC',
+      paired,
+      gattConnected: false,
+      connectionHealth: 'UNAVAILABLE',
+    };
+
+    const assessment = assessDeviceSecurity(device);
+    device.trustScore = assessment.trustScore;
+    device.riskLevel = assessment.trustRiskLevel;
+    const guardedDevice = applySecurityPolicy(device);
+    dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
+    void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
+      console.warn('Classic Bluetooth observation could not be saved locally.', error);
+    });
+  };
+
+  const scanClassicDevices = async (): Promise<void> => {
+    if (!isNativeAndroidApp()) {
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: { state: 'unsupported', source: 'REAL', transport: 'ANDROID_CLASSIC_SCAN', error: 'Classic Bluetooth discovery is only available inside the BlueGuardian Android APK.' },
+      });
+      return;
+    }
+
+    dispatch({
+      type: 'SET_SCAN_STATE',
+      payload: { state: 'scanning', elapsedMs: 0, devicesFound: 0, source: 'REAL', transport: 'ANDROID_CLASSIC_SCAN', error: undefined },
+    });
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      dispatch({ type: 'SET_SCAN_STATE', payload: { elapsedMs: Date.now() - startedAt } });
+    }, 200);
+    let diagnosticStage = 'Android classic Bluetooth discovery';
+
+    try {
+      const result = await scanNativeAndroidClassic((observation) => {
+        registerClassicObservation(observation);
+      }, 12000);
+
+      if (!result.ok) {
+        const permissionFailure = /permission|denied|not allowed/i.test(result.error);
+        dispatch({
+          type: 'SET_SCAN_STATE',
+          payload: {
+            state: permissionFailure ? 'permission-denied' : 'error',
+            source: 'REAL',
+            transport: 'ANDROID_CLASSIC_SCAN',
+            error: result.error,
+          },
+        });
+        return;
+      }
+
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: {
+          state: 'complete',
+          source: 'REAL',
+          transport: 'ANDROID_CLASSIC_SCAN',
+          devicesFound: result.devicesFound,
+          error: result.message,
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Classic Bluetooth discovery failed.';
+      console.error('[BlueGuardian][Classic] Discovery pipeline failed.', { stage: diagnosticStage, message }, error);
+      dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', source: 'REAL', transport: 'ANDROID_CLASSIC_SCAN', error: message } });
+    } finally {
+      clearInterval(interval);
+    }
+  };
+
+  const loadPairedDevices = async (): Promise<number> => {
+    if (!isNativeAndroidApp()) {
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: { state: 'unsupported', source: 'REAL', transport: 'ANDROID_PAIRED_DEVICES', error: 'Paired-device listing is only available inside the BlueGuardian Android APK.' },
+      });
+      return 0;
+    }
+
+    dispatch({
+      type: 'SET_SCAN_STATE',
+      payload: { state: 'idle', elapsedMs: 0, devicesFound: 0, source: 'REAL', transport: 'ANDROID_PAIRED_DEVICES', error: undefined },
+    });
+    try {
+      const pairedDevices = await listNativeAndroidPairedDevices();
+      pairedDevices.forEach((observation) => registerClassicObservation(observation, true));
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: {
+          state: 'complete',
+          source: 'REAL',
+          transport: 'ANDROID_PAIRED_DEVICES',
+          devicesFound: pairedDevices.length,
+          error: pairedDevices.length === 0
+            ? 'Android reports no paired classic Bluetooth devices. Pair a device in Android Settings first.'
+            : undefined,
+        },
+      });
+      return pairedDevices.length;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Could not load paired Bluetooth devices.';
+      const permissionFailure = /permission|denied|not allowed/i.test(message);
+      dispatch({
+        type: 'SET_SCAN_STATE',
+        payload: {
+          state: permissionFailure ? 'permission-denied' : 'error',
+          source: 'REAL',
+          transport: 'ANDROID_PAIRED_DEVICES',
+          error: message,
+        },
+      });
+      return 0;
+    }
+  };
+
   // Backwards-compatible entry point: existing components still follow the
   // Simulation Mode toggle. New controls can use the explicit methods below.
   const scanDevices = (): Promise<void> =>
@@ -656,7 +807,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, backendReady }}>
+    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, scanClassicDevices, loadPairedDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, backendReady }}>
       {children}
     </DeviceContext.Provider>
   );
