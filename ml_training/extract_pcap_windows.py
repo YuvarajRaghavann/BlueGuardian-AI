@@ -62,10 +62,21 @@ def normalise_address(value: Any) -> str | None:
 
 
 def packet_layers(packet: Any) -> list[Any]:
-    try:
-        return list(packet.layers())
-    except Exception:
-        return []
+    # packet.layers() returns layer classes in Scapy. Walk the actual packet chain
+    # so field values are read from decoded packet instances.
+    result: list[Any] = []
+    current = packet
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if type(current).__name__ == "NoPayload":
+            break
+        result.append(current)
+        payload = getattr(current, "payload", None)
+        if payload is None or payload is current:
+            break
+        current = payload
+    return result
 
 
 def is_ble_advertisement(packet: Any, layers: list[Any]) -> bool:
@@ -245,9 +256,10 @@ def main() -> int:
         raise SystemExit("Manifest has no captures.")
     capture_sessions: set[tuple[str, str]] = set()
     for capture in capture_rows:
-        raw_path = Path((capture.get("pcap_path") or "").strip())
-        if not str(raw_path):
+        raw_path_text = (capture.get("pcap_path") or "").strip()
+        if not raw_path_text:
             raise SystemExit("Manifest contains an empty pcap_path.")
+        raw_path = Path(raw_path_text)
         path = raw_path if raw_path.is_absolute() else manifest_base / raw_path
         label = (capture.get("label") or "").strip().lower()
         session_id = (capture.get("session_id") or "").strip()
