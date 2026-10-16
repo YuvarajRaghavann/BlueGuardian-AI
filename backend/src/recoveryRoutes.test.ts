@@ -174,6 +174,35 @@ describe('recovery API integration', () => {
     expect(store.devices[0].recoveryState).toBe('lost');
   });
 
+
+  it('stores coordinates only when a community participant explicitly opts in', async () => {
+    const { createHash } = await import('node:crypto');
+    const fingerprintHash = createHash('sha256')
+      .update(JSON.stringify({ name: 'owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }))
+      .digest('hex');
+    store.devices.push({
+      deviceId: 'owner-location-test',
+      deviceIdentifier: 'private-address',
+      ownerId: 'test-owner',
+      name: 'Owner earbuds',
+      discoverySource: 'REAL',
+      recoveryEnabled: true,
+      recoveryState: 'searching',
+      recoveryFingerprintHash: fingerprintHash,
+    });
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        observations: [{ name: 'Owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }],
+        shareLocation: true,
+        location: { lat: 12.9716, lng: 77.5946 },
+      }),
+    });
+    expect(response.status).toBe(202);
+    expect(store.encounters[0].location).toEqual({ lat: 12.9716, lng: 77.5946 });
+  });
+
   it('rejects community reports that try to attach a location without opt-in', async () => {
     const response = await fetch(`${origin}/api/recovery/community/sightings`, {
       method: 'POST',
