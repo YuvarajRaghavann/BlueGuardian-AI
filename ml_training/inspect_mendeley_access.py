@@ -20,6 +20,7 @@ API_URLS = [
     "https://api.data.mendeley.com/datasets/ntmmcw6jj8?version=2",
 ]
 OUT = Path("ml_training/reports/mendeley_access_diagnostics.json")
+PUBLIC_DOWNLOAD_URL = "https://data.mendeley.com/public-api/zip/ntmmcw6jj8/download/2"
 TERMS = re.compile(
     r"BLE_Datasets\.zip|file_downloaded|public-files|fileId|file_id|download.?all|"
     r"datasets/ntmmcw6jj8/files|api\.data\.mendeley\.com",
@@ -87,6 +88,65 @@ def get(url, limit=8 * 1024 * 1024):
         return {"requested_url": url, "error": f"{type(exc).__name__}: {exc}"}
 
 
+def probe_public_download(url: str) -> dict:
+    result = {"requested_url": url, "method": "HEAD"}
+    head = urllib.request.Request(
+        url,
+        method="HEAD",
+        headers={"User-Agent": "Mozilla/5.0 BlueGuardian-Dataset-Access-Diagnostic/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(head, timeout=60) as response:
+            result.update({
+                "status": response.status,
+                "final_url": response.geturl(),
+                "content_type": response.headers.get("Content-Type"),
+                "content_length": response.headers.get("Content-Length"),
+                "accept_ranges": response.headers.get("Accept-Ranges"),
+            })
+            if response.status < 400:
+                return result
+    except urllib.error.HTTPError as exc:
+        result.update({
+            "status": exc.code,
+            "final_url": exc.geturl(),
+            "content_type": exc.headers.get("Content-Type"),
+            "content_length": exc.headers.get("Content-Length"),
+        })
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {exc}"
+
+    # HEAD may be disabled on a download endpoint. Probe only the first 1 KiB.
+    ranged = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 BlueGuardian-Dataset-Access-Diagnostic/1.0",
+            "Range": "bytes=0-1023",
+        },
+    )
+    result["fallback_method"] = "GET Range: bytes=0-1023"
+    try:
+        with urllib.request.urlopen(ranged, timeout=60) as response:
+            start = response.read(1024)
+            result.update({
+                "range_status": response.status,
+                "range_final_url": response.geturl(),
+                "range_content_type": response.headers.get("Content-Type"),
+                "range_content_length": response.headers.get("Content-Length"),
+                "content_range": response.headers.get("Content-Range"),
+                "first_bytes_hex": start[:16].hex(),
+            })
+    except urllib.error.HTTPError as exc:
+        result.update({
+            "range_status": exc.code,
+            "range_final_url": exc.geturl(),
+            "range_content_type": exc.headers.get("Content-Type"),
+        })
+    except Exception as exc:
+        result["range_error"] = f"{type(exc).__name__}: {exc}"
+    return result
+
+
 def main():
     page_result = get(PAGE)
     report = {
@@ -127,6 +187,7 @@ def main():
         item = get(url, limit=100_000)
         item.pop("body", None)
         report["api_probes"].append(item)
+    report["public_download_probe"] = probe_public_download(PUBLIC_DOWNLOAD_URL)
 
     # The HTML loads the file tree client-side. Inspect only its public JS assets
     # to find the documented route used by the landing-page Download All button.
@@ -176,6 +237,7 @@ def main():
     print(json.dumps({
         "page_status": report["page"].get("status") if isinstance(report["page"], dict) else None,
         "access_decision": report["access_decision"],
+        "public_download_probe": report["public_download_probe"],
         "api_probes": report["api_probes"],
         "report_path": str(OUT),
         "candidate_links": report["page"].get("links", [])[:20] if isinstance(report["page"], dict) else [],
