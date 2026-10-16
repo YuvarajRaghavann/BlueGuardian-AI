@@ -148,7 +148,7 @@ describe('security action device transitions', () => {
     expect(next.riskLevel).toBe(blockedDevice.riskLevel);
   });
 
-  it('reapplies the review policy when a device is updated', () => {
+  it('recomputes neutral review risk when a device is updated', () => {
     const updated = {
       ...device,
       trusted: false,
@@ -166,7 +166,7 @@ describe('security action device transitions', () => {
     expect(next.trusted).toBe(false);
     expect(next.isKnown).toBe(false);
     expect(next.approvalRequired).toBe(true);
-    expect(next.riskLevel).toBe('medium');
+    expect(next.riskLevel).toBe('low');
   });
 
   it('marks the current-session GATT connection disconnected after the browser reports it', () => {
