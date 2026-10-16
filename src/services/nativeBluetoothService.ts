@@ -52,6 +52,7 @@ export async function scanNativeAndroidBle(
   let deviceListener: PluginListenerHandle | undefined;
   let stateListener: PluginListenerHandle | undefined;
   let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
+  let startupTimeout: ReturnType<typeof setTimeout> | undefined;
   let resolveCompletion: (state: NativeBleScanState) => void = () => undefined;
   const completion = new Promise<NativeBleScanState>((resolve) => {
     resolveCompletion = resolve;
@@ -74,7 +75,22 @@ export async function scanNativeAndroidBle(
       if (state.state === 'complete' || state.state === 'error') resolveCompletion(state);
     });
 
-    const started = await nativeBluetooth.startBleScan({ durationMs });
+    // Guard the startup call as well as the scan window. A native permission/bridge
+    // call that never settles must not leave the Devices page spinning forever.
+    const started = await Promise.race([
+      nativeBluetooth.startBleScan({ durationMs }),
+      new Promise<never>((_resolve, reject) => {
+        startupTimeout = setTimeout(() => {
+          reject(new Error(
+            'Android BLE scanner did not acknowledge the scan within 10 seconds. Check Nearby Devices permission and native plugin registration.',
+          ));
+        }, 10000);
+      }),
+    ]);
+    if (startupTimeout) {
+      clearTimeout(startupTimeout);
+      startupTimeout = undefined;
+    }
     const actualDurationMs = Math.min(30000, Math.max(3000, started.durationMs || durationMs));
     const timeout = new Promise<NativeBleScanState>((resolve) => {
       safetyTimeout = setTimeout(() => resolve({
@@ -104,6 +120,7 @@ export async function scanNativeAndroidBle(
     return { ok: false, error: message };
   } finally {
     if (safetyTimeout) clearTimeout(safetyTimeout);
+    if (startupTimeout) clearTimeout(startupTimeout);
     try {
       await nativeBluetooth.stopBleScan();
     } catch {
