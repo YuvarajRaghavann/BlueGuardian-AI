@@ -136,7 +136,7 @@ export function NativeBleResultsModal({
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-3">
-          <span className="text-xs text-[var(--text-muted)]">Phase 3 · foreground BLE discovery</span>
+          <span className="text-xs text-[var(--text-muted)]">Foreground BLE discovery</span>
           <button
             type="button"
             onClick={onClose}

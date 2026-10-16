@@ -10,7 +10,7 @@ interface NativeCombinedResultsModalProps {
 }
 
 /**
- * Phase 5 single results surface for a sequential BLE + classic discovery pass.
+ * Single results surface for a sequential BLE + classic discovery pass.
  * Same normalized Android-reported addresses are merged by DeviceContext.
  */
 export function NativeCombinedResultsModal({
@@ -67,7 +67,7 @@ export function NativeCombinedResultsModal({
                 Combined Bluetooth discovery
               </h2>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Phase 5 · BLE followed by classic inquiry · foreground only
+                BLE followed by classic discovery · foreground only
               </p>
             </div>
           </div>
@@ -156,7 +156,7 @@ export function NativeCombinedResultsModal({
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-3">
-          <span className="text-xs text-[var(--text-muted)]">Phase 5 · combined discovery</span>
+          <span className="text-xs text-[var(--text-muted)]">Combined Bluetooth discovery</span>
           <button
             type="button"
             onClick={onClose}

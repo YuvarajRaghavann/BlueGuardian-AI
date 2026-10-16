@@ -11,7 +11,7 @@ interface NativeClassicResultsModalProps {
   onSelect: (device: BluetoothDevice) => void;
 }
 
-/** Phase 4 classic discovery and bonded-device list, deliberately separate from BLE. */
+/** Classic discovery and the Android bonded-device list, deliberately separate from BLE. */
 export function NativeClassicResultsModal({
   open,
   view,
@@ -149,7 +149,7 @@ export function NativeClassicResultsModal({
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-3">
-          <span className="text-xs text-[var(--text-muted)]">Phase 4 · classic discovery</span>
+          <span className="text-xs text-[var(--text-muted)]">Classic Bluetooth discovery</span>
           <button
             type="button"
             onClick={onClose}
