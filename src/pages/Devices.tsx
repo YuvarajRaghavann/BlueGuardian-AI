@@ -3,14 +3,12 @@ import {
   Bluetooth,
   FlaskConical,
   Search,
-  Cpu,
-  AlertTriangle,
-  SlidersHorizontal,
   Radar,
   Radio,
   List,
   Bug,
   Database,
+  ShieldCheck,
 } from 'lucide-react';
 import { DeviceCard } from '../components/DeviceCard';
 import { DeviceDetailModal } from '../components/DeviceDetailModal';
@@ -18,10 +16,8 @@ import { NativeBleResultsModal } from '../components/NativeBleResultsModal';
 import { NativeClassicResultsModal } from '../components/NativeClassicResultsModal';
 import { NativeCombinedResultsModal } from '../components/NativeCombinedResultsModal';
 import { EmptyState } from '../components/EmptyState';
-import { LoadingSpinner } from '../components/LoadingSpinner';
 import { useBluetoothDevices } from '../context/DeviceContext';
 import { cn } from '../utils/cn';
-import { needsManualApproval } from '../utils/connectionPolicy';
 import { diagnoseBluetoothEnvironment, type BluetoothEnvironmentDiagnostics } from '../services/bluetoothService';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 
@@ -34,8 +30,6 @@ export function Devices() {
     scanClassicDevices,
     scanCombinedDevices,
     loadPairedDevices,
-    startWatchingPermittedBleDevices,
-    stopWatchingPermittedBleDevices,
     clearSimulatedDevices,
   } = useBluetoothDevices();
   const [selectedDevice, setSelectedDevice] =
@@ -49,7 +43,6 @@ export function Devices() {
   const [pairedDevicesLoading, setPairedDevicesLoading] = useState(false);
   const [classicScanStartedAt, setClassicScanStartedAt] = useState<number | null>(null);
   const [localSearch, setLocalSearch] = useState(state.search);
-  const [advertisementWatch, setAdvertisementWatch] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
   const [sourceView, setSourceView] = useState<'real' | 'simulated' | 'all'>('real');
   const [diagnostics, setDiagnostics] = useState<BluetoothEnvironmentDiagnostics | null>(null);
   const [diagnosticError, setDiagnosticError] = useState<string | null>(null);
@@ -126,7 +119,7 @@ export function Devices() {
     if (!q) return sourceFiltered;
     return sourceFiltered.filter(device =>
       device.name.toLowerCase().includes(q)
-      || device.address.toLowerCase().includes(q)
+      || (device.address ?? '').toLowerCase().includes(q)
       || device.type.toLowerCase().includes(q)
     );
   }, [state.devices, sourceView, localSearch]);
@@ -174,16 +167,6 @@ export function Devices() {
       setDiagnosticError(message);
       console.error('[BlueGuardian][BLE] Browser environment diagnostics failed:', error);
     }
-  };
-
-  const handleToggleAdvertisementWatch = async () => {
-    if (advertisementWatch.active) {
-      stopWatchingPermittedBleDevices();
-      setAdvertisementWatch({ active: false, message: 'Advertisement watch stopped.' });
-      return;
-    }
-    const result = await startWatchingPermittedBleDevices();
-    setAdvertisementWatch({ active: result.ok, message: result.message });
   };
 
   const isScanning = state.scan.state === 'scanning';
@@ -393,7 +376,15 @@ export function Devices() {
               : sourceView === 'simulated'
                 ? 'Generate simulated examples to preview the interface. These are not physical devices.'
                 : 'Turn Bluetooth on, make the device discoverable, and search again.'}
-            action={state.scan.state === 'scanning' ? undefined : { label: nativeAndroid ? 'Search again' : 'Select a device', onClick: () => void (nativeAndroid ? handleCombinedScan() : handleScan()) }}
+            action={state.scan.state === 'scanning' ? undefined : (
+              <button
+                type="button"
+                onClick={() => { if (nativeAndroid) void handleCombinedScan(); else void handleScan(); }}
+                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[var(--accent)] px-5 text-sm font-semibold text-white transition hover:bg-[var(--accent-strong)]"
+              >
+                {nativeAndroid ? 'Search again' : 'Choose a device'}
+              </button>
+            )}
           />
         ) : (
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -467,7 +458,6 @@ export function Devices() {
 
       <DeviceDetailModal
         device={selectedDevice}
-        open={selectedDevice !== null}
         onClose={() => setSelectedDevice(null)}
       />
     </div>
