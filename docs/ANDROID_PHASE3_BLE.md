@@ -30,3 +30,6 @@ The GitHub Actions workflow regenerates the Android project with Capacitor 8, ap
 8. Confirm Chrome/web mode continues to use the original Web Bluetooth chooser.
 9. Confirm the scan stops automatically or when the app is paused.
 10. Do not treat a missing AirPods entry as proof of a scanner bug: AirPods may not advertise a name or usable data in the state being tested.
+## Cloud validation
+
+This phase is compiled by the branch's GitHub Actions workflow on a hosted Linux runner. The APK artifact is a debug build; install and verify it on physical Android hardware before treating scan behavior as validated.
