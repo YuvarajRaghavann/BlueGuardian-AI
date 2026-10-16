@@ -130,7 +130,7 @@ export function DeviceCard({
                       : 'warning'
                   }
                 />
-                {device.discoveryTransport === 'CLASSIC' && (
+                {(device.discoveryTransport === 'CLASSIC' || device.discoveryTransport === 'PAIRED') && (
                   <StatusBadge label={device.paired ? 'PAIRED' : 'CLASSIC'} variant={device.paired ? 'success' : 'info'} />
                 )}
               </div>
