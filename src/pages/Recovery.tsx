@@ -3,6 +3,7 @@ import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-r
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
 import { setOwnerToken as setActiveOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
+import { createFirebaseAccount, getFreshFirebaseIdToken, signInWithEmailPassword, signOutFirebase } from '../services/firebaseAuth';
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not recorded';
@@ -11,7 +12,10 @@ function formatDate(value?: string | null) {
 }
 
 export function Recovery() {
-  const [ownerToken, setOwnerToken] = useState('');
+  const [ownerToken, setOwnerToken] = useState(''); // Current Firebase ID token, never rendered in the UI.
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [firebaseSignedInEmail, setFirebaseSignedInEmail] = useState<string | null>(null);
   const [deviceName, setDeviceName] = useState('');
   const [selectedBluetoothDevice, setSelectedBluetoothDevice] = useState<BluetoothDeviceInfo | null>(null);
   const [devices, setDevices] = useState<RecoveryDeviceRecord[]>([]);
@@ -25,7 +29,7 @@ export function Recovery() {
 
   const requireToken = () => {
     if (!ownerToken.trim()) {
-      setError('Enter the owner bearer token configured on the backend.');
+      setError('Sign in to BlueGuardian with your Firebase email and password first.');
       return false;
     }
     return true;
@@ -38,10 +42,12 @@ export function Recovery() {
     setError(null);
     setNotice(null);
     try {
-      const loadedDevices = await api.recovery.listDevices(token);
+      const freshToken = await getFreshFirebaseIdToken() ?? token;
+      const loadedDevices = await api.recovery.listDevices(freshToken);
       // Only publish the credential to the rest of the app after a protected
       // owner request succeeds. The session helper holds it in memory only.
-      setActiveOwnerToken(token);
+      setOwnerToken(freshToken);
+      setActiveOwnerToken(freshToken);
       setDevices(loadedDevices);
       setDevicesLoaded(true);
       if (selectedDevice) {
@@ -59,6 +65,62 @@ export function Recovery() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const authenticateWithFirebase = async (mode: 'sign-in' | 'sign-up') => {
+    if (!email.trim() || !password) {
+      setError('Enter your email address and password.');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    setActiveOwnerToken(null);
+    try {
+      const session = mode === 'sign-in'
+        ? await signInWithEmailPassword(email, password)
+        : await createFirebaseAccount(email, password);
+
+      setOwnerToken(session.idToken);
+      setFirebaseSignedInEmail(session.email);
+      setPassword('');
+
+      try {
+        const freshToken = await getFreshFirebaseIdToken() ?? session.idToken;
+        const loadedDevices = await api.recovery.listDevices(freshToken);
+        setOwnerToken(freshToken);
+        setActiveOwnerToken(freshToken);
+        setDevices(loadedDevices);
+        setDevicesLoaded(true);
+        setSelectedDevice(null);
+        setRecoveryInfo(null);
+        setEncounters([]);
+        setNotice(`Signed in as ${session.email}. Your owner-authorized recovery records loaded successfully.`);
+      } catch (caught) {
+        setError(`Firebase sign-in succeeded, but the backend request failed: ${errorMessage(caught)}`);
+        setNotice('Firebase accepted your account sign-in. The Render backend must also be deployed with Firebase token verification enabled.');
+      }
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFirebaseSignOut = () => {
+    signOutFirebase();
+    setActiveOwnerToken(null);
+    setOwnerToken('');
+    setFirebaseSignedInEmail(null);
+    setPassword('');
+    setDevices([]);
+    setDevicesLoaded(false);
+    setSelectedDevice(null);
+    setRecoveryInfo(null);
+    setEncounters([]);
+    setError(null);
+    setNotice('You have signed out of BlueGuardian.');
   };
 
   const selectBluetoothDevice = async () => {
@@ -224,33 +286,67 @@ export function Recovery() {
           <LockKeyhole className="h-4 w-4 text-[var(--accent)]" />
           <h2 className="text-sm font-semibold text-[var(--text)]">Backend owner access</h2>
         </div>
-        <label className="block text-sm text-[var(--text-secondary)]">
-          Owner bearer token
-          <input
-            type="password"
-            autoComplete="off"
-            value={ownerToken}
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm text-[var(--text-secondary)]">
+            Email address
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              disabled={busy}
+              onChange={event => setEmail(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+          </label>
+          <label className="block text-sm text-[var(--text-secondary)]">
+            Password
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              disabled={busy}
+              onChange={event => setPassword(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter') void authenticateWithFirebase('sign-in');
+              }}
+              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+          </label>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void authenticateWithFirebase('sign-in')}
             disabled={busy}
-            onChange={event => {
-              // Do not keep using a previously authenticated owner token after
-              // the user starts entering a different credential.
-              setActiveOwnerToken(null);
-              setOwnerToken(event.target.value);
-              setDevices([]);
-              setDevicesLoaded(false);
-              setSelectedDevice(null);
-              setRecoveryInfo(null);
-              setEncounters([]);
-              setError(null);
-              setNotice(null);
-            }}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            aria-describedby="recovery-auth-note"
-          />
-        </label>
-        <p id="recovery-auth-note" className="mt-2 text-xs text-[var(--text-muted)]">
-          The token is kept in application memory only and is not written to browser storage. After a successful owner request it enables owner-scoped device, threat, and action synchronization until the app is reloaded or the token is cleared. The current static backend token is a development integration, not production identity management.
+            className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50"
+          >
+            {busy ? 'Working…' : 'Sign in'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void authenticateWithFirebase('sign-up')}
+            disabled={busy}
+            className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
+          >
+            Create account
+          </button>
+          {firebaseSignedInEmail && (
+            <button
+              type="button"
+              onClick={handleFirebaseSignOut}
+              disabled={busy}
+              className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
+            >
+              Sign out
+            </button>
+          )}
+        </div>
+        <p id="recovery-auth-note" className="mt-3 text-xs text-[var(--text-muted)]">
+          BlueGuardian uses Firebase email/password authentication. ID tokens are verified by the backend and scoped to your Firebase user ID. Credentials and refresh tokens are held in application memory only, not browser storage. Reloading the app requires you to sign in again.
         </p>
+        {firebaseSignedInEmail && (
+          <p className="mt-2 text-xs text-[var(--text-muted)]">Firebase account: {firebaseSignedInEmail}</p>
+        )}
         <button
           type="button"
           onClick={loadDevices}
