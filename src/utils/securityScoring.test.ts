@@ -84,7 +84,7 @@ describe('BlueGuardian false-positive safeguards', () => {
       isKnown: true,
       trusted: true,
       trustScore: 85,
-      connectionHealth: 'STABLE' as const,
+      connectionHealth: 'GOOD' as const,
     };
     expect(new DevelopmentModel().predict(extractDeviceFeatures(trusted).values).label).toBe('BENIGN');
   });
