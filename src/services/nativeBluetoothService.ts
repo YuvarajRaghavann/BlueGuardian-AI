@@ -10,6 +10,27 @@ export interface NativeBleObservation {
   observedAt: number;
 }
 
+export interface NativeClassicObservation {
+  id: string;
+  address: string;
+  name?: string;
+  rssi?: number;
+  transport: 'CLASSIC';
+  paired?: boolean;
+  observedAt: number;
+}
+
+interface NativeClassicScanState {
+  state: 'scanning' | 'complete' | 'error';
+  devicesFound?: number;
+  durationMs?: number;
+  message?: string;
+}
+
+export type NativeClassicScanOutcome =
+  | { ok: true; devicesFound: number; durationMs: number; message?: string }
+  | { ok: false; error: string };
+
 interface NativeBleScanState {
   state: 'scanning' | 'complete' | 'error';
   devicesFound?: number;
@@ -21,8 +42,13 @@ interface NativeBleScanState {
 interface BlueGuardianBluetoothPlugin {
   startBleScan(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number }>;
   stopBleScan(): Promise<{ stopped: boolean }>;
+  startClassicDiscovery(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number }>;
+  stopClassicDiscovery(): Promise<{ stopped: boolean }>;
+  listPairedDevices(): Promise<{ devices: NativeClassicObservation[]; count: number }>;
   addListener(eventName: 'deviceFound', listenerFunc: (event: NativeBleObservation) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'scanState', listenerFunc: (event: NativeBleScanState) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'classicDeviceFound', listenerFunc: (event: NativeClassicObservation) => void): Promise<PluginListenerHandle>;
+  addListener(eventName: 'classicScanState', listenerFunc: (event: NativeClassicScanState) => void): Promise<PluginListenerHandle>;
 }
 
 const nativeBluetooth = registerPlugin<BlueGuardianBluetoothPlugin>('BlueGuardianBluetooth');
@@ -144,3 +170,136 @@ export async function scanNativeAndroidBle(
     }
   }
 }
+
+/**
+ * Runs Android classic discovery while BlueGuardian is foregrounded.
+ * Classic discovery is intentionally separate from the BLE scan in Phase 4.
+ */
+export async function scanNativeAndroidClassic(
+  onObservation: (observation: NativeClassicObservation) => void,
+  requestedDurationMs = 12000,
+): Promise<NativeClassicScanOutcome> {
+  if (!isNativeAndroidApp()) {
+    return { ok: false, error: 'Classic Bluetooth discovery is only available inside the BlueGuardian Android APK.' };
+  }
+
+  const durationMs = Math.min(30000, Math.max(3000, Math.round(requestedDurationMs)));
+  const observedIds = new Set<string>();
+  let deviceListener: PluginListenerHandle | undefined;
+  let stateListener: PluginListenerHandle | undefined;
+  let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
+  let startupTimeout: ReturnType<typeof setTimeout> | undefined;
+  let resolveCompletion: (state: NativeClassicScanState) => void = () => undefined;
+  const completion = new Promise<NativeClassicScanState>((resolve) => {
+    resolveCompletion = resolve;
+  });
+
+  try {
+    deviceListener = await nativeBluetooth.addListener('classicDeviceFound', (observation) => {
+      const address = String(observation.address || observation.id || '').trim();
+      if (!address) return;
+      const identity = address.toLowerCase();
+      if (observedIds.has(identity)) return;
+      observedIds.add(identity);
+      onObservation({
+        ...observation,
+        id: address,
+        address,
+        transport: 'CLASSIC',
+        observedAt: typeof observation.observedAt === 'number' ? observation.observedAt : Date.now(),
+      });
+    });
+
+    stateListener = await nativeBluetooth.addListener('classicScanState', (state) => {
+      if (state.state === 'complete' || state.state === 'error') resolveCompletion(state);
+    });
+
+    const started = await Promise.race([
+      nativeBluetooth.startClassicDiscovery({ durationMs }),
+      new Promise<never>((_resolve, reject) => {
+        startupTimeout = setTimeout(() => {
+          reject(new Error('Classic Bluetooth discovery did not start within 10 seconds. Check Nearby Devices permission and native plugin registration.'));
+        }, 10000);
+      }),
+    ]);
+    if (startupTimeout) {
+      clearTimeout(startupTimeout);
+      startupTimeout = undefined;
+    }
+
+    const actualDurationMs = Math.min(30000, Math.max(3000, started.durationMs || durationMs));
+    const timeout = new Promise<NativeClassicScanState>((resolve) => {
+      safetyTimeout = setTimeout(() => resolve({
+        state: 'complete',
+        devicesFound: observedIds.size,
+        durationMs: actualDurationMs,
+        message: 'The safety timeout ended the classic discovery window because Android did not send a final event.',
+      }), actualDurationMs + 2500);
+    });
+    const finalState = await Promise.race([completion, timeout]);
+
+    if (finalState.state === 'error') {
+      return { ok: false, error: finalState.message || 'Android classic Bluetooth discovery failed.' };
+    }
+
+    const devicesFound = Math.max(
+      observedIds.size,
+      typeof finalState.devicesFound === 'number' ? finalState.devicesFound : 0,
+    );
+    return {
+      ok: true,
+      devicesFound,
+      durationMs: actualDurationMs,
+      message: finalState.message || (devicesFound === 0
+        ? 'No classic Bluetooth devices were discovered. The other device must be discoverable during the scan.'
+        : undefined),
+    };
+  } catch (error: unknown) {
+    return { ok: false, error: error instanceof Error ? error.message : 'Unknown classic Bluetooth error.' };
+  } finally {
+    if (safetyTimeout) clearTimeout(safetyTimeout);
+    if (startupTimeout) clearTimeout(startupTimeout);
+    try {
+      void nativeBluetooth.stopClassicDiscovery().catch(() => undefined);
+    } catch {
+      // Cleanup must not mask the scan result.
+    }
+    try {
+      const removal = deviceListener?.remove();
+      if (removal) void removal.catch(() => undefined);
+    } catch {
+      // Cleanup must not mask the scan result.
+    }
+    try {
+      const removal = stateListener?.remove();
+      if (removal) void removal.catch(() => undefined);
+    } catch {
+      // Cleanup must not mask the scan result.
+    }
+  }
+}
+
+/** Returns the Android system's bonded classic devices; this is not a live scan. */
+export async function listNativeAndroidPairedDevices(): Promise<NativeClassicObservation[]> {
+  if (!isNativeAndroidApp()) {
+    throw new Error('Paired Bluetooth devices are only available inside the BlueGuardian Android APK.');
+  }
+
+  const result = await Promise.race([
+    nativeBluetooth.listPairedDevices(),
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error(
+        'Android did not return the paired-device list. Check Nearby Devices permission and native plugin registration.',
+      )), 10000);
+    }),
+  ]);
+  return (Array.isArray(result.devices) ? result.devices : []).map((device) => ({
+    ...device,
+    id: String(device.address || device.id || '').trim(),
+    address: String(device.address || device.id || '').trim(),
+    transport: 'CLASSIC' as const,
+    paired: true,
+    observedAt: typeof device.observedAt === 'number' ? device.observedAt : Date.now(),
+  })).filter((device) => Boolean(device.address));
+}
+
