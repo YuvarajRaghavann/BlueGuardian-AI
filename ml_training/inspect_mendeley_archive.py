@@ -78,29 +78,67 @@ def main():
 
         files = []
         docs = []
+        containers = []
         counts_by_extension: dict[str, int] = {}
         sizes_by_extension: dict[str, int] = {}
         total_uncompressed = 0
-        with zipfile.ZipFile(archive_path) as archive:
-            for member in archive.infolist():
-                if member.is_dir():
-                    continue
-                path = PurePosixPath(member.filename)
-                extension = path.suffix.lower() or "[no extension]"
-                counts_by_extension[extension] = counts_by_extension.get(extension, 0) + 1
-                sizes_by_extension[extension] = sizes_by_extension.get(extension, 0) + member.file_size
-                total_uncompressed += member.file_size
-                files.append({
-                    "path": member.filename,
-                    "extension": extension,
-                    "compressed_bytes": member.compress_size,
-                    "uncompressed_bytes": member.file_size,
-                    "file_size_limit_for_extract": member.file_size <= MAX_DOC_BYTES,
-                    "likely_capture": extension in {".pcap", ".pcapng", ".btsnoop", ".cap"},
+
+        def add_member(archive: zipfile.ZipFile, member: zipfile.ZipInfo, display_path: str) -> None:
+            nonlocal total_uncompressed
+            if member.is_dir():
+                return
+            path = PurePosixPath(member.filename)
+            extension = path.suffix.lower() or "[no extension]"
+            counts_by_extension[extension] = counts_by_extension.get(extension, 0) + 1
+            sizes_by_extension[extension] = sizes_by_extension.get(extension, 0) + member.file_size
+            total_uncompressed += member.file_size
+            files.append({
+                "path": display_path,
+                "extension": extension,
+                "compressed_bytes": member.compress_size,
+                "uncompressed_bytes": member.file_size,
+                "file_size_limit_for_extract": member.file_size <= MAX_DOC_BYTES,
+                "likely_capture": extension in {".pcap", ".pcapng", ".btsnoop", ".cap"},
+            })
+            doc = read_metadata_doc(archive, member)
+            if doc is not None:
+                docs.append({"path": display_path, "text": doc})
+
+        with zipfile.ZipFile(archive_path) as outer:
+            nested_members = [m for m in outer.infolist() if not m.is_dir() and m.filename.lower().endswith(".zip")]
+            if nested_members:
+                containers.append({
+                    "archive_layer": "outer",
+                    "members": [{
+                        "path": m.filename,
+                        "compressed_bytes": m.compress_size,
+                        "uncompressed_bytes": m.file_size,
+                    } for m in outer.infolist() if not m.is_dir()],
                 })
-                doc = read_metadata_doc(archive, member)
-                if doc is not None:
-                    docs.append({"path": member.filename, "text": doc})
+                for index, nested_member in enumerate(nested_members):
+                    nested_path = Path(tmp) / f"nested-{index}.zip"
+                    # Unpack only the nested ZIP container itself into temporary runner storage.
+                    # No PCAP/PCAPNG member is extracted from it.
+                    with outer.open(nested_member) as src, nested_path.open("wb") as dst:
+                        while True:
+                            block = src.read(1024 * 1024)
+                            if not block:
+                                break
+                            dst.write(block)
+                    if not zipfile.is_zipfile(nested_path):
+                        raise RuntimeError(f"Nested archive is not a valid ZIP: {nested_member.filename}")
+                    with zipfile.ZipFile(nested_path) as inner:
+                        inner_members = inner.infolist()
+                        containers.append({
+                            "archive_layer": "inner",
+                            "container_path": nested_member.filename,
+                            "file_count": sum(not m.is_dir() for m in inner_members),
+                        })
+                        for member in inner_members:
+                            add_member(inner, member, f"{nested_member.filename}!/{member.filename}")
+            else:
+                for member in outer.infolist():
+                    add_member(outer, member, member.filename)
 
         report = {
             "source": "https://data.mendeley.com/datasets/ntmmcw6jj8/2",
@@ -112,6 +150,7 @@ def main():
             "archive_sha256": sha256,
             "archive_content_type": content_type,
             "total_uncompressed_bytes": total_uncompressed,
+            "containers": containers,
             "file_count": len(files),
             "counts_by_extension": counts_by_extension,
             "uncompressed_bytes_by_extension": sizes_by_extension,
