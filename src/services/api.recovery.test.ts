@@ -24,6 +24,24 @@ describe('recovery API client', () => {
     await expect(api.recovery.listDevices('owner-session-token')).resolves.toEqual([]);
   });
 
+  it('uses review-level risk when a backend device has no valid risk metadata', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      deviceId: 'unknown-device',
+      name: 'Unknown Bluetooth Device',
+      discoverySource: 'REAL',
+      firstSeen: '2026-10-16T12:00:00.000Z',
+      lastSeen: '2026-10-16T12:00:00.000Z',
+      isKnown: false,
+      trusted: false,
+      blocked: false,
+      services: [],
+    }]), { status: 200 })));
+
+    const [device] = await api.listDevices('owner-session-token');
+    expect(device.riskLevel).toBe('medium');
+    expect(device.blocked).toBe(false);
+  });
+
   it.each([
     [401, 'Unauthorized', 'Owner token required.'],
     [503, 'Service Unavailable', 'Recovery storage is unavailable.'],
