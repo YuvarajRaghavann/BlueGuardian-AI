@@ -109,6 +109,7 @@ export type ThreatCategory =
   | 'UNSTABLE_CONNECTION'
   | 'BLOCKED_DEVICE'
   | 'SPOOFING_SUSPECTED'
+  | 'BLE_ADVERTISING_FLOOD'
   | 'OTHER';
 
 export type ThreatStatus = 'ACTIVE' | 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED';
