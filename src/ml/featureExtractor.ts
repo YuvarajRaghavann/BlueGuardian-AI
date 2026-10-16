@@ -24,6 +24,7 @@ export function extractDeviceFeatures(device: BluetoothDevice): FeatureVector {
   const suspiciousNameFlag = isSuspiciousName(device.name);
 
   const independentIndicators = [
+    blockedFlag === 1,
     suspiciousNameFlag,
     device.connectionHealth === 'UNSTABLE',
     device.connectionHealth === 'DEGRADED',

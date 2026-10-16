@@ -29,9 +29,8 @@ export function analyzeDeviceThreat(device: BluetoothDevice): ThreatAnalysis {
   let threatScore = 0;
 
   if (device.blocked) {
-    // Owner policy state is important to display, but must not be counted as
-    // evidence that the device itself is malicious.
-    reasons.push({ code: 'BLOCKED_DEVICE', message: 'This device is blocked by owner policy. The block decision alone is not proof of an attack.' });
+    threatScore += 70;
+    reasons.push({ code: 'BLOCKED_DEVICE', message: 'This device was explicitly blocked in BlueGuardian.' });
   }
 
   if (!device.isKnown) {
@@ -82,7 +81,7 @@ export function analyzeDeviceThreat(device: BluetoothDevice): ThreatAnalysis {
 
   const severity = scoreToSeverity(threatScore);
   let recommendedAction = 'No immediate threat evidence detected. Keep normal approval controls enabled.';
-  if (severity === 'critical') recommendedAction = 'Multiple strong indicators are present. Keep the device isolated and review the evidence.';
+  if (severity === 'critical') recommendedAction = 'An explicitly blocked device has additional risk signals. Keep it blocked and review the evidence.';
   else if (severity === 'high') recommendedAction = 'Keep this device blocked and review the available evidence.';
   else if (severity === 'medium') recommendedAction = 'Review the device and gather another observation before making a security decision.';
 

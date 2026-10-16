@@ -126,10 +126,11 @@ function threatReducer(state: ThreatState, action: Action): ThreatState {
 
 function isActionableThreat(assessment: ReturnType<typeof assessDeviceSecurity>): boolean {
   const codes = new Set(assessment.reasons.map(reason => reason.code));
+  const explicitlyBlocked = codes.has('BLOCKED_DEVICE');
   const corroboratedSuspicion = assessment.finalThreatScore >= 35
     && codes.has('SUSPICIOUS_NAME')
     && codes.has('UNSTABLE_CONNECTION');
-  return assessment.finalThreatScore >= 50 || corroboratedSuspicion;
+  return assessment.finalThreatScore >= 50 || explicitlyBlocked || corroboratedSuspicion;
 }
 
 function createAnalysisPayload(devices: BluetoothDevice[]): {

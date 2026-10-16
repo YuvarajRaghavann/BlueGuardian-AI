@@ -26,6 +26,7 @@ export function Recovery() {
   const [recoveryInfo, setRecoveryInfo] = useState<RecoveryInfoRecord | null>(null);
   const [encounters, setEncounters] = useState<RecoveryEncounterRecord[]>([]);
   const [busy, setBusy] = useState(false);
+  const [shareLocation, setShareLocation] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -387,13 +388,43 @@ export function Recovery() {
         observedIdentifier = result.device.id;
       }
 
+      let location: { lat: number; lng: number } | undefined;
+      if (shareLocation) {
+        if (typeof navigator === 'undefined' || !navigator.geolocation) {
+          setError('This device does not expose location services. No encounter was submitted; turn off location sharing to record a Bluetooth-only sighting.');
+          return;
+        }
+        try {
+          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: true,
+              timeout: 12000,
+              maximumAge: 0,
+            });
+          });
+          location = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+        } catch (locationError: unknown) {
+          const reason = locationError instanceof Error
+            ? locationError.message
+            : 'Location permission was denied or unavailable.';
+          setError(`Bluetooth presence was verified, but location could not be obtained (${reason}). No encounter was submitted. Allow location access or turn off optional location sharing and retry.`);
+          return;
+        }
+      }
+
       await api.recovery.submitEncounter(token, selectedDevice.deviceId, {
         source: 'REAL',
         simulated: false,
         isTestFixture: false,
         description: observationDescription,
+        ...(location ? { location } : {}),
       });
-      setNotice('The backend accepted the encounter and recorded its receive time. No coordinates were inferred or submitted.');
+      setNotice(location
+        ? 'Bluetooth encounter saved with the location you explicitly chose to share.'
+        : 'Bluetooth encounter saved without GPS. No location was inferred or submitted.');
       try {
         await loadRecoveryInfo(selectedDevice, token);
       } catch (refreshError) {
@@ -631,6 +662,22 @@ export function Recovery() {
                 <button type="button" disabled={busy} onClick={() => updateState('recovered')} className="rounded-lg bg-[var(--success)] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">Mark recovered</button>
               )}
             </div>
+          </div>
+
+          <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+            <label className="flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={shareLocation}
+                onChange={event => setShareLocation(event.target.checked)}
+                disabled={busy}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
+              />
+              <span>
+                <span className="block text-sm font-medium text-[var(--text)]">Attach this phone's location to the sighting (optional)</span>
+                <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">Only requested after Bluetooth verification, only when checked, and sent with this owner-authorized encounter. If location cannot be obtained, the encounter is not submitted until you retry without location sharing.</span>
+              </span>
+            </label>
           </div>
 
           <div className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
