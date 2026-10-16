@@ -693,7 +693,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           transport: 'ANDROID_PAIRED_DEVICES',
           devicesFound: pairedDevices.length,
           error: pairedDevices.length === 0
-            ? 'Android reports no paired classic Bluetooth devices. Pair a device in Android Settings first.'
+            ? 'Android reports no paired Bluetooth devices. Pair a device in Android Settings first.'
             : undefined,
         },
       });
