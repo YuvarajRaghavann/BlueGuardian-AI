@@ -1,17 +1,26 @@
 import type { BluetoothDevice, ConnectionStatus, DeviceType, RiskLevel, SecurityAction, SecurityActionType, Threat, ThreatCategory, ThreatSeverity, ThreatStatus, ThreatReason, MLThreatClass } from '../types';
 import { resolveBluetoothDisplayName } from './bluetoothService';
 import { getApiBaseConfig } from './apiBase';
+import { getFreshFirebaseIdToken, hasFirebaseSession } from './firebaseAuth';
 
 const BASE = () => getApiBaseConfig().baseUrl;
 
-function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
+async function withFreshFirebaseAuthorization(options: RequestInit): Promise<RequestInit> {
+  const headers = new Headers(options.headers);
+  if (headers.has('Authorization') && hasFirebaseSession()) {
+    const token = await getFreshFirebaseIdToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+  }
+  return { ...options, headers };
+}
+
+async function apiFetch(url: string, options: RequestInit = {}): Promise<Response> {
   const config = getApiBaseConfig();
   if (!config.configured || !config.baseUrl) {
-    return Promise.reject(new Error(
-      config.error || 'Backend URL is not configured. Open Settings → Backend and database.',
-    ));
+    throw new Error(config.error || 'Backend URL is not configured. Open Settings → Backend and database.');
   }
-  return fetch(url, { ...options, cache: 'no-store' });
+  const authenticatedOptions = await withFreshFirebaseAuthorization(options);
+  return fetch(url, { ...authenticatedOptions, cache: 'no-store' });
 }
 
 function recoveryHeaders(token: string, jsonBody = false): Record<string, string> {
