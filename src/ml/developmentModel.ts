@@ -2,7 +2,7 @@ import type { MLPrediction, MLThreatClass } from '../types/index.js';
 import type { ThreatClassificationModel } from './model.js';
 
 const MODEL_NAME = 'BlueGuardian Evidence Heuristic';
-const MODEL_VERSION = '0.2.0-heuristic';
+const MODEL_VERSION = '0.3.0-heuristic';
 
 const FEATURE_NAMES = [
   'normalizedTrustScore', 'normalizedRSSI', 'knownFlag', 'trustedFlag',
