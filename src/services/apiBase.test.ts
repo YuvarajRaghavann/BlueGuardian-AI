@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { api } from './api';
 import {
   API_BASE_CHANGED_EVENT,
   getApiBaseConfig,
@@ -50,6 +51,22 @@ describe('runtime API base configuration', () => {
     expect(values.get('blueguardian.apiBaseUrl')).toBe('https://api.example.com/api');
     expect(dispatchEvent).toHaveBeenCalledTimes(1);
     expect(dispatchEvent.mock.calls[0][0].type).toBe(API_BASE_CHANGED_EVENT);
+  });
+
+  it('routes API health requests through the saved endpoint and disables caching', async () => {
+    stubBrowserStorage();
+    setApiBaseUrl('https://api.example.com');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ status: 'ok', database: 'connected' }),
+      { status: 200 },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(api.health()).resolves.toEqual({ status: 'ok', database: 'connected' });
+
+    expect(fetchMock).toHaveBeenCalledWith('https://api.example.com/api/health', {
+      cache: 'no-store',
+    });
   });
 
   it('clears a custom URL and returns the browser same-origin API fallback', () => {
