@@ -29,13 +29,13 @@ export function NativeCombinedResultsModal({
 
   const summary = scanning
     ? scan.scanStage === 'CLASSIC'
-      ? 'Classic discovery running… ' + devices.length + ' unique device(s) observed so far'
-      : 'BLE discovery running… ' + devices.length + ' unique device(s) observed so far'
+      ? 'Searching nearby devices… ' + devices.length + ' found so far'
+      : 'Searching nearby devices… ' + devices.length + ' found so far'
     : failed
       ? scan.error || 'Combined Bluetooth discovery failed.'
       : devices.length > 0
-        ? 'Combined discovery finished. ' + devices.length + ' unique device(s) shown.'
-        : scan.error || 'No devices were reported during the combined scan.';
+        ? 'Found ' + devices.length + ' device(s). Select one to view details.'
+        : scan.error || 'No devices found. Keep Bluetooth on and try again.';
 
   const transportLabel = (device: BluetoothDevice) => {
     const transports = device.discoveryTransports ?? [];
@@ -64,10 +64,10 @@ export function NativeCombinedResultsModal({
             </div>
             <div>
               <h2 id="native-combined-results-title" className="text-base font-semibold text-[var(--text)]">
-                Combined Bluetooth discovery
+                Nearby devices
               </h2>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                BLE followed by classic discovery · foreground only
+                Live search results
               </p>
             </div>
           </div>
@@ -93,7 +93,7 @@ export function NativeCombinedResultsModal({
             <div className="min-w-0">
               <p className="text-sm font-medium text-[var(--text)]">{summary}</p>
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                BlueGuardian runs BLE first, then classic discovery to avoid competing permission prompts and adapter sessions. Results with the same Android-reported address merge into one record. BLE privacy addresses may differ from classic addresses, so Android may not always reveal that two reports belong to the same physical device. Discovery does not connect to or trust devices.
+                Select a device to review its details and security status. BlueGuardian will not connect to or trust a device automatically.
               </p>
               {scan.error && !scanning && (
                 <p role={failed ? 'alert' : 'status'} className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
@@ -156,7 +156,7 @@ export function NativeCombinedResultsModal({
         </div>
 
         <footer className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-5 py-3">
-          <span className="text-xs text-[var(--text-muted)]">Combined Bluetooth discovery</span>
+          <span className="text-xs text-[var(--text-muted)]">Device search</span>
           <button
             type="button"
             onClick={onClose}
