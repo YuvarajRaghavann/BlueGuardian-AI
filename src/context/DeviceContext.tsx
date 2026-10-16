@@ -80,8 +80,7 @@ function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
   // Approval is a connection gate, not evidence of maliciousness.
   return {
     ...scoredDevice,
-    approvalRequired: profile.connectionDecision === 'REQUIRE_APPROVAL'
-      || (policy.restrictWearablesToAudio && profile.wearableMode === 'RESTRICTED'),
+    approvalRequired: profile.connectionDecision === 'REQUIRE_APPROVAL',
   };
 }
 
@@ -530,8 +529,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         gattConnected: false,
         connectionHealth: 'UNAVAILABLE',
       });
-      const currentPolicy = loadSecurityPolicy(DEFAULT_SECURITY_POLICY);
-      if (previewDevice.blocked || (currentPolicy.requireConnectionApproval && previewDevice.approvalRequired)) {
+      if (previewDevice.blocked || previewDevice.approvalRequired) {
         dispatch({ type: 'ADD_DEVICE', payload: previewDevice });
         void localDatabase.saveDevice(previewDevice).catch((error: unknown) => {
           console.warn('Selected BLE device could not be saved locally.', error);
