@@ -323,7 +323,7 @@ export function SettingsPage() {
                 Version
               </p>
               <p className="mt-1 text-sm font-medium text-[var(--text)]">
-                0.1.0-demo
+                {modelMetadata.version}
               </p>
             </div>
 
