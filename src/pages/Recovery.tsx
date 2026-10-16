@@ -3,7 +3,7 @@ import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-r
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
 import { setOwnerToken as setActiveOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
-import { createFirebaseAccount, getFreshFirebaseIdToken, signInWithEmailPassword, signOutFirebase } from '../services/firebaseAuth';
+import { createFirebaseAccount, getFreshFirebaseIdToken, sendFirebasePasswordResetEmail, signInWithEmailPassword, signOutFirebase } from '../services/firebaseAuth';
 import { isNativeAndroidApp, listNativeAndroidPairedDevices, scanNativeAndroidBle, scanNativeAndroidClassic } from '../services/nativeBluetoothService';
 
 function formatDate(value?: string | null) {
@@ -103,6 +103,25 @@ export function Recovery() {
         setError(`Firebase sign-in succeeded, but the backend request failed: ${errorMessage(caught)}`);
         setNotice('Firebase accepted your account sign-in. The Render backend must also be deployed with Firebase token verification enabled.');
       }
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleFirebasePasswordReset = async () => {
+    if (!email.trim()) {
+      setError('Enter your email address first, then tap Forgot password.');
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const targetEmail = await sendFirebasePasswordResetEmail(email);
+      setNotice(`If a BlueGuardian Firebase account exists for ${targetEmail}, a password-reset email has been requested. Check Inbox and Spam, follow the link, then return here and sign in with the new password.`);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {
@@ -452,6 +471,14 @@ export function Recovery() {
           >
             Create account
           </button>
+          <button
+            type="button"
+            onClick={() => void handleFirebasePasswordReset()}
+            disabled={busy}
+            className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
+          >
+            Forgot password?
+          </button>
           {firebaseSignedInEmail && (
             <button
               type="button"
@@ -464,7 +491,7 @@ export function Recovery() {
           )}
         </div>
         <p id="recovery-auth-note" className="mt-3 text-xs text-[var(--text-muted)]">
-          BlueGuardian uses Firebase email/password authentication. ID tokens are verified by the backend and scoped to your Firebase user ID. Credentials and refresh tokens are held in application memory only, not browser storage. Reloading the app requires you to sign in again.
+          BlueGuardian uses Firebase email/password authentication. If you created this user in Firebase Console, sign in with the exact password you assigned there. Use Forgot password? to request a reset email. ID tokens are verified by the backend and scoped to your Firebase user ID; credentials and refresh tokens stay in memory only. Reloading requires sign-in again.
         </p>
         {firebaseSignedInEmail && (
           <p className="mt-2 text-xs text-[var(--text-muted)]">Firebase account: {firebaseSignedInEmail}</p>
