@@ -167,6 +167,8 @@ export function Devices() {
   // accidentally showing only sample data when the old Simulation Mode toggle
   // was left enabled from an earlier session.
   const handleScan = async () => {
+    setClassicResultsOpen(false);
+    setPairedResultsOpen(false);
     setSourceView('real');
     dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
     if (nativeAndroid) {
@@ -179,6 +181,8 @@ export function Devices() {
   };
 
   const handleClassicScan = async () => {
+    setNativeResultsOpen(false);
+    setPairedResultsOpen(false);
     setSourceView('real');
     dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
     setClassicScanStartedAt(Date.now());
@@ -188,6 +192,8 @@ export function Devices() {
   };
 
   const handleLoadPairedDevices = async () => {
+    setNativeResultsOpen(false);
+    setClassicResultsOpen(false);
     setSourceView('real');
     dispatch({ type: 'TOGGLE_SIMULATION', payload: false });
     setPairedResultsOpen(true);
@@ -288,7 +294,9 @@ export function Devices() {
             >
               <Bluetooth className={cn('h-4 w-4', isScanning && 'animate-spin')} />
               {isScanning
-                ? nativeAndroid ? 'Scanning nearby BLE advertisements…' : 'Opening Bluetooth chooser…'
+                ? nativeAndroid
+                  ? state.scan.transport === 'ANDROID_CLASSIC_SCAN' ? 'Classic discovery running…' : 'Scanning nearby BLE advertisements…'
+                  : 'Opening Bluetooth chooser…'
                 : nativeAndroid ? 'Scan nearby BLE devices' : pickerMode === 'known' ? 'Select named BLE device' : 'Select BLE device'}
             </button>
 
@@ -347,7 +355,7 @@ export function Devices() {
         <div className="flex items-start gap-3">
           <Bluetooth className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />
           <div className="min-w-0 flex-1 space-y-1">
-            <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Native Android BLE scanner' : 'Browser Bluetooth capability'}</p>
+            <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Native Android Bluetooth discovery' : 'Browser Bluetooth capability'}</p>
             <p className="text-xs leading-5 text-[var(--text-secondary)]">
               {nativeAndroid
                 ? 'The Android APK uses Android BluetoothLeScanner for a separate foreground BLE scan. Phase 4 also offers a separate classic Bluetooth discovery action and a system paired-device list. Classic discovery finds only currently discoverable classic devices; it does not find every BLE advertiser or connect to devices. Combined scanning is reserved for Phase 5.'
@@ -487,7 +495,9 @@ export function Devices() {
               <p className="text-sm font-medium text-[var(--text)]">
                 {state.scan.state === 'scanning' &&
                   (nativeAndroid
-                    ? `Scanning nearby BLE advertisements… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
+                    ? state.scan.transport === 'ANDROID_CLASSIC_SCAN'
+                      ? `Discovering classic Bluetooth devices… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
+                      : `Scanning nearby BLE advertisements… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
                     : `Opening Bluetooth chooser… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`)}
                 {state.scan.state === 'complete' &&
                   (state.scan.source === 'SIMULATED'
