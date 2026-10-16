@@ -130,7 +130,14 @@ export function DeviceCard({
                       : 'warning'
                   }
                 />
-                {(device.discoveryTransport === 'CLASSIC' || device.discoveryTransport === 'PAIRED') && (
+                {device.discoveryTransport === 'COMBINED' ? (
+                  <StatusBadge
+                    label={device.discoveryTransports?.includes('BLE') && device.discoveryTransports?.includes('CLASSIC')
+                      ? 'BLE + CLASSIC'
+                      : device.discoveryTransports?.[0] ?? 'COMBINED'}
+                    variant="info"
+                  />
+                ) : (device.discoveryTransport === 'CLASSIC' || device.discoveryTransport === 'PAIRED') && (
                   <StatusBadge label={device.paired ? 'PAIRED' : 'CLASSIC'} variant={device.paired ? 'success' : 'info'} />
                 )}
               </div>
