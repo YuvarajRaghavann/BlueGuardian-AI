@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
 import { getModelStatus, getCurrentModelMetadata, availableModels } from '../ml/mlService';
+import { getBleFloodModelStatus } from '../ml/bleFloodInference';
 import { useSecurity } from '../context/SecurityContext';
 import { api } from '../services/api';
 import { localDatabase } from '../services/localDatabase';
@@ -20,6 +21,7 @@ export function SettingsPage() {
   const modelStatus = getModelStatus();
   const modelMetadata = getCurrentModelMetadata();
   const models = availableModels();
+  const bleFloodModelStatus = getBleFloodModelStatus();
   const [backendHealth, setBackendHealth] = useState<{ status: string; database: string } | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [backendCheckVersion, setBackendCheckVersion] = useState(0);
@@ -387,6 +389,36 @@ export function SettingsPage() {
             </p>
           </div>
         </div>
+      </section>
+
+      {/* Research model readiness is separate from the existing snapshot heuristic. */}
+      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--text)]">Temporal BLE Flood Detector</h2>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-[var(--text-muted)]">
+              Separate research model for BLE advertising-flood patterns. It uses five-second native scan-observation windows, not a general detector for all Bluetooth attacks.
+            </p>
+          </div>
+          <StatusBadge
+            label={bleFloodModelStatus.status.toUpperCase()}
+            variant={bleFloodModelStatus.available ? 'success' : 'warning'}
+          />
+        </div>
+        <p className="mt-3 text-sm text-[var(--text-secondary)]">{bleFloodModelStatus.reason}</p>
+        <dl className="mt-4 grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-[var(--border)] p-3">
+            <dt className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Model</dt>
+            <dd className="mt-1 text-sm font-medium text-[var(--text)]">{bleFloodModelStatus.modelName}</dd>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] p-3">
+            <dt className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Version</dt>
+            <dd className="mt-1 text-sm font-medium text-[var(--text)]">{bleFloodModelStatus.modelVersion}</dd>
+          </div>
+        </dl>
+        <p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">
+          Safety gate: candidate or unreviewed weights are not executed. Even after activation, the detector raises an advisory only and never automatically blocks or trusts a device.
+        </p>
       </section>
 
       {/* Security policy */}
