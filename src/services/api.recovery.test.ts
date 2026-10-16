@@ -72,7 +72,7 @@ describe('recovery API client', () => {
       ['/api/actions', { Authorization: 'Bearer owner-session-token' }],
       ['/api/events', { Authorization: 'Bearer owner-session-token' }],
     ]);
-    expect(() => api.listThreats('')).toThrow('An owner access token is required for protected API operations.');
+    await expect(api.listThreats('')).rejects.toThrow('An owner access token is required for protected API operations.');
   });
 
   it('keeps benign assessments out of the threat list and uses only the latest assessment per device', async () => {
