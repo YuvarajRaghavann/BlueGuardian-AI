@@ -139,7 +139,7 @@ export function NativeClassicResultsModal({
                   : failed
                     ? pairedView
                       ? 'Grant Nearby Devices permission to BlueGuardian in Android Settings, then retry loading the paired-device list.'
-                      : 'Allow BlueGuardian's requested Bluetooth permissions in Android Settings, confirm Bluetooth is on, and try again. The app does not collect GPS coordinates from this permission.'
+                      : "Allow BlueGuardian's requested Bluetooth permissions in Android Settings, confirm Bluetooth is on, and try again. The app does not collect GPS coordinates from this permission."
                     : pairedView
                       ? 'Pair an eligible Bluetooth device in Android Settings, then refresh this list.'
                       : 'Make sure the device is discoverable or in pairing mode, then try again.'}

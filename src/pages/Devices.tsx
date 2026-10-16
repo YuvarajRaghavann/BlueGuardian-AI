@@ -240,7 +240,7 @@ export function Devices() {
                   )}
                 >
                   <Radio className={cn('h-4 w-4', state.scan.transport === 'ANDROID_CLASSIC_SCAN' && isScanning && 'animate-pulse')} />
-                  {state.scan.transport === 'ANDROID_CLASSIC_SCAN' && isScanning ? 'Discovering classic…' : 'Scan classic'}
+                  {state.scan.transport === 'ANDROID_CLASSIC_SCAN' && isScanning ? 'Searching nearby…' : 'Search nearby'}
                 </button>
                 <button
                   type="button"
