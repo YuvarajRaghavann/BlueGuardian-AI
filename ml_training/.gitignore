@@ -1,0 +1,8 @@
+data/
+processed/
+reports/
+*.pcap
+*.pcapng
+*.btsnoop
+*.pcap.gz
+*.zip
