@@ -218,7 +218,7 @@ export function Devices() {
               className="min-w-44 bg-transparent text-sm text-[var(--text)] outline-none disabled:opacity-60"
             >
               <option value="known">Recognizable names first</option>
-              <option value="all">All BLE devices, including unnamed</option>
+              <option value="all">All available devices</option>
             </select>
           </label>
 
@@ -238,10 +238,9 @@ export function Devices() {
               {isScanning
                 ? nativeAndroid
                   ? state.scan.transport === 'ANDROID_COMBINED_SCAN'
-                    ? (state.scan.scanStage === 'CLASSIC' ? 'Combined scan · classic discovery…' : 'Combined scan · BLE discovery…')
-                    : state.scan.transport === 'ANDROID_CLASSIC_SCAN' ? 'Classic discovery running…' : 'Scanning nearby BLE advertisements…'
-                  : 'Opening Bluetooth chooser…'
-                : nativeAndroid ? 'Find nearby devices' : pickerMode === 'known' ? 'Select named BLE device' : 'Select BLE device'}
+                    ? 'Searching nearby devices…'
+                  : 'Opening device picker…'
+                : nativeAndroid ? 'Find nearby devices' : pickerMode === 'known' ? 'Choose a named device' : 'Choose a device'}
             </button>
 
             {nativeAndroid && false && (
