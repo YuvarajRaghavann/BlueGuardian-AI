@@ -131,14 +131,18 @@ export function NativeClassicResultsModal({
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
               <Bluetooth className="h-8 w-8 text-[var(--text-muted)]" />
               <p className="text-sm font-medium text-[var(--text)]">
-                {loading ? 'Loading paired devices…' : scanning ? 'Waiting for discoverable devices' : pairedView ? 'No paired devices to show' : 'No classic devices found'}
+                {loading ? 'Loading paired devices…' : scanning ? 'Waiting for discoverable devices' : failed ? (pairedView ? 'Could not load paired devices' : 'Classic discovery could not start') : pairedView ? 'No paired devices to show' : 'No classic devices found'}
               </p>
               <p className="max-w-md text-xs leading-5 text-[var(--text-muted)]">
                 {loading
                   ? 'Android is checking its system paired-device registry. The permission prompt may need your approval.'
-                  : pairedView
-                  ? 'Pair an eligible Bluetooth device in Android Settings, then refresh this list.'
-                  : 'Make the other classic Bluetooth device discoverable or place it in pairing mode before retrying. Devices that only advertise over BLE belong in the separate BLE scan.'}
+                  : failed
+                    ? pairedView
+                      ? 'Grant Nearby Devices permission to BlueGuardian in Android Settings, then retry loading the paired-device list.'
+                      : 'Grant Nearby Devices and Location permission for classic discovery. On Android 12+, allow precise location if prompted. Confirm Bluetooth is enabled, wait for any system scan to finish, and retry. BlueGuardian does not collect GPS coordinates from this permission.'
+                    : pairedView
+                      ? 'Pair an eligible Bluetooth device in Android Settings, then refresh this list.'
+                      : 'Make the other classic Bluetooth device discoverable or place it in pairing mode before retrying. Devices that only advertise over BLE belong in the separate BLE scan.'}
               </p>
             </div>
           )}
