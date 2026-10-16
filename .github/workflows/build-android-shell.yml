@@ -1,4 +1,5 @@
 name: Build BlueGuardian Android Shell
+# Final UX reliability branch: build from the latest approval and navigation fixes.
 
 on:
   push:
