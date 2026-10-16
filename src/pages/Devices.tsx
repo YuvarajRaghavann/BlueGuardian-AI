@@ -320,7 +320,7 @@ export function Devices() {
           <div className="flex flex-col gap-2 sm:flex-row">
             <button
               type="button"
-              onClick={handleScan}
+              onClick={nativeAndroid ? handleCombinedScan : handleScan}
               disabled={isScanning}
               className={cn(
                 'inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-md)] px-4 text-sm font-semibold transition-all',
@@ -336,10 +336,10 @@ export function Devices() {
                     ? (state.scan.scanStage === 'CLASSIC' ? 'Combined scan · classic discovery…' : 'Combined scan · BLE discovery…')
                     : state.scan.transport === 'ANDROID_CLASSIC_SCAN' ? 'Classic discovery running…' : 'Scanning nearby BLE advertisements…'
                   : 'Opening Bluetooth chooser…'
-                : nativeAndroid ? 'Scan nearby BLE devices' : pickerMode === 'known' ? 'Select named BLE device' : 'Select BLE device'}
+                : nativeAndroid ? 'Find nearby devices' : pickerMode === 'known' ? 'Select named BLE device' : 'Select BLE device'}
             </button>
 
-            {nativeAndroid && (
+            {nativeAndroid && false && (
               <>
                 <button
                   type="button"
@@ -367,7 +367,7 @@ export function Devices() {
                   )}
                 >
                   <Bluetooth className={cn('h-4 w-4', state.scan.transport === 'ANDROID_COMBINED_SCAN' && isScanning && 'animate-pulse')} />
-                  {state.scan.transport === 'ANDROID_COMBINED_SCAN' && isScanning ? 'Combined scan running…' : 'Combined scan · Phase 5'}
+                  {state.scan.transport === 'ANDROID_COMBINED_SCAN' && isScanning ? 'Combined scan running…' : 'Find nearby devices'}
                 </button>
                 <button
                   type="button"
@@ -411,7 +411,7 @@ export function Devices() {
             <p className="text-sm font-semibold text-[var(--text)]">{nativeAndroid ? 'Native Android Bluetooth discovery' : 'Browser Bluetooth capability'}</p>
             <p className="text-xs leading-5 text-[var(--text-secondary)]">
               {nativeAndroid
-                ? 'The Android APK uses Android BluetoothLeScanner for a separate foreground BLE scan. Phase 4 also offers a separate classic Bluetooth discovery action and a system paired-device list. Classic discovery finds only currently discoverable classic devices; it does not find every BLE advertiser or connect to devices. Phase 5 adds a combined action that runs BLE then classic discovery sequentially and merges reports sharing the same normalized Android-reported address. It does not connect to devices.'
+                ? 'BlueGuardian searches nearby Bluetooth devices in one guided scan, combining BLE advertisements with discoverable classic devices. Results are merged when Android reports the same device address. Scanning does not connect to a device; pairing and connections remain under your control.'
                 : "The real scan path uses Chrome's Web Bluetooth chooser, which returns one selected BLE peripheral per click, not a complete nearby-device list. BlueGuardian then attempts GATT connection and service inspection. Stored real records may be from earlier selections; they are not proof that a device is currently nearby. The diagnostics help identify the stage where access failed. Simulated examples are kept separate and are no longer written into the physical-device database."}
             </p>
           </div>
