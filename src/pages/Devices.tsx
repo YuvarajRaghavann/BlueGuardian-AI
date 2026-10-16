@@ -8,7 +8,6 @@ import {
   Radar,
   ScanLine,
   ShieldCheck,
-  Sparkles,
   CircleHelp,
   CheckCircle2,
 } from 'lucide-react';
@@ -16,7 +15,6 @@ import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { DeviceCard } from '../components/DeviceCard';
 import { DeviceDetailModal } from '../components/DeviceDetailModal';
 import { EmptyState } from '../components/EmptyState';
-import { LoadingSpinner } from '../components/LoadingSpinner';
 import { useBluetoothDevices } from '../context/DeviceContext';
 import { cn } from '../utils/cn';
 import { needsManualApproval } from '../utils/connectionPolicy';
@@ -179,68 +177,49 @@ export function Devices() {
         </div>
       </section>
 
-      {/* Scan state */}
-      {state.scan.state !== 'idle' && (
-        <div
-          className={cn(
-            'flex flex-col gap-3 rounded-[var(--radius-md)] border p-4 sm:flex-row sm:items-center sm:justify-between',
-            state.scan.state === 'scanning' &&
-              'border-[var(--accent)]/30 bg-[var(--accent-soft)]',
-            state.scan.state === 'complete' &&
-              'border-[var(--success)]/30 bg-[var(--success)]/10',
-            (state.scan.state === 'unsupported' ||
-              state.scan.state === 'permission-denied') &&
-              'border-[var(--warning)]/30 bg-[var(--warning)]/10',
-            state.scan.state === 'error' &&
-              'border-[var(--danger)]/30 bg-[var(--danger)]/10'
-          )}
-        >
-          <div className="flex items-center gap-3">
-            {state.scan.state === 'scanning' && <LoadingSpinner size="sm" />}
-            {state.scan.state === 'complete' && (
-              <Bluetooth className="h-5 w-5 text-[var(--success)]" />
+      <AnimatePresence initial={false}>
+        {state.scan.state !== 'idle' && (
+          <motion.section
+            initial={reduceMotion ? false : { opacity: 0, y: 8, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: 'auto' }}
+            exit={reduceMotion ? undefined : { opacity: 0, y: -6, height: 0 }}
+            className={cn(
+              "overflow-hidden rounded-2xl border p-4",
+              state.scan.state === 'scanning' && "border-sky-300/20 bg-sky-300/[0.06]",
+              state.scan.state === 'complete' && "border-emerald-300/20 bg-emerald-300/[0.06]",
+              (state.scan.state === 'unsupported' || state.scan.state === 'permission-denied') && "border-amber-300/20 bg-amber-300/[0.06]",
+              state.scan.state === 'error' && "border-rose-300/20 bg-rose-300/[0.06]"
             )}
-            {state.scan.state === 'unsupported' && (
-              <Cpu className="h-5 w-5 text-[var(--warning)]" />
-            )}
-            {state.scan.state === 'permission-denied' && (
-              <AlertTriangle className="h-5 w-5 text-[var(--warning)]" />
-            )}
-            {state.scan.state === 'error' && (
-              <AlertTriangle className="h-5 w-5 text-[var(--danger)]" />
-            )}
-
-            <div>
-              <p className="text-sm font-medium text-[var(--text)]">
-                {state.scan.state === 'scanning' &&
-                  `Scanning for Bluetooth devices… ${(state.scan.elapsedMs / 1000).toFixed(1)}s`}
-                {state.scan.state === 'complete' &&
-                  `Scan complete · ${state.scan.devicesFound} device(s) found`}
-                {state.scan.state === 'unsupported' &&
-                  `Web Bluetooth not supported: ${state.scan.error}`}
-                {state.scan.state === 'permission-denied' &&
-                  `Permission denied: ${state.scan.error}`}
-                {state.scan.state === 'error' &&
-                  `Scan failed: ${state.scan.error}`}
-              </p>
+          >
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-black/15">
+                {state.scan.state === 'scanning' && <Radar className="h-4 w-4 animate-spin text-sky-200" />}
+                {state.scan.state === 'complete' && <CheckCircle2 className="h-4 w-4 text-emerald-200" />}
+                {(state.scan.state === 'unsupported' || state.scan.state === 'permission-denied') && <CircleHelp className="h-4 w-4 text-amber-200" />}
+                {state.scan.state === 'error' && <AlertTriangle className="h-4 w-4 text-rose-200" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-white">
+                  {state.scan.state === 'scanning' && 'Looking for nearby devices'}
+                  {state.scan.state === 'complete' && `Search complete · ${state.scan.devicesFound} device(s) found`}
+                  {state.scan.state === 'unsupported' && 'This browser cannot scan Bluetooth'}
+                  {state.scan.state === 'permission-denied' && 'Bluetooth permission was not granted'}
+                  {state.scan.state === 'error' && 'The scan could not be completed'}
+                </p>
+                <p className="mt-1 break-words text-xs leading-5 text-[var(--text-secondary)]">
+                  {state.scan.state === 'scanning' && `Keep this screen open while discovery runs · ${(state.scan.elapsedMs / 1000).toFixed(1)}s`}
+                  {(state.scan.state === 'unsupported' || state.scan.state === 'permission-denied' || state.scan.state === 'error') && state.scan.error}
+                  {state.scan.state === 'complete' && (state.scan.devicesFound > 0 ? 'Choose any device below to review its details and security signals.' : 'No devices were returned. Try again or check Bluetooth permissions and device visibility.')}
+                </p>
+              </div>
+              <button type="button" onClick={() => dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'idle' } })} aria-label="Dismiss scan status" className="rounded-lg p-1.5 text-[var(--text-muted)] transition hover:bg-white/[0.06] hover:text-white">
+                <span aria-hidden="true">×</span>
+              </button>
             </div>
-          </div>
-
-          {state.scan.state === 'complete' && (
-            <button
-              onClick={() =>
-                dispatch({
-                  type: 'SET_SCAN_STATE',
-                  payload: { state: 'idle' },
-                })
-              }
-              className="text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text)]"
-            >
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
+            {state.scan.state === 'scanning' && <div className="mt-4 h-1 overflow-hidden rounded-full bg-slate-700/60"><div className="discovery-progress h-full w-2/5 rounded-full bg-gradient-to-r from-sky-400 to-blue-400" /></div>}
+          </motion.section>
+        )}
+      </AnimatePresence>
 
       {/* Controls */}
       <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4">
