@@ -123,7 +123,7 @@ export function DeviceCard({
                 </h3>
 
                 <StatusBadge
-                  label={device.discoverySource}
+                  label={device.discoverySource === 'REAL' ? 'Nearby' : 'Sample'}
                   variant={
                     device.discoverySource === 'REAL'
                       ? 'info'
@@ -133,12 +133,12 @@ export function DeviceCard({
                 {device.discoveryTransport === 'COMBINED' ? (
                   <StatusBadge
                     label={device.discoveryTransports?.includes('BLE') && device.discoveryTransports?.includes('CLASSIC')
-                      ? 'BLE + CLASSIC'
-                      : device.discoveryTransports?.[0] ?? 'COMBINED'}
+                      ? 'Dual signal'
+                      : device.discoveryTransports?.includes('CLASSIC') ? 'Classic' : 'Bluetooth'}
                     variant="info"
                   />
                 ) : (device.discoveryTransport === 'CLASSIC' || device.discoveryTransport === 'PAIRED') && (
-                  <StatusBadge label={device.paired ? 'PAIRED' : 'CLASSIC'} variant={device.paired ? 'success' : 'info'} />
+                  <StatusBadge label={device.paired ? 'Paired' : 'Nearby'} variant={device.paired ? 'success' : 'info'} />
                 )}
               </div>
 
