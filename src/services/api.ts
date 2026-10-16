@@ -109,7 +109,9 @@ function fromApiDevice(record: Record<string, any>): BluetoothDevice {
     trusted: record.trusted ?? false,
     blocked: record.blocked ?? false,
     trustScore: record.trustScore ?? 0,
-    riskLevel: validRiskLevels.includes(record.riskLevel) ? record.riskLevel : 'high',
+    // Missing/invalid metadata means review is needed, not evidence of high threat.
+    // Connection policy independently requires approval for untrusted devices.
+    riskLevel: validRiskLevels.includes(record.riskLevel) ? record.riskLevel : 'medium',
     connectionStatus: validConnectionStatuses.includes(record.connectionStatus)
       ? record.connectionStatus
       : record.gattConnected ? 'connected' : 'unknown',
