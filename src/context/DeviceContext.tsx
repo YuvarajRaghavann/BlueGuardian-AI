@@ -10,7 +10,7 @@ import { applySecurityActionToDevice } from '../services/securityActionService';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
 import { API_BASE_CHANGED_EVENT } from '../services/apiBase';
-import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeBleWindowFeatures, type NativeClassicObservation } from '../services/nativeBluetoothService';
+import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
 import { processBleObservationWindow } from '../ml/bleFloodMonitor';
 
 export interface DeviceState {
