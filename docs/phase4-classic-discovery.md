@@ -43,7 +43,7 @@ After the APK exists, physical-device acceptance should confirm:
 4. Android's paired-device registry loads in a separate view.
 5. Permission denial, Bluetooth-off/not-ready state, empty results, and an existing discovery session report distinct outcomes. A startup failure must never be rendered as a successful empty scan.
 6. If a system discovery session races with startup, BlueGuardian must not cancel that session unless its own start call succeeded.
-6. Discovered/paired devices remain marked unconnected unless a later approved phase implements and verifies connection handling.
+7. Discovered/paired devices remain marked unconnected unless a later approved phase implements and verifies connection handling.
 
 Passing CI proves build integration, not real-radio hardware behavior. Phase 5 should not begin until Phase 4's source/build acceptance passes and the classic discovery behavior has been reviewed.
 
