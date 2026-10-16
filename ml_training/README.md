@@ -36,20 +36,24 @@ python -m venv .venv-ml
 python -m pip install -r ml_training/requirements.txt
 ```
 
-## Data manifest
+## Data manifest and real capture extraction
 
-Copy `ml_training/manifest.example.csv` to `ml_training/manifest.csv` and replace each path and label using the dataset's own capture documentation. Allowed labels are exactly `benign` and `ble_flood`. Each independently captured session must have a unique `session_id`. Do not give windows from the same capture/session different IDs to make evaluation look better.
+The public dataset's PCAPNGs use the Nordic nRF Sniffer format. Scapy reads these files as raw payloads and does not expose the advertisement fields, so use Wireshark's `tshark` dissector. The CI training workflow installs `tshark` and runs the entire real-data pipeline via `run_public_ble_training.py`.
 
 ```bash
-python ml_training/extract_pcap_windows.py \
-  --manifest ml_training/manifest.csv \
-  --output ml_training/processed/ble_windows.csv \
-  --window-seconds 5
+sudo apt-get update
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y tshark
+python -m pip install -r ml_training/requirements.txt
+python ml_training/run_public_ble_training.py
 ```
 
-The extractor skips non-advertising packets and writes one aggregate row per non-empty time window. Android feature windows are based on scanner callbacks, not guaranteed raw radio packets; this parity limitation must be checked before model promotion. It does not infer labels from a filename; the manifest is the explicit source of ground truth.
+The workflow downloads the public dataset into temporary runner storage, reads the nested capture ZIP, extracts only the seven documented captures into a temporary directory, filters advertising frames with `btle.advertising_address`, and reads RSSI through `nordic_ble.rssi`. It emits aggregate five-second windows and then invokes the trainer. No raw captures are committed to Git or uploaded as artifacts. Capture-to-label and capture-to-session mappings are explicit in `run_public_ble_training.py` and recorded in the report provenance.
+
+For manually prepared PCAPs compatible with Scapy's standard BLE dissectors, `extract_pcap_windows.py` remains available. The actual Mendeley Nordic capture pipeline uses `extract_tshark_windows.py`.
 
 ## Train and evaluate
+
+For a pre-extracted feature CSV, run the trainer independently:
 
 ```bash
 python ml_training/train_ble_flood_model.py \
