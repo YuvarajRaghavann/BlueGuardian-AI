@@ -177,15 +177,14 @@ def main() -> int:
                 pcap_path = raw_dir / basename
                 copy_zip_member(captures, members[basename], pcap_path)
                 print(f"Extracting features: {basename} label={label} session={session_id}", flush=True)
-                capture_rows = extract_capture(
+                capture_rows = extract_windows(
                     pcap_path,
                     label=label,
                     session_id=session_id,
                     window_seconds=WINDOW_SECONDS,
-                    max_packets=0,
                 )
                 for row in capture_rows:
-                    # Do not preserve runner-specific absolute paths in the processed dataset.
+                    # Keep only capture basename, never runner-specific temporary paths.
                     row["capture_path"] = basename
                 rows.extend(capture_rows)
                 manifest_details.append({
