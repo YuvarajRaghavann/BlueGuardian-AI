@@ -27,7 +27,7 @@ export function errorHandler(err: any, req: Request, res: Response, _next: NextF
   if (res.headersSent) return;
 
   // JSON body-parser errors should be understandable to the frontend, not reported as server failures.
-  if (err?.type === 'entity.parse.failed' || err instanceof SyntaxError && err?.status === 400) {
+  if (err?.type === 'entity.parse.failed' || (err instanceof SyntaxError && (err as SyntaxError & { status?: number }).status === 400)) {
     return res.status(400).json({ error: 'Malformed JSON request body.' });
   }
   if (err?.type === 'entity.too.large') {
