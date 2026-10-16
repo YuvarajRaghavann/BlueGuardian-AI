@@ -314,7 +314,7 @@ export function SettingsPage() {
                 Model
               </p>
               <p className="mt-1 text-sm font-medium text-[var(--text)]">
-                BlueGuardian Development Classifier
+                {modelMetadata.name}
               </p>
             </div>
 
