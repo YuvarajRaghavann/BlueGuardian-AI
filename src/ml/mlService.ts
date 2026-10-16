@@ -81,3 +81,13 @@ export function classifyDevices(devices: BluetoothDevice[]): MLPrediction[] {
 export function availableModels(): string[] {
   return listModels();
 }
+
+/** Return the concrete model metadata rather than a UI hard-coded label/version. */
+export function getCurrentModelMetadata(): { key: string; name: string; version: string } {
+  const model = getModel(currentModelKey);
+  return {
+    key: currentModelKey,
+    name: model?.name ?? 'Unavailable',
+    version: model?.version ?? 'unknown',
+  };
+}
