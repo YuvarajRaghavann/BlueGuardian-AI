@@ -173,9 +173,14 @@ export function Dashboard() {
   return (
     <div className="relative space-y-6 sm:space-y-7">
       {/* Page heading */}
-      <section className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] sm:p-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
+      <section className="guardian-hero relative isolate overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_18px_55px_rgba(0,0,0,0.28)] sm:p-7 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+        <div aria-hidden="true" className="guardian-hero-orbit pointer-events-none absolute -right-10 -top-24 h-64 w-64 rounded-full border border-[var(--accent)]/15">
+          <div className="absolute inset-5 rounded-full border border-[var(--accent)]/10" />
+          <div className="absolute inset-12 rounded-full border border-[var(--accent)]/10" />
+          <div className="absolute right-10 top-12 h-3 w-3 rounded-full bg-[var(--accent)] shadow-[0_0_28px_var(--accent)]" />
+        </div>
+        <div className="relative z-10">
+          <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">
             <Activity className="h-3.5 w-3.5 text-[var(--accent)]" />
             Bluetooth observations
           </div>
@@ -184,13 +189,16 @@ export function Dashboard() {
             Bluetooth security overview
           </h1>
 
-          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-            Review browser-selected device observations, inspect development risk assessments,
-            and manage owner recovery cases.
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+            Monitor nearby Bluetooth observations, review risk signals, and make deliberate trust decisions from one security workspace.
           </p>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="guardian-status-chip"><span className="guardian-status-dot" /> User-initiated monitoring</span>
+            <span className="guardian-status-chip"><ShieldCheck className="h-3.5 w-3.5 text-[var(--accent)]" /> Approval-first protection</span>
+          </div>
         </div>
 
-        <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+        <div className="relative z-10 flex shrink-0 flex-col gap-2 sm:flex-row">
           <button
             type="button"
             onClick={() => void scanRealDevices()}
