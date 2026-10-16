@@ -1,4 +1,4 @@
-import type { BluetoothDevice } from '../types';
+import type { BluetoothDevice, SecurityPolicy } from '../types';
 
 export type ConnectionDecision = 'ALLOW' | 'REQUIRE_APPROVAL' | 'BLOCK';
 export type WearableMode = 'AUDIO_ONLY' | 'RESTRICTED' | 'BLOCKED' | 'FULL_ACCESS';
@@ -22,11 +22,11 @@ export function evaluateRssiRisk(rssi?: number): RssiRisk {
   return 'NORMAL';
 }
 
-export function evaluateWearableProfile(device: BluetoothDevice): WearableMode {
+export function evaluateWearableProfile(device: BluetoothDevice, restrictWearablesToAudio = true): WearableMode {
   if (device.blocked) return 'BLOCKED';
 
   const wearableTypes = new Set<BluetoothDevice['type']>(['headphones', 'earbuds', 'smartwatch']);
-  if (!wearableTypes.has(device.type)) return 'FULL_ACCESS';
+  if (!wearableTypes.has(device.type) || !restrictWearablesToAudio) return 'FULL_ACCESS';
 
   if (!device.trusted || !device.isKnown || device.trustScore < 60) {
     return 'RESTRICTED';
@@ -38,20 +38,24 @@ export function evaluateWearableProfile(device: BluetoothDevice): WearableMode {
 export function needsManualApproval(
   device: BluetoothDevice,
   context: ConnectionRequestContext = {},
+  policy: Partial<SecurityPolicy> = {},
 ): boolean {
   if (device.blocked) return false;
-  const decision = evaluateBluetoothConnection(device, context);
+  const decision = evaluateBluetoothConnection(device, context, policy);
   return decision === 'REQUIRE_APPROVAL' || Boolean(device.approvalRequired);
 }
 
 export function evaluateBluetoothConnection(
   device: BluetoothDevice,
   context: ConnectionRequestContext = {},
+  policy: Partial<SecurityPolicy> = {},
 ): ConnectionDecision {
   if (device.blocked) return 'BLOCK';
 
   const suspiciousName = suspiciousNamePattern.test(device.name);
-  const rssiRisk = evaluateRssiRisk(context.rssi ?? device.rssi);
+  const rssiRisk = policy.enableRssiGuard === false
+    ? 'NORMAL'
+    : evaluateRssiRisk(context.rssi ?? device.rssi);
   const fastPairFlow = Boolean(context.isFastPair || context.isQuickConnect);
 
   // Derived risk and a single strong RSSI sample are review signals, not a verified block.
@@ -63,11 +67,11 @@ export function evaluateBluetoothConnection(
     return 'ALLOW';
   }
 
-  if (fastPairFlow && (!device.trusted || !device.isKnown)) {
+  if (fastPairFlow && policy.enforceFastPairApproval !== false && (!device.trusted || !device.isKnown)) {
     return 'REQUIRE_APPROVAL';
   }
 
-  if (!device.isKnown || device.trustScore < 60 || suspiciousName || device.riskLevel === 'medium' || rssiRisk === 'WARNING') {
+  if (policy.requireConnectionApproval !== false && (!device.isKnown || device.trustScore < 60 || suspiciousName || device.riskLevel === 'medium' || rssiRisk === 'WARNING')) {
     return 'REQUIRE_APPROVAL';
   }
 
@@ -78,16 +82,18 @@ export function evaluateFileTransferSafety(
   device: BluetoothDevice,
   fileName = '',
   context: ConnectionRequestContext = {},
+  policy: Partial<SecurityPolicy> = {},
 ): ConnectionDecision {
   if (device.blocked) return 'BLOCK';
 
   const suspiciousFile = suspiciousFilePattern.test(fileName);
-  if (suspiciousFile) {
+  if (suspiciousFile && policy.blockUnknownFileTransfers !== false) {
     if (!device.trusted || !device.isKnown) return 'BLOCK';
     return 'REQUIRE_APPROVAL';
   }
+  if (suspiciousFile) return 'REQUIRE_APPROVAL';
 
-  const connectionDecision = evaluateBluetoothConnection(device, context);
+  const connectionDecision = evaluateBluetoothConnection(device, context, policy);
   if (connectionDecision === 'BLOCK') return 'BLOCK';
   if (connectionDecision === 'REQUIRE_APPROVAL') return 'REQUIRE_APPROVAL';
 
@@ -97,6 +103,7 @@ export function evaluateFileTransferSafety(
 export function evaluateSecureBluetoothProfile(
   device: BluetoothDevice,
   context: ConnectionRequestContext = {},
+  policy: Partial<SecurityPolicy> = {},
 ): {
   connectionDecision: ConnectionDecision;
   fileTransferDecision: ConnectionDecision;
@@ -104,13 +111,13 @@ export function evaluateSecureBluetoothProfile(
   rssiRisk: RssiRisk;
   approvalRequired: boolean;
 } {
-  const connectionDecision = evaluateBluetoothConnection(device, context);
+  const connectionDecision = evaluateBluetoothConnection(device, context, policy);
 
   return {
     connectionDecision,
-    fileTransferDecision: evaluateFileTransferSafety(device, context.fileName ?? '', context),
-    wearableMode: evaluateWearableProfile(device),
-    rssiRisk: evaluateRssiRisk(context.rssi ?? device.rssi),
-    approvalRequired: needsManualApproval(device, context),
+    fileTransferDecision: evaluateFileTransferSafety(device, context.fileName ?? '', context, policy),
+    wearableMode: evaluateWearableProfile(device, policy.restrictWearablesToAudio !== false),
+    rssiRisk: policy.enableRssiGuard === false ? 'NORMAL' : evaluateRssiRisk(context.rssi ?? device.rssi),
+    approvalRequired: needsManualApproval(device, context, policy),
   };
 }

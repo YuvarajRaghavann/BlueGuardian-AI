@@ -81,6 +81,25 @@ describe('secure connection policy', () => {
     expect(evaluateBluetoothConnection(nearby, { rssi: -20 })).toBe('REQUIRE_APPROVAL');
   });
 
+
+  it('respects the app-level connection approval switch for an unknown non-critical device', () => {
+    const unknown: BluetoothDevice = {
+      ...baseDevice,
+      id: 'conn-policy-off',
+      trusted: false,
+      isKnown: false,
+      trustScore: 65,
+      riskLevel: 'low',
+    };
+    expect(evaluateBluetoothConnection(unknown)).toBe('REQUIRE_APPROVAL');
+    expect(evaluateBluetoothConnection(unknown, {}, { requireConnectionApproval: false })).toBe('ALLOW');
+  });
+
+  it('keeps explicit blocks enforced even when connection approval is disabled', () => {
+    const blocked = { ...baseDevice, blocked: true };
+    expect(evaluateBluetoothConnection(blocked, {}, { requireConnectionApproval: false })).toBe('BLOCK');
+  });
+
   it('prevents unsafe file transfer from an untrusted device', () => {
     expect(evaluateFileTransferSafety(baseDevice, 'notes.txt')).toBe('ALLOW');
     expect(evaluateFileTransferSafety({ ...baseDevice, trusted: false, isKnown: false, riskLevel: 'medium' }, 'payload.exe')).toBe('BLOCK');
