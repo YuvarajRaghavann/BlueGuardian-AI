@@ -647,7 +647,7 @@ export function Dashboard() {
               </div>
 
               <div className="grid grid-cols-3 gap-2 border-t border-[var(--border)] pt-4">
-                <Metric value={mlClassified} label="Classified" />
+                <Metric value={mlClassified} label="AI alerts" />
                 <Metric value={highRiskML} label="High risk" />
                 <Metric value={mlClassified > 0 ? `${avgMLConfidence}%` : '—'} label="Confidence" />
               </div>
