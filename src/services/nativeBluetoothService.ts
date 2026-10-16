@@ -121,18 +121,24 @@ export async function scanNativeAndroidBle(
   } finally {
     if (safetyTimeout) clearTimeout(safetyTimeout);
     if (startupTimeout) clearTimeout(startupTimeout);
+
+    // Cleanup is best-effort and deliberately non-blocking. If the native
+    // bridge itself is unresponsive, awaiting stop/remove here would hide the
+    // startup timeout and leave the app stuck in its scanning state anyway.
     try {
-      await nativeBluetooth.stopBleScan();
+      void nativeBluetooth.stopBleScan().catch(() => undefined);
     } catch {
-      // The scan may already have stopped due to a permission error or lifecycle change.
+      // Ignore synchronous bridge errors during cleanup.
     }
     try {
-      await deviceListener?.remove();
+      const removal = deviceListener?.remove();
+      if (removal) void removal.catch(() => undefined);
     } catch {
       // Cleanup must not mask the scan result.
     }
     try {
-      await stateListener?.remove();
+      const removal = stateListener?.remove();
+      if (removal) void removal.catch(() => undefined);
     } catch {
       // Cleanup must not mask the scan result.
     }
