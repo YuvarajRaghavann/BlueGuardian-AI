@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, type ReactNode } from 'react';
 import {
   Bluetooth,
   Search,
@@ -343,7 +343,7 @@ export function Devices() {
 }
 
 
-function QuickStat({ label, value, icon }: { label: string; value: number; icon: React.ReactNode }) {
+function QuickStat({ label, value, icon }: { label: string; value: number; icon: ReactNode }) {
   return (
     <div className="flex min-w-0 items-center gap-2.5 rounded-xl border border-white/[0.07] bg-black/10 p-3 sm:gap-3 sm:px-4">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/[0.06] text-sky-200">{icon}</span>
