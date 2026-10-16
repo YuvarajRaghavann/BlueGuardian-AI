@@ -279,7 +279,7 @@ export async function scanNativeAndroidClassic(
   }
 }
 
-/** Returns the Android system's bonded classic devices; this is not a live scan. */
+/** Returns Android's system bonded-device registry; this is not a live scan or connection check. */
 export async function listNativeAndroidPairedDevices(): Promise<NativeClassicObservation[]> {
   if (!isNativeAndroidApp()) {
     throw new Error('Paired Bluetooth devices are only available inside the BlueGuardian Android APK.');
