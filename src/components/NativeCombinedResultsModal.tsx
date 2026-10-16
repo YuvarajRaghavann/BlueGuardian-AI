@@ -109,7 +109,7 @@ export function NativeCombinedResultsModal({
             <ul className="space-y-2">
               {devices.map((device) => {
                 const label = transportLabel(device);
-                const dualObserved = label === 'BLE + CLASSIC';
+                const dualObserved = label === 'Dual signal';
                 return (
                   <li key={device.id}>
                     <button
@@ -118,7 +118,7 @@ export function NativeCombinedResultsModal({
                       className="flex w-full items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-left transition hover:border-[var(--accent)]/40 hover:bg-[var(--surface-hover)]"
                     >
                       <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--surface-raised)] text-[var(--accent)]">
-                        {dualObserved ? <Bluetooth className="h-5 w-5" /> : label === 'CLASSIC' ? <Radio className="h-5 w-5" /> : <Bluetooth className="h-5 w-5" />}
+                        {dualObserved ? <Bluetooth className="h-5 w-5" /> : label === 'Nearby' ? <Radio className="h-5 w-5" /> : <Bluetooth className="h-5 w-5" />}
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-[var(--text)]">{device.name || 'Unknown Bluetooth device'}</p>
