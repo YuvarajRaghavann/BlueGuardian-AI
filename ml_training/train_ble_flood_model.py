@@ -55,6 +55,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--report-output", required=True, type=Path, help="Output JSON evaluation report")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--test-size", type=float, default=0.25)
+    parser.add_argument(
+        "--split-profile",
+        choices=["random-session", "paired-capture-family"],
+        default="random-session",
+        help=(
+            "random-session evaluates a random group split and may hold out an entire attack profile; "
+            "paired-capture-family trains on one capture from each paired attack setup and tests on "
+            "the other capture, keeping whole PCAP sessions disjoint."
+        ),
+    )
     parser.add_argument("--minimum-windows-per-class", type=int, default=10)
     parser.add_argument("--minimum-sessions-per-class", type=int, default=2)
     parser.add_argument("--decision-threshold", type=float, default=0.5)
@@ -97,6 +107,51 @@ def find_group_split(
         "Add more independent benign and BLE-flood captures; do not split adjacent windows "
         "from one capture across train and test."
     )
+
+
+PAIRED_TRAIN_SESSIONS = {
+    "benign_static_1hr",
+    "spam_randomized_6hr_01",
+    "spam_static_mac_100ms_01",
+    "spam_static_mac_20ms",
+}
+PAIRED_TEST_SESSIONS = {
+    "benign_extended_12hr",
+    "spam_randomized_6hr_02",
+    "spam_static_mac_100ms_02",
+}
+
+
+def find_paired_capture_split(
+    groups: pd.Series,
+    y: pd.Series,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Predeclared split: whole captures stay separate, paired capture profiles span train/test.
+
+    This is a scenario-representative development split, not an unseen-attack-family test:
+    randomized-spam and 100ms static-MAC profiles each have one capture on each side.
+    """
+    observed_groups = set(groups.astype(str).unique())
+    expected_groups = PAIRED_TRAIN_SESSIONS | PAIRED_TEST_SESSIONS
+    missing = sorted(expected_groups - observed_groups)
+    unexpected = sorted(observed_groups - expected_groups)
+    if missing or unexpected:
+        raise ValueError(
+            f"paired-capture-family split requires the known seven-session manifest; "
+            f"missing={missing}, unexpected={unexpected}. Use random-session for a different manifest."
+        )
+
+    train_mask = groups.isin(PAIRED_TRAIN_SESSIONS).to_numpy()
+    test_mask = groups.isin(PAIRED_TEST_SESSIONS).to_numpy()
+    train_idx = np.flatnonzero(train_mask)
+    test_idx = np.flatnonzero(test_mask)
+    if (
+        set(y.iloc[train_idx].unique()) != set(LABELS)
+        or set(y.iloc[test_idx].unique()) != set(LABELS)
+        or not set(groups.iloc[train_idx]).isdisjoint(set(groups.iloc[test_idx]))
+    ):
+        raise ValueError("paired-capture-family split failed label coverage or group-isolation checks.")
+    return train_idx, test_idx
 
 
 def imputation_values(train: pd.DataFrame) -> dict[str, float]:
@@ -202,9 +257,12 @@ def main() -> int:
     groups = frame["session_id"]
     raw_X = frame[FEATURE_COLUMNS]
     y = frame["label"]
-    train_idx, test_idx = find_group_split(
-        raw_X, y, groups, args.test_size, args.seed
-    )
+    if args.split_profile == "paired-capture-family":
+        train_idx, test_idx = find_paired_capture_split(groups, y)
+    else:
+        train_idx, test_idx = find_group_split(
+            raw_X, y, groups, args.test_size, args.seed
+        )
 
     train_frame = raw_X.iloc[train_idx]
     test_frame = raw_X.iloc[test_idx]
@@ -274,6 +332,14 @@ def main() -> int:
         "dataset_csv": str(args.data),
         "sklearn_version": sklearn.__version__,
         "seed": args.seed,
+        "split_profile": args.split_profile,
+        "test_protocol": (
+            "Whole capture sessions are disjoint. Each paired attack profile is represented in training "
+            "and an independent capture of that profile is held out; this evaluates session-to-session "
+            "generalization, not generalization to an unseen attack family."
+            if args.split_profile == "paired-capture-family"
+            else "Random whole-session holdout; an attack profile may be absent from training and present in test."
+        ),
         "feature_names": FEATURE_COLUMNS,
         "rows_by_class": counts,
         "sessions_by_class": sessions_by_class,
@@ -316,6 +382,7 @@ def main() -> int:
             "bleFloodF1": metrics["ble_flood_f1"],
             "benignFalsePositiveRate": metrics["benign_false_positive_rate"],
             "sessionIndependentHoldout": True,
+            "splitProfile": args.split_profile,
             "preliminaryGatesPassed": promotion_candidate,
         },
         "deploymentStatus": "disabled_until_explicit_review",
@@ -331,6 +398,7 @@ def main() -> int:
         "metrics": metrics,
         "preliminary_gates_passed": promotion_candidate,
         "deployment_status": "disabled_until_explicit_review",
+        "split_profile": args.split_profile,
         "train_sessions": report["train_sessions"],
         "test_sessions": report["test_sessions"],
     }, indent=2))
