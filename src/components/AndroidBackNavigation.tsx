@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 
 /**
  * Bridges Android's system/predictive Back gesture to React Router.
- * Native code exits the Activity only when the dashboard is the current route.
+ * A direct-opened route falls back to the dashboard instead of leaving the app.
  */
 export function AndroidBackNavigation() {
   const navigate = useNavigate();
@@ -11,8 +11,15 @@ export function AndroidBackNavigation() {
 
   useEffect(() => {
     const handleAndroidBack = () => {
-      if (location.pathname !== '/dashboard' && location.pathname !== '/') {
+      if (location.pathname === '/dashboard' || location.pathname === '/') return;
+
+      // React Router stores its stack index in the browser history state.
+      // Do not let a direct-opened deep link navigate outside the application.
+      const historyIndex = window.history.state?.idx;
+      if (typeof historyIndex === 'number' && historyIndex > 0) {
         navigate(-1);
+      } else {
+        navigate('/dashboard', { replace: true });
       }
     };
 
