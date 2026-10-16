@@ -6,8 +6,12 @@ import { getFreshFirebaseIdToken, hasFirebaseSession } from './firebaseAuth';
 const BASE = () => getApiBaseConfig().baseUrl;
 
 async function withFreshFirebaseAuthorization(options: RequestInit): Promise<RequestInit> {
+  // Preserve the original request options for unauthenticated health checks and
+  // legacy development tests. Only normalize headers when a Firebase session exists.
+  if (!hasFirebaseSession()) return options;
+
   const headers = new Headers(options.headers);
-  if (headers.has('Authorization') && hasFirebaseSession()) {
+  if (headers.has('Authorization')) {
     const token = await getFreshFirebaseIdToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
   }
