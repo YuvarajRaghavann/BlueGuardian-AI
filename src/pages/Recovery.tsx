@@ -529,15 +529,15 @@ export function Recovery() {
           Owner recovery
         </div>
         <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">Device Recovery</h1>
-        <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-          Register and manage recovery cases through the authenticated backend. Android uses foreground native BLE/classic discovery with system permissions. Browser builds use Web Bluetooth when available; neither mode provides continuous background community scanning.
+        <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
+          Protect your devices and manage recovery cases in one place. Register a device, mark it lost, review sightings, and confirm when it is safely back with you.
         </p>
       </header>
 
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-        <div className="mb-4 flex items-center gap-2">
-          <LockKeyhole className="h-4 w-4 text-[var(--accent)]" />
-          <h2 className="text-sm font-semibold text-[var(--text)]">Backend owner access</h2>
+        <div className="mb-4 flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] text-[var(--accent)]"><LockKeyhole className="h-5 w-5" /></div>
+          <div><h2 className="text-base font-semibold text-[var(--text)]">Your secure account</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">Sign in to manage only your own registered devices.</p></div>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="block text-sm text-[var(--text-secondary)]">
@@ -620,9 +620,9 @@ export function Recovery() {
 
       <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Register a Bluetooth device</h2>
+          <h2 className="text-lg font-semibold text-[var(--text)]">Add a device to recovery</h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Android uses BlueGuardian's native foreground Bluetooth scanner and paired-device list. Browser builds use the browser BLE picker. Neither mode collects GPS coordinates or continuously scans in the background.
+            Find a nearby Bluetooth device to register it for recovery. Location sharing is optional and only used when you explicitly enable it.
           </p>
           <button
             type="button"
@@ -630,7 +630,7 @@ export function Recovery() {
             disabled={busy}
             className="mt-4 min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
           >
-            {busy ? 'Searching Bluetooth…' : isNativeAndroidApp() ? 'Find native Android devices' : 'Select real device'}
+            {busy ? 'Searching…' : isNativeAndroidApp() ? 'Find nearby devices' : 'Choose a device'}
           </button>
           {isNativeAndroidApp() && availableNativeDevices.length > 0 && (
             <div className="mt-4 space-y-2" aria-label="Available Android Bluetooth devices">
@@ -732,7 +732,7 @@ export function Recovery() {
           <input type="checkbox" checked={communityShareLocation} onChange={event => setCommunityShareLocation(event.target.checked)} disabled={busy} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
           <span>
             <span className="block text-sm font-medium text-[var(--text)]">Share this phone's location with matched owners (optional)</span>
-            <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">GPS is requested only after the scan and only when this box is checked. Without it, reports contain no location.</span>
+            <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">Location is optional. When switched off, sightings are sent without GPS coordinates.</span>
           </span>
         </label>
         <button type="button" onClick={() => void scanForCommunitySightings()} disabled={busy || !ownerToken.trim()} className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50">
