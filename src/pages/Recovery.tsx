@@ -269,8 +269,8 @@ export function Recovery() {
         type: 'unknown',
         discoverySource: 'REAL',
         recoveryState: 'lost',
-        ...(selectedBluetoothDevice.name && (selectedBluetoothDevice.uuids?.length ?? 0) > 0
-          ? { recoveryFingerprint: { name: selectedBluetoothDevice.name, serviceUuids: selectedBluetoothDevice.uuids } }
+        ...(selectedBluetoothDevice.name
+          ? { recoveryFingerprint: { name: selectedBluetoothDevice.name, serviceUuids: selectedBluetoothDevice.uuids ?? [] } }
           : {}),
       });
       setSelectedDevice(registered);
@@ -279,12 +279,14 @@ export function Recovery() {
       setSelectedBluetoothDevice(null);
       setRecoveryInfo(null);
       setEncounters([]);
-      const fingerprintReady = Boolean(selectedBluetoothDevice.name && (selectedBluetoothDevice.uuids?.length ?? 0) > 0);
+      const fingerprintReady = Boolean(selectedBluetoothDevice.name);
       setNotice(`${selectedBluetoothDevice.source === 'native'
         ? 'Device registration was saved by the backend using the Android-reported Bluetooth address. Addresses may be randomized and are not guaranteed to be a universal hardware identity.'
         : 'Device registration was saved by the backend using a browser-scoped identifier, which is not a universal hardware identity.'} ${fingerprintReady
-          ? 'A name + BLE service fingerprint was registered for privacy-preserving community candidate matching; it is not a unique hardware identity, so sightings remain unverified leads.'
-          : 'Community matching is not enabled for this device because its advertisement did not expose both a name and service UUIDs.'}`);
+          ? (selectedBluetoothDevice.uuids?.length ?? 0) > 0
+            ? 'A name + BLE service fingerprint was registered for community candidate matching; it is not a unique hardware identity, so sightings remain unverified leads.'
+            : 'A name-only recovery fingerprint was registered. It is a weak match and may produce false candidates; owner confirmation is required.'
+          : 'Community matching is not enabled because no advertised device name was available.'}`);
       try {
         await loadRecoveryInfo(registered, token);
       } catch (refreshError) {
@@ -463,7 +465,7 @@ export function Recovery() {
       const outcome = await scanNativeAndroidBle((observation) => {
         const name = observation.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
         const serviceUuids = [...new Set((observation.serviceUuids ?? []).map(uuid => uuid.trim().toLowerCase()).filter(Boolean))].sort();
-        if (!name || serviceUuids.length === 0) return;
+        if (!name) return;
         const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids });
         if (!candidates.has(key)) candidates.set(key, { name, serviceUuids });
       }, 12000);
@@ -471,7 +473,7 @@ export function Recovery() {
       const observations = Array.from(candidates.values()).slice(0, 30);
       if (observations.length === 0) {
         setError(outcome.ok
-          ? 'The scan found no BLE advertisements with both a usable name and service UUIDs. No community report was sent. Many earbuds do not advertise enough stable information for safe matching.'
+          ? 'The scan found no BLE advertisements with a usable name. No community report was sent. Name-only matches are weaker and all community results remain unverified leads.'
           : outcome.error);
         return;
       }

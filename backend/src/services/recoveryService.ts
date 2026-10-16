@@ -63,9 +63,9 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
       : '';
     const rawUuids = recoveryFingerprint.serviceUuids;
     if (!fingerprintName || fingerprintName.length > 96 || !Array.isArray(rawUuids) ||
-      rawUuids.length === 0 || rawUuids.length > 32 ||
+      rawUuids.length > 32 ||
       rawUuids.some((uuid) => typeof uuid !== 'string' || uuid.trim().length === 0 || uuid.length > 128)) {
-      throw new RecoveryValidationError('Community recovery needs an advertised device name and at least one valid BLE service UUID.');
+      throw new RecoveryValidationError('Community recovery needs an advertised device name and a valid BLE service UUID list.');
     }
     const serviceUuids = [...new Set((rawUuids as string[]).map(uuid => uuid.trim().toLowerCase()))].sort();
     recoveryFingerprintHash = createHash('sha256')

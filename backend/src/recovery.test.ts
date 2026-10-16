@@ -228,10 +228,10 @@ describeFingerprint('community recovery fingerprint validation', () => {
     expectFingerprint(first.recoveryFingerprintHash).toBe(second.recoveryFingerprintHash);
   });
 
-  itFingerprint('rejects fingerprints without service UUIDs to avoid weak name-only matching', () => {
+  itFingerprint('allows name-only fingerprints but canonicalizes them as weak candidates', () => {
     expectFingerprint(() => validateFingerprintRegistration({
       deviceName: 'Earbuds', deviceIdentifier: 'device-a',
       recoveryFingerprint: { name: 'Earbuds', serviceUuids: [] },
-    })).toThrow(/service UUID/i);
+    })).toMatchObject({ recoveryFingerprintHash: expectFingerprint.any(String) });
   });
 });
