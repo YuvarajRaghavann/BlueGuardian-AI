@@ -218,12 +218,7 @@ export function Devices() {
               )}
             >
               <Bluetooth className={cn('h-4 w-4', isScanning && 'animate-spin')} />
-              {isScanning
-                ? nativeAndroid
-                  ? state.scan.transport === 'ANDROID_COMBINED_SCAN'
-                    ? 'Searching nearby devices…'
-                  : 'Opening device picker…'
-                : nativeAndroid ? 'Find nearby devices' : pickerMode === 'known' ? 'Choose a named device' : 'Choose a device'}
+              {isScanning ? 'Searching nearby devices…' : nativeAndroid ? 'Find nearby devices' : pickerMode === 'known' ? 'Choose a named device' : 'Choose a device'}
             </button>
 
             {nativeAndroid && false && (

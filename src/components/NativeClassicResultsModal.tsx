@@ -135,11 +135,11 @@ export function NativeClassicResultsModal({
               </p>
               <p className="max-w-md text-xs leading-5 text-[var(--text-muted)]">
                 {loading
-                  ? 'Android is checking its system paired-device registry. The permission prompt may need your approval.'
+                  ? 'Checking your saved devices. You may need to approve the permission prompt.'
                   : failed
-                    ? pairedView
-                      ? 'Grant Nearby Devices permission to BlueGuardian in Android Settings, then retry loading the paired-device list.'
-                      : "Allow BlueGuardian's requested Bluetooth permissions in Android Settings, confirm Bluetooth is on, and try again. The app does not collect GPS coordinates from this permission."
+                    ? (pairedView
+                      ? 'Allow Nearby Devices permission for BlueGuardian in Android Settings, then try again.'
+                      : `Allow Bluetooth permissions for BlueGuardian in Android Settings, confirm Bluetooth is on, then try again. GPS coordinates are not collected from this permission.`)
                     : pairedView
                       ? 'Pair an eligible Bluetooth device in Android Settings, then refresh this list.'
                       : 'Make sure the device is discoverable or in pairing mode, then try again.'}
