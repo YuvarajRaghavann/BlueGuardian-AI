@@ -3,7 +3,6 @@ import {
   createFirebaseAccount,
   getFreshFirebaseIdToken,
   hasFirebaseSession,
-  resetFirebaseAuthForTests,
   signInWithEmailPassword,
   signOutFirebase,
 } from './firebaseAuth';
