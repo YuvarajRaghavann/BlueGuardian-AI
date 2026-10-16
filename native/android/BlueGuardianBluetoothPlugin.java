@@ -49,10 +49,21 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     private static final int MIN_SCAN_DURATION_MS = 3000;
     private static final int MAX_SCAN_DURATION_MS = 30000;
     private static final long MIN_EMIT_INTERVAL_MS = 900L;
+    // Aggregate scanner observations before UI deduplication for temporal flood analysis.
+    private static final long BLE_FEATURE_WINDOW_MS = 5000L;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Set<String> seenAddresses = new HashSet<>();
     private final Map<String, Long> lastEmittedAt = new HashMap<>();
+    private final Map<String, Integer> bleWindowAddressCounts = new HashMap<>();
+    private Runnable bleFeatureWindowRunnable;
+    private long bleFeatureWindowStartMs;
+    private long bleWindowObservationCount;
+    private long bleWindowRssiCount;
+    private double bleWindowRssiSum;
+    private double bleWindowRssiSumSquares;
+    private long bleWindowNamedCount;
+    private long bleWindowServiceCount;
 
     private BluetoothLeScanner activeScanner;
     private ScanCallback activeScanCallback;
@@ -194,6 +205,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
         stopScanRunnable = () -> stopBleScanInternal(true);
         mainHandler.postDelayed(stopScanRunnable, activeDurationMs);
+        startBleFeatureWindows();
 
         JSObject result = new JSObject();
         result.put("started", true);
@@ -221,12 +233,13 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
         final long now = System.currentTimeMillis();
         seenAddresses.add(address);
+        ScanRecord record = result.getScanRecord();
+        recordBleWindowObservation(address, result, record);
         Long last = lastEmittedAt.get(address);
         if (last != null && now - last < MIN_EMIT_INTERVAL_MS) return;
         lastEmittedAt.put(address, now);
 
         String name = null;
-        ScanRecord record = result.getScanRecord();
         if (record != null) name = record.getDeviceName();
         if (name == null || name.trim().isEmpty()) {
             try {
@@ -624,6 +637,11 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
     private void stopBleScanInternal(boolean emitComplete) {
         boolean wasScanning = activeScanCallback != null;
+        if (emitComplete && wasScanning) emitBleFeatureWindow();
+        if (bleFeatureWindowRunnable != null) {
+            mainHandler.removeCallbacks(bleFeatureWindowRunnable);
+            bleFeatureWindowRunnable = null;
+        }
         if (stopScanRunnable != null) {
             mainHandler.removeCallbacks(stopScanRunnable);
             stopScanRunnable = null;
@@ -649,6 +667,97 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             state.put("durationMs", activeDurationMs);
             notifyListeners("scanState", state);
         }
+    }
+
+
+    private void startBleFeatureWindows() {
+        resetBleFeatureWindow();
+        bleFeatureWindowStartMs = System.currentTimeMillis();
+        bleFeatureWindowRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (activeScanCallback == null) return;
+                emitBleFeatureWindow();
+                bleFeatureWindowStartMs = System.currentTimeMillis();
+                mainHandler.postDelayed(this, BLE_FEATURE_WINDOW_MS);
+            }
+        };
+        mainHandler.postDelayed(bleFeatureWindowRunnable, BLE_FEATURE_WINDOW_MS);
+    }
+
+    private void recordBleWindowObservation(String address, ScanResult result, ScanRecord record) {
+        bleWindowObservationCount++;
+        if (address != null && !address.trim().isEmpty()) {
+            bleWindowAddressCounts.put(address, bleWindowAddressCounts.getOrDefault(address, 0) + 1);
+        }
+        int rssi = result.getRssi();
+        if (rssi >= -127 && rssi <= 20) {
+            bleWindowRssiCount++;
+            bleWindowRssiSum += rssi;
+            bleWindowRssiSumSquares += (double) rssi * (double) rssi;
+        }
+        if (record != null) {
+            String advertisedName = record.getDeviceName();
+            if (advertisedName != null && !advertisedName.trim().isEmpty()) bleWindowNamedCount++;
+            if (record.getServiceUuids() != null && !record.getServiceUuids().isEmpty()) {
+                bleWindowServiceCount++;
+            }
+        }
+    }
+
+    private void emitBleFeatureWindow() {
+        long now = System.currentTimeMillis();
+        long elapsedMs = Math.max(1L, now - bleFeatureWindowStartMs);
+        if (bleWindowObservationCount <= 0L) {
+            resetBleFeatureWindow();
+            bleFeatureWindowStartMs = now;
+            return;
+        }
+
+        int uniqueAddresses = bleWindowAddressCounts.size();
+        int maxAddressCount = 0;
+        for (Integer count : bleWindowAddressCounts.values()) {
+            if (count != null && count > maxAddressCount) maxAddressCount = count;
+        }
+        double observations = (double) bleWindowObservationCount;
+        double addressed = Math.max(1.0, (double) bleWindowAddressCounts.values().stream()
+            .mapToInt(value -> value == null ? 0 : value).sum());
+        double meanRssi = bleWindowRssiCount > 0L ? bleWindowRssiSum / bleWindowRssiCount : -100.0;
+        double variance = bleWindowRssiCount > 0L
+            ? (bleWindowRssiSumSquares / bleWindowRssiCount) - (meanRssi * meanRssi)
+            : 0.0;
+        double stdRssi = Math.sqrt(Math.max(0.0, variance));
+        double seconds = elapsedMs / 1000.0;
+
+        JSObject features = new JSObject();
+        features.put("windowStartMs", bleFeatureWindowStartMs);
+        features.put("windowEndMs", now);
+        features.put("windowDurationMs", elapsedMs);
+        features.put("observationCount", bleWindowObservationCount);
+        features.put("observationsPerSecond", bleWindowObservationCount / seconds);
+        features.put("uniqueAddresses", uniqueAddresses);
+        features.put("uniqueAddressFraction", uniqueAddresses / addressed);
+        features.put("maxAddressFraction", maxAddressCount / addressed);
+        features.put("rssiMean", meanRssi);
+        features.put("rssiStd", stdRssi);
+        features.put("rssiObservationFraction", bleWindowRssiCount / observations);
+        features.put("advertisedNameFraction", bleWindowNamedCount / observations);
+        features.put("serviceUuidFraction", bleWindowServiceCount / observations);
+        features.put("telemetrySource", "ANDROID_SCAN_CALLBACKS");
+        notifyListeners("scanWindow", features);
+
+        resetBleFeatureWindow();
+        bleFeatureWindowStartMs = now;
+    }
+
+    private void resetBleFeatureWindow() {
+        bleWindowAddressCounts.clear();
+        bleWindowObservationCount = 0L;
+        bleWindowRssiCount = 0L;
+        bleWindowRssiSum = 0.0;
+        bleWindowRssiSumSquares = 0.0;
+        bleWindowNamedCount = 0L;
+        bleWindowServiceCount = 0L;
     }
 
     private String scanFailureMessage(int errorCode) {
