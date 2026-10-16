@@ -121,3 +121,55 @@ a { color: inherit; text-decoration: none; }
   }
   #root main section, #root main article { animation: none; }
 }
+
+/* Dashboard hero: a visible identity for the native security workspace. */
+.guardian-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(115deg, rgba(57,215,232,.08), transparent 48%),
+    radial-gradient(ellipse at 82% 18%, rgba(57,215,232,.13), transparent 42%);
+  pointer-events: none;
+}
+.guardian-hero-orbit {
+  animation: guardian-orbit-drift 18s linear infinite;
+  mask-image: linear-gradient(135deg, black, transparent 82%);
+}
+.guardian-status-chip {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(57,215,232,.17);
+  border-radius: 999px;
+  background: rgba(5,17,26,.58);
+  padding: 5px 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .015em;
+}
+.guardian-status-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 12px rgba(105,229,177,.7);
+}
+#root main button:focus-visible,
+#root main a:focus-visible,
+#root main input:focus-visible,
+#root main select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@keyframes guardian-orbit-drift {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guardian-hero-orbit { animation: none; }
+}
