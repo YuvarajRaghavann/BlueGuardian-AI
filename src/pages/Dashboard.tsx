@@ -186,15 +186,15 @@ export function Dashboard() {
         <div className="relative z-10">
           <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--accent)]">
             <Activity className="h-3.5 w-3.5 text-[var(--accent)]" />
-            Bluetooth observations
+            Your protection hub
           </div>
 
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-            Bluetooth security overview
+            Your devices. Your peace of mind.
           </h1>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-            Monitor nearby Bluetooth observations, review risk signals, and make deliberate trust decisions from one security workspace.
+            Keep an eye on nearby devices, review security alerts, and manage your trusted devices from one place.
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <span className="guardian-status-chip"><span className="guardian-status-dot" /> User-initiated monitoring</span>
@@ -213,7 +213,7 @@ export function Dashboard() {
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(59,156,255,0.16)] transition-all hover:-translate-y-0.5 hover:bg-[var(--accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ScanLine className={`h-4 w-4 ${scanActive ? 'animate-pulse' : ''}`} />
-            {scanActive ? 'Searching...' : isNativeAndroidApp() ? 'Find nearby BLE devices' : 'Select a BLE device'}
+            {scanActive ? 'Searching...' : isNativeAndroidApp() ? 'Find nearby devices' : 'Choose a device'}
           </button>
           <button
             type="button"
@@ -222,7 +222,7 @@ export function Dashboard() {
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--success)]/30 bg-[var(--success)]/10 px-4 text-sm font-semibold text-[var(--success)] transition-all hover:bg-[var(--success)]/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--success)]/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <FlaskConical className="h-4 w-4" />
-            Generate simulated data
+            Preview sample devices
           </button>
         </div>
       </section>
