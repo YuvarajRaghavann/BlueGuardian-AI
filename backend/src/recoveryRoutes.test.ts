@@ -114,6 +114,7 @@ describe('recovery API integration', () => {
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
+    delete process.env.FIREBASE_PROJECT_ID; // These integration tests intentionally exercise the local development-token path.
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = 'blueguardian-participant-token';
