@@ -5,6 +5,7 @@ on:
     branches:
       - 'android/phase2-cloud-build-*'
       - 'android/phase4-classic-discovery-*'
+      - 'android/phase5-combined-scanning-*'
   workflow_dispatch:
 
 permissions:
