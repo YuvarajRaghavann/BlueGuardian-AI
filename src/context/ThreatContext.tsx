@@ -6,6 +6,7 @@ import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { localDatabase, type StoredAssessment } from '../services/localDatabase';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
+import { type BleFloodAlertDetail } from '../ml/bleFloodMonitor';
 
 interface ThreatState {
   threats: Threat[];
@@ -252,6 +253,56 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (storedThreats === null) return;
+    const onBleFloodAlert = (event: Event) => {
+      const detail = (event as CustomEvent<BleFloodAlertDetail>).detail;
+      if (!detail || !Number.isFinite(detail.voteScore)) return;
+      const detectedAt = new Date(detail.windowEndMs || Date.now());
+      const activeEnvironmentAlert = state.threats.some(threat =>
+        threat.deviceId === 'blueguardian:ble-environment'
+        && threat.category === 'BLE_ADVERTISING_FLOOD'
+        && threat.status === 'ACTIVE'
+        && detectedAt.getTime() - threat.detectedAt.getTime() < 5 * 60_000,
+      );
+      if (activeEnvironmentAlert) return;
+
+      const rawVote = Math.max(0, Math.min(1, detail.voteScore));
+      const threat: Threat = {
+        id: `thr-ble-flood-${detectedAt.getTime()}`,
+        deviceId: 'blueguardian:ble-environment',
+        deviceName: 'Nearby BLE environment',
+        category: 'BLE_ADVERTISING_FLOOD',
+        severity: 'medium',
+        score: Math.round(rawVote * 100),
+        title: 'BLE Advertising-Flood Pattern Detected',
+        description: 'The reviewed BLE-flood classifier observed repeated high-scoring temporal windows. This is an environment-level advisory, not proof of a malicious device.',
+        reasons: [
+          {
+            code: 'BLE_FLOOD_MODEL',
+            message: `${detail.modelName} v${detail.modelVersion} flagged at least two of the last three scan windows. The ${(rawVote * 100).toFixed(1)}% ensemble vote is not a calibrated probability.`,
+          },
+          {
+            code: 'BLE_WINDOW_FEATURES',
+            message: `${detail.observationsPerSecond.toFixed(1)} scanner observations per second across ${detail.uniqueAddresses} distinct advertiser addresses in the triggering window.`,
+          },
+        ],
+        recommendedAction: 'Review nearby Bluetooth activity, repeat the scan in a normal environment, and compare with an independent capture before taking action on a particular device.',
+        status: 'ACTIVE',
+        detectedAt,
+        updatedAt: detectedAt,
+        discoverySource: 'REAL',
+        modelName: detail.modelName,
+        modelVersion: detail.modelVersion,
+        finalClassification: 'BLE_FLOOD',
+      };
+      dispatch({ type: 'ADD_THREAT', payload: threat });
+    };
+
+    window.addEventListener('blueguardian:ble-flood-alert', onBleFloodAlert);
+    return () => window.removeEventListener('blueguardian:ble-flood-alert', onBleFloodAlert);
+  }, [storedThreats, state.threats]);
+
+  useEffect(() => {
     if (storedThreats === null || state.threats === initialState.threats || state.threats === storedThreats) return;
     void localDatabase.replaceThreats(state.threats).catch((error: unknown) => {
       console.warn('Threat status is available for this session but was not saved locally.', error);
@@ -357,6 +408,9 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
     const actionType = status === 'RESOLVED' ? 'RESOLVE_THREAT' : status === 'DISMISSED' ? 'DISMISS_THREAT' : 'INVESTIGATE_THREAT';
     dispatch({ type: actionType, payload: threatId });
     if (!ownerToken || !backendReady || !threat) return;
+    // Environment-level BLE telemetry is not a registered device in the owner API.
+    // Keep this advisory's status local rather than posting a fabricated device ID.
+    if (threat.deviceId === 'blueguardian:ble-environment') return;
 
     const persistStatus = async () => {
       const device = deviceState.devices.find(item => item.id === threat.deviceId);
