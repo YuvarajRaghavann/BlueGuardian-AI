@@ -555,7 +555,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 if (name != null && !name.trim().isEmpty()) {
                     item.put("name", name.replaceAll("[\\p{Cntrl}]", " ").trim());
                 }
-                item.put("transport", "CLASSIC");
+                item.put("transport", "PAIRED");
                 item.put("source", "REAL");
                 item.put("paired", true);
                 item.put("bondState", device.getBondState());
