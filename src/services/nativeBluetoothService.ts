@@ -15,7 +15,7 @@ export interface NativeClassicObservation {
   address: string;
   name?: string;
   rssi?: number;
-  transport: 'CLASSIC';
+  transport: 'CLASSIC' | 'PAIRED';
   paired?: boolean;
   observedAt: number;
 }
@@ -299,7 +299,7 @@ export async function listNativeAndroidPairedDevices(): Promise<NativeClassicObs
       ...device,
       id: String(device.address || device.id || '').trim(),
       address: String(device.address || device.id || '').trim(),
-      transport: 'CLASSIC' as const,
+      transport: 'PAIRED' as const,
       paired: true,
       observedAt: typeof device.observedAt === 'number' ? device.observedAt : Date.now(),
     })).filter((device) => Boolean(device.address));
