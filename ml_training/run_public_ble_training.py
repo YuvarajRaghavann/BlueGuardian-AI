@@ -96,7 +96,7 @@ def write_features(rows: list[dict], output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     fields = [
         "capture_path", "session_id", "label", "window_index", "window_start_seconds",
-        "window_seconds", *FEATURE_COLUMNS, "address_coverage",
+        "window_seconds", *WINDOW_COLUMNS, "address_coverage",
     ]
     with output.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
@@ -118,7 +118,7 @@ def annotate_provenance(report_path: Path, model_path: Path, outer_sha: str, inn
         },
         "capture_manifest": capture_rows,
         "window_seconds": WINDOW_SECONDS,
-        "feature_schema": FEATURE_COLUMNS,
+        "feature_schema": WINDOW_COLUMNS,
     }
     report = json.loads(report_path.read_text(encoding="utf-8"))
     report["dataset_provenance"] = provenance
