@@ -53,11 +53,15 @@ function installNativeBluetoothPlugin() {
   // This project avoids that flag because it can filter some Bluetooth advertisers.
   // Request location only when the user explicitly starts classic discovery; no
   // GPS coordinates are collected by this Bluetooth-discovery feature.
-  for (const permissionName of [
-    'android.permission.ACCESS_COARSE_LOCATION',
-    'android.permission.ACCESS_FINE_LOCATION',
-  ]) {
-    const escapedName = permissionName.replace(/[.*+?^${}()|[\]\\]/g, '\\  let xml = fs.readFileSync(androidManifestPath, 'utf8');
+  xml = xml.split('\n').map((line) => {
+    const isLocationPermission =
+      line.includes('android:name="android.permission.ACCESS_COARSE_LOCATION"')
+      || line.includes('android:name="android.permission.ACCESS_FINE_LOCATION"');
+    return isLocationPermission
+      ? line.replace(/\s+android:maxSdkVersion="30"/g, '')
+      : line;
+  }).join('\n');
+
   const requiredEntries = [
     '<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />',
