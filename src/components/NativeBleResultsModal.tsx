@@ -29,12 +29,12 @@ export function NativeBleResultsModal({
     || scan.state === 'unsupported';
 
   const summary = scanning
-    ? `Listening for BLE advertisements… ${devices.length} device(s) observed`
+    ? `Searching nearby… ${devices.length} device(s) found`
     : failed
       ? scan.error || 'The BLE scan could not be completed.'
       : devices.length > 0
-        ? `Scan finished. ${devices.length} device(s) are available to inspect.`
-        : scan.error || 'No BLE advertisements were received during this scan.';
+        ? `Found ${devices.length} device(s). Select one to view details.`
+        : scan.error || 'No devices found. Keep Bluetooth on and try again.';
 
   return (
     <div
@@ -55,10 +55,10 @@ export function NativeBleResultsModal({
             </div>
             <div>
               <h2 id="native-ble-results-title" className="text-base font-semibold text-[var(--text)]">
-                Nearby BLE devices
+                Nearby devices
               </h2>
               <p className="mt-1 text-xs text-[var(--text-secondary)]">
-                Native Android scan · real observations only
+                Live results · nearby devices only
               </p>
             </div>
           </div>
@@ -84,7 +84,7 @@ export function NativeBleResultsModal({
             <div className="min-w-0">
               <p className="text-sm font-medium text-[var(--text)]">{summary}</p>
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                Devices appear here only when Android reports a BLE advertisement. Detection does not mean the device is connected; some devices do not advertise continuously.
+                Only nearby devices detected during this scan appear here. Detection does not mean a device is connected, and some devices do not advertise continuously.
               </p>
             </div>
           </div>
