@@ -377,8 +377,9 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
         reason: `Threat status changed to ${status.toLowerCase()} from the security dashboard.`,
         threatId: backendThreatId,
       });
-      const refreshed = await api.listThreats(ownerToken, deviceState.devices);
-      dispatch({ type: 'MERGE_SERVER_THREATS', payload: refreshed });
+      const snapshot = await api.getThreatSnapshot(ownerToken, deviceState.devices);
+      backendAssessedDeviceIds.current = new Set(snapshot.assessedDeviceIds);
+      dispatch({ type: 'MERGE_SERVER_THREATS', payload: snapshot });
     };
     void persistStatus().catch((error: unknown) => console.warn('Threat status changed locally, but backend persistence failed.', error));
   };
