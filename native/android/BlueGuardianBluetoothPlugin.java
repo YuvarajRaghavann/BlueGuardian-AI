@@ -371,14 +371,19 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                     short rssiValue = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, (short) 0);
                     String address;
                     String name = null;
+                    int deviceType;
                     try {
                         address = device.getAddress();
                         name = device.getName();
+                        deviceType = device.getType();
                     } catch (SecurityException error) {
                         emitClassicScanError("Android denied access to classic Bluetooth device details. Check Nearby Devices permission.");
                         return;
                     }
                     if (address == null || address.trim().isEmpty()) return;
+                    // Do not present a known LE-only device as a classic discovery result.
+                    // Dual-mode and unknown-type results from classic inquiry remain eligible.
+                    if (deviceType == BluetoothDevice.DEVICE_TYPE_LE) return;
                     if (!classicSeenAddresses.add(address)) return;
 
                     JSObject observation = new JSObject();
