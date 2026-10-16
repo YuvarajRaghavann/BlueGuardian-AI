@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: blueguardian-ble-real-data-training
@@ -45,6 +45,52 @@ jobs:
 
       - name: Run real-data feature extraction, training and grouped holdout evaluation
         run: python -u ml_training/run_public_ble_training.py
+
+      - name: Check evaluation gates for embedding the candidate
+        id: candidate-gate
+        if: success()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("ml_training/reports/ble_flood_evaluation.json").read_text())
+          model = json.loads(Path("src/ml/generated/bleFloodModel.json").read_text())
+          eligible = (
+              report.get("preliminary_gates_passed") is True
+              and model.get("status") == "candidate"
+              and model.get("deploymentStatus") == "disabled_until_explicit_review"
+              and model.get("evaluationSummary", {}).get("preliminaryGatesPassed") is True
+          )
+          print(json.dumps({
+              "eligible_for_embedding": eligible,
+              "accuracy": report.get("metrics", {}).get("accuracy"),
+              "ble_flood_recall": report.get("metrics", {}).get("ble_flood_recall"),
+              "benign_false_positive_rate": report.get("metrics", {}).get("benign_false_positive_rate"),
+              "candidate_remains_disabled": model.get("deploymentStatus") == "disabled_until_explicit_review",
+          }, indent=2))
+          with open(__import__("os").environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"eligible={'true' if eligible else 'false'}\\n")
+          PY
+
+      - name: Embed gate-passing candidate weights in the isolated ML branch
+        if: steps.candidate-gate.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/ml/generated/bleFloodModel.json
+          if git diff --cached --quiet; then
+            echo "The candidate weights already match the branch; nothing to commit."
+            exit 0
+          fi
+          git commit -m "Embed gate-passing BLE flood candidate weights"
+          git push origin HEAD
+          echo "Candidate weights were embedded with status=candidate and deployment disabled."
+          echo "The app's runtime gate still requires recorded review and a handset smoke test."
 
       - name: Upload evaluation report, aggregate features and disabled candidate weights
         if: always()
