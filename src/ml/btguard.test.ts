@@ -59,6 +59,7 @@ describe('BTGuard continuous trust binding', () => {
       authenticated: true,
       keySizeBytes: 16,
       channelSoundingDistanceM: 2,
+      calibratedRssiDistanceM: 2.4,
       rssiDbm: -48,
     });
     expect(result.level).toBe('ISOLATED');
