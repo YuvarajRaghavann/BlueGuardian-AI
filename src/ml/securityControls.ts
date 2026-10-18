@@ -209,6 +209,7 @@ export function ingestBtGuardEvidence(deviceId: string, bundle: BtGuardEvidenceB
   if (bundle.proximity) {
     const result = verifyProximity(bundle.proximity);
     telemetry.channelSoundingDistanceM = bundle.proximity.channelSoundingDistanceM;
+    telemetry.calibratedRssiDistanceM = bundle.proximity.calibratedRssiDistanceM;
     telemetry.rssiDbm = bundle.proximity.rssiDbm;
     telemetry.proximityVerified = result.allowed;
   }
