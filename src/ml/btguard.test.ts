@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import type { BluetoothDevice } from '../types/index.js';
 import { assessBtGuard, ContinuousTrustRegistry } from './btguard.js';
 
