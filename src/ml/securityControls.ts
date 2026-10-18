@@ -1,4 +1,3 @@
-import type { BluetoothDevice } from '../types/index.js';
 import { publishBtGuardTelemetry, type BtGuardTelemetry, type BtGuardAssessment, type BtGuardLevel } from './btguard.js';
 
 export const BTGUARD_MIN_KEY_SIZE_BYTES = 16;
