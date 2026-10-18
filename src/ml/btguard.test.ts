@@ -38,6 +38,11 @@ describe('BTGuard continuous trust binding', () => {
   it('requires positive crypto and proximity evidence before recommending full capabilities', () => {
     const missingEvidence = assessBtGuard(base);
     expect(missingEvidence.level).toBe('RESTRICTED');
+    const rawRssiOnly = assessBtGuard(base, {
+      secureConnections: true, encrypted: true, authenticated: true, keySizeBytes: 16,
+      channelSoundingDistanceM: 2, rssiDbm: -48,
+    });
+    expect(rawRssiOnly.level).toBe('RESTRICTED');
     const verified = assessBtGuard(base, {
       secureConnections: true,
       encrypted: true,
