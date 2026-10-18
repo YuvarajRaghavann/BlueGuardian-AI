@@ -44,6 +44,8 @@ describe('BTGuard continuous trust binding', () => {
       authenticated: true,
       keySizeBytes: 16,
       channelSoundingDistanceM: 2,
+      proximityVerified: true,
+      rfFingerprintComparable: true,
       rssiDbm: -48,
     });
     expect(verified.level).toBe('FULL');
