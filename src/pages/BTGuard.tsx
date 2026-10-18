@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Activity, AlertTriangle, Bluetooth, CircleHelp, LockKeyhole, Radio, Shield, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useBluetoothDevices } from '../context/DeviceContext';
-import { assessBtGuard, btGuardRegistry, type BtGuardLevel } from '../ml/btguard';
+import { btGuardRegistry, getBtGuardTelemetry, type BtGuardLevel } from '../ml/btguard';
 import { StatusBadge } from '../components/StatusBadge';
 
 const levelStyle: Record<BtGuardLevel, string> = {
@@ -14,8 +14,7 @@ export function BTGuard() {
   const { state } = useBluetoothDevices();
   const assessments = useMemo(() => state.devices.map(device => ({
     device,
-    snapshot: btGuardRegistry.observe(device),
-    initial: assessBtGuard(device),
+    snapshot: btGuardRegistry.observe(device, getBtGuardTelemetry(device.id)),
   })), [state.devices]);
   const restricted = assessments.filter(item => item.snapshot.level !== 'FULL').length;
   const signalCount = assessments.length ? Math.round(assessments.reduce((sum, item) => sum + item.snapshot.telemetryCoverage.length, 0) / assessments.length) : 0;
