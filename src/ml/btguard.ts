@@ -39,10 +39,11 @@ const RESTRICTED_CAPABILITIES: BtGuardCapability[] = ['read', 'audio'];
 const ISOLATED_CAPABILITIES: BtGuardCapability[] = [];
 const clamp = (n: number, min = 0, max = 100) => Math.max(min, Math.min(max, n));
 
-function inferLevel(score: number, blocked: boolean): BtGuardLevel {
+function inferLevel(score: number, blocked: boolean, fullEvidence = false): BtGuardLevel {
   if (blocked || score < 30) return 'ISOLATED';
-  if (score < 70) return 'RESTRICTED';
-  return 'FULL';
+  // Full capability requires affirmative security and proximity evidence, not just a high heuristic score.
+  if (score >= 70 && fullEvidence) return 'FULL';
+  return 'RESTRICTED';
 }
 
 /** Stateless evidence assessment. RSSI alone is never treated as spoofing proof. */
@@ -141,7 +142,15 @@ export function assessBtGuard(
   }
 
   const trustScore = clamp(Math.round(score));
-  const level = inferLevel(trustScore, Boolean(device.blocked));
+  const fullEvidence = device.discoverySource === 'REAL'
+    && device.isKnown && device.trusted
+    && telemetry.secureConnections === true
+    && telemetry.encrypted === true
+    && telemetry.authenticated === true
+    && typeof telemetry.keySizeBytes === 'number' && telemetry.keySizeBytes >= 16
+    && typeof telemetry.channelSoundingDistanceM === 'number'
+    && typeof telemetry.rssiDbm === 'number';
+  const level = inferLevel(trustScore, Boolean(device.blocked), fullEvidence);
   const capabilities = level === 'FULL'
     ? [...FULL_CAPABILITIES]
     : level === 'RESTRICTED'
@@ -180,7 +189,8 @@ export class ContinuousTrustRegistry {
         ? 0.65 : 0.2) * (current.trustScore - previous.trustScore))
       : current.trustScore;
     const trustScore = clamp(smoothed);
-    const level = inferLevel(trustScore, Boolean(device.blocked));
+    const fullEvidence = current.level === 'FULL';
+    const level = inferLevel(trustScore, Boolean(device.blocked), fullEvidence);
     const snapshot: BtGuardSnapshot = {
       ...current,
       trustScore,
