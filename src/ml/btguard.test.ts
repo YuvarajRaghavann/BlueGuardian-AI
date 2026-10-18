@@ -62,6 +62,16 @@ describe('BTGuard continuous trust binding', () => {
     expect(result.level).toBe('ISOLATED');
   });
 
+  it('uses recent RSSI variation as a low-confidence review signal, not a spoofing verdict', () => {
+    const registry = new ContinuousTrustRegistry();
+    registry.observe({ ...base, rssi: -42, lastSeen: new Date(1000) });
+    registry.observe({ ...base, rssi: -55, lastSeen: new Date(2000) });
+    registry.observe({ ...base, rssi: -70, lastSeen: new Date(3000) });
+    const result = registry.observe({ ...base, rssi: -91, lastSeen: new Date(4000) });
+    expect(result.telemetryCoverage).toContain('multi-sample RSSI history');
+    expect(result.reasons.join(' ')).toContain('not proof of spoofing');
+  });
+
   it('does not decay trust on identical UI re-renders', () => {
     const registry = new ContinuousTrustRegistry();
     const first = registry.observe(base);
