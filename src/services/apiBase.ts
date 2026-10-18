@@ -22,6 +22,41 @@ function isNativePlatform(): boolean {
   }
 }
 
+/**
+ * Hosts a packaged release app may send the owner's sign-in token to.
+ * Built from VITE_API_BASE plus VITE_API_ALLOWED_HOSTS (comma separated).
+ * A backend URL typed into Settings that is not on this list is refused in
+ * release builds, so a tricked user cannot redirect tokens to another server.
+ */
+export function apiHostAllowlist(
+  buildBase: string | undefined = import.meta.env.VITE_API_BASE,
+  extraHosts: string | undefined = import.meta.env.VITE_API_ALLOWED_HOSTS,
+): string[] {
+  const hosts = new Set<string>();
+  if (buildBase && !buildBase.trim().startsWith('/')) {
+    try {
+      hosts.add(new URL(buildBase.trim()).hostname.toLowerCase());
+    } catch {
+      // invalid build base is reported elsewhere
+    }
+  }
+  for (const host of (extraHosts ?? '').split(',')) {
+    const clean = host.trim().toLowerCase();
+    if (clean) hosts.add(clean);
+  }
+  return [...hosts];
+}
+
+export function isAllowedApiHost(hostname: string, allowlist: string[]): boolean {
+  const host = hostname.toLowerCase();
+  return allowlist.some((entry) => entry === host || (entry.startsWith('*.') && host.endsWith(entry.slice(1))));
+}
+
+/** Release native builds enforce the allowlist; browser and development builds do not. */
+function enforceAllowlist(): boolean {
+  return isNativePlatform() && import.meta.env.PROD === true && import.meta.env.VITE_ALLOW_ANY_BACKEND !== 'true';
+}
+
 function readStoredBase(): string | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -61,6 +96,13 @@ export function normalizeApiBaseUrl(input: string): string {
   const browserLocalHttp = !isNativePlatform() && parsed.protocol === 'http:' && isLoopback;
   if (parsed.protocol !== 'https:' && !browserLocalHttp) {
     throw new Error('Use HTTPS for a remote backend. HTTP is allowed only for localhost browser development, not the Android APK.');
+  }
+
+  if (enforceAllowlist()) {
+    const allowlist = apiHostAllowlist();
+    if (!isAllowedApiHost(hostname, allowlist)) {
+      throw new Error(`This release build only connects to approved backends (${allowlist.join(', ') || 'none configured'}). Ask your administrator to add ${hostname}.`);
+    }
   }
 
   let pathname = parsed.pathname.replace(/\/+$/, '');
@@ -170,7 +212,7 @@ export function setApiBaseUrl(input: string | null): ApiBaseConfig {
       window.localStorage.removeItem(API_BASE_STORAGE_KEY);
     }
   } catch (error) {
-    if (error instanceof Error && /Enter |complete URL|Do not put|query string|HTTPS|backend URL/i.test(error.message)) throw error;
+    if (error instanceof Error && /Enter |complete URL|Do not put|query string|HTTPS|backend URL|approved backends/i.test(error.message)) throw error;
     throw new Error('BlueGuardian could not save the backend URL in this device’s local settings.');
   }
 

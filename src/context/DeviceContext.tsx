@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, type ReactNode } from 'react';
 import type { BluetoothDevice, BluetoothScanState, DeviceType, SecurityPolicy } from '../types';
 import { generateSimulatedDevices } from '../services/bluetoothSimulator';
+import { SIMULATOR_ENABLED } from '../config/buildFlags';
 import { isBluetoothSupported, requestBluetoothDevice, connectAndDiscover, readStandardCharacteristics, normalizeBluetoothName, resolveBluetoothDisplayName, getPreviouslyGrantedBluetoothDevices, watchBluetoothAdvertisements, type BluetoothPickerMode, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { calculateTrustScore } from '../utils/trustScore';
@@ -376,6 +377,11 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
    * picker. All existing persistence and security-assessment behavior is kept.
    */
   const runScan = async (mode: 'simulated' | 'real', pickerMode: BluetoothPickerMode = 'all'): Promise<void> => {
+    if (mode === 'simulated' && !SIMULATOR_ENABLED) {
+      // Release builds never generate sample devices, so fake threats cannot mix with real scans.
+      dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'error', source: 'SIMULATED', error: 'Sample devices are turned off in this release build.' } });
+      return;
+    }
     dispatch({
       type: 'SET_SCAN_STATE',
       payload: {

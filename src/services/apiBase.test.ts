@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api } from './api';
 import {
   API_BASE_CHANGED_EVENT,
+  apiHostAllowlist,
+  isAllowedApiHost,
   normalizeApiBaseUrl,
   setApiBaseUrl,
 } from './apiBase';
@@ -80,5 +82,23 @@ describe('runtime API base configuration', () => {
       configured: true,
       source: 'same-origin',
     });
+  });
+});
+
+describe('release backend allowlist', () => {
+  it('is built from the build-time API base plus extra hosts', () => {
+    expect(apiHostAllowlist('https://api.blueguardian.example/api', 'backup.example.com, *.corp.example')).toEqual([
+      'api.blueguardian.example',
+      'backup.example.com',
+      '*.corp.example',
+    ]);
+  });
+
+  it('accepts only listed hosts and wildcard subdomains', () => {
+    const list = ['api.blueguardian.example', '*.corp.example'];
+    expect(isAllowedApiHost('api.blueguardian.example', list)).toBe(true);
+    expect(isAllowedApiHost('eu.corp.example', list)).toBe(true);
+    expect(isAllowedApiHost('evil.example', list)).toBe(false);
+    expect(isAllowedApiHost('api.blueguardian.example.evil.com', list)).toBe(false);
   });
 });

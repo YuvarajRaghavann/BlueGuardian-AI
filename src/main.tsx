@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { DeviceProvider } from './context/DeviceContext'
 import { ThreatProvider } from './context/ThreatContext'
 import { SecurityProvider } from './context/SecurityContext'
+import { SecureLinkProvider } from './context/SecureLinkContext'
 import './index.css'
 import App from './App.tsx'
 
@@ -13,7 +14,9 @@ createRoot(document.getElementById('root')!).render(
       <DeviceProvider>
         <ThreatProvider>
           <SecurityProvider>
-            <App />
+            <SecureLinkProvider>
+              <App />
+            </SecureLinkProvider>
           </SecurityProvider>
         </ThreatProvider>
       </DeviceProvider>

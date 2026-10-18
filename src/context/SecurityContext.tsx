@@ -9,6 +9,7 @@ import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
+import { SIMULATOR_ENABLED } from '../config/buildFlags';
 
 interface SecurityState {
   actions: SecurityAction[];
@@ -29,7 +30,7 @@ const initialPolicy: SecurityPolicy = {
   confirmBlock: true,
   confirmTrust: true,
   showLowConfidenceWarnings: true,
-  showSimulatedEvents: true,
+  showSimulatedEvents: SIMULATOR_ENABLED,
   requireConnectionApproval: true,
   blockUnknownFileTransfers: true,
   enforceFastPairApproval: true,

@@ -28,6 +28,7 @@ import { visibleEvents } from '../utils/visibleEvents';
 import { getCurrentModelMetadata } from '../ml/mlService';
 import { NativeBleResultsModal } from '../components/NativeBleResultsModal';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
+import { SIMULATOR_ENABLED } from '../config/buildFlags';
 
 export function Dashboard() {
   const { state, dispatch: deviceDispatch, scanRealDevices, scanSimulatedDevices } = useBluetoothDevices();
@@ -215,7 +216,7 @@ export function Dashboard() {
             <ScanLine className={`h-4 w-4 ${scanActive ? 'animate-pulse' : ''}`} />
             {scanActive ? 'Searching...' : isNativeAndroidApp() ? 'Find nearby devices' : 'Choose a device'}
           </button>
-          <button
+          {SIMULATOR_ENABLED && (<button
             type="button"
             onClick={() => void scanSimulatedDevices()}
             disabled={scanActive}
@@ -223,7 +224,7 @@ export function Dashboard() {
           >
             <FlaskConical className="h-4 w-4" />
             Preview sample devices
-          </button>
+          </button>)}
         </div>
       </section>
 

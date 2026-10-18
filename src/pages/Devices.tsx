@@ -20,6 +20,7 @@ import { useBluetoothDevices } from '../context/DeviceContext';
 import { cn } from '../utils/cn';
 import { diagnoseBluetoothEnvironment, type BluetoothEnvironmentDiagnostics } from '../services/bluetoothService';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
+import { SIMULATOR_ENABLED } from '../config/buildFlags';
 
 export function Devices() {
   const {
@@ -268,7 +269,7 @@ export function Devices() {
               </>
             )}
 
-            <button
+            {SIMULATOR_ENABLED && (<button
               type="button"
               onClick={() => void handleGenerateSimulated()}
               disabled={isScanning}
@@ -281,7 +282,7 @@ export function Devices() {
             >
               <FlaskConical className="h-4 w-4" />
               Generate simulated data
-            </button>
+            </button>)}
           </div>
         </div>
       </header>
@@ -344,7 +345,7 @@ export function Devices() {
               className="min-h-10 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
             >
               <option value="real">Real observations</option>
-              <option value="simulated">Simulated examples</option>
+              {SIMULATOR_ENABLED && <option value="simulated">Simulated examples</option>}
               <option value="all">All devices</option>
             </select>
           </div>

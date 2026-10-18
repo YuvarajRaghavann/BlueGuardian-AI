@@ -35,8 +35,9 @@ if (!fs.existsSync(path.join(root, 'android', 'app'))) {
 
 function installNativeBluetoothPlugin() {
   const pluginSource = path.join(nativeSourceDir, 'BlueGuardianBluetoothPlugin.java');
+  const secureLinkSource = path.join(nativeSourceDir, 'BlueGuardianSecureLinkPlugin.java');
   const activitySource = path.join(nativeSourceDir, 'MainActivity.java');
-  if (!fs.existsSync(pluginSource) || !fs.existsSync(activitySource)) {
+  if (!fs.existsSync(pluginSource) || !fs.existsSync(activitySource) || !fs.existsSync(secureLinkSource)) {
     throw new Error('Native Bluetooth source files are missing from native/android.');
   }
   if (!fs.existsSync(androidManifestPath)) {
@@ -46,6 +47,7 @@ function installNativeBluetoothPlugin() {
   fs.mkdirSync(nativePackageDir, { recursive: true });
   fs.copyFileSync(pluginSource, path.join(nativePackageDir, 'BlueGuardianBluetoothPlugin.java'));
   fs.copyFileSync(activitySource, path.join(nativePackageDir, 'MainActivity.java'));
+  fs.copyFileSync(secureLinkSource, path.join(nativePackageDir, 'BlueGuardianSecureLinkPlugin.java'));
 
   let xml = fs.readFileSync(androidManifestPath, 'utf8');
   // Android's classic BluetoothAdapter.startDiscovery() permission contract
@@ -69,6 +71,7 @@ function installNativeBluetoothPlugin() {
     '<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
+    '<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />',
     '<uses-feature android:name="android.hardware.bluetooth" android:required="false" />',
     '<uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />',
   ];
@@ -88,10 +91,72 @@ function installNativeBluetoothPlugin() {
   if (!xml.includes('<application')) {
     throw new Error('Cannot safely add Bluetooth declarations: <application> tag is missing.');
   }
+  xml = hardenApplicationTag(xml);
   fs.writeFileSync(androidManifestPath, xml);
+  writeNetworkSecurityConfig();
 
   return 'Native foreground BLE and classic Bluetooth discovery plugin installed; Android permissions and optional Bluetooth hardware features configured. Classic discovery requests Nearby Devices plus location permission as required by Android; GPS coordinates are not collected by this feature.';
 }
+/**
+ * Release hardening applied to every build:
+ *  - android:allowBackup="false" so keys/peer records are never copied off the phone
+ *  - a network security config that forbids cleartext and trusts only system CAs,
+ *    with optional certificate pins (BACKEND_CERT_PINS="sha256/AAA...=,sha256/BBB...=")
+ */
+function hardenApplicationTag(xml) {
+  const match = xml.match(/<application\b[^>]*>/);
+  if (!match) throw new Error('Cannot harden manifest: <application> tag is missing.');
+  let tag = match[0];
+  const setAttr = (name, value) => {
+    const re = new RegExp(`\\s${name}="[^"]*"`);
+    tag = re.test(tag) ? tag.replace(re, ` ${name}="${value}"`) : tag.replace('<application', `<application ${name}="${value}"`);
+  };
+  setAttr('android:allowBackup', 'false');
+  setAttr('android:usesCleartextTraffic', 'false');
+  setAttr('android:networkSecurityConfig', '@xml/network_security_config');
+  return xml.replace(match[0], tag);
+}
+
+function writeNetworkSecurityConfig() {
+  const xmlDir = path.join(root, 'android', 'app', 'src', 'main', 'res', 'xml');
+  fs.mkdirSync(xmlDir, { recursive: true });
+  const backendHost = (() => {
+    try {
+      return new URL(process.env.VITE_API_BASE || 'https://blueguardian-backend-phase6.onrender.com/api').hostname;
+    } catch {
+      return '';
+    }
+  })();
+  const pins = (process.env.BACKEND_CERT_PINS || '').split(',').map((p) => p.trim()).filter(Boolean);
+  const pinBlock = pins.length && backendHost
+    ? [
+        '  <domain-config cleartextTrafficPermitted="false">',
+        `    <domain includeSubdomains="false">${backendHost}</domain>`,
+        '    <pin-set expiration="2027-12-31">',
+        ...pins.map((p) => `      <pin digest="SHA-256">${p.replace(/^sha256\//, '')}</pin>`),
+        '    </pin-set>',
+        '  </domain-config>',
+      ]
+    : [];
+  const config = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<network-security-config>',
+    '  <base-config cleartextTrafficPermitted="false">',
+    '    <trust-anchors>',
+    '      <certificates src="system" />',
+    '    </trust-anchors>',
+    '  </base-config>',
+    ...pinBlock,
+    '</network-security-config>',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(xmlDir, 'network_security_config.xml'), config);
+  hardeningNotes.push(pins.length
+    ? `Network security config: cleartext off, system CAs only, ${pins.length} certificate pin(s) for ${backendHost}.`
+    : 'Network security config: cleartext off, system CAs only (set BACKEND_CERT_PINS to add certificate pinning).');
+}
+
+const hardeningNotes = ['Manifest hardening: allowBackup=false, usesCleartextTraffic=false, network security config attached.'];
 const nativePluginNote = installNativeBluetoothPlugin();
 
 let notes = [];
@@ -121,7 +186,7 @@ const capacitorCore = JSON.parse(fs.readFileSync(path.join(root, 'node_modules',
 const capacitorAndroid = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '@capacitor', 'android', 'package.json'), 'utf8'));
 const cli = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '@capacitor', 'cli', 'package.json'), 'utf8'));
 const manifest = [
-  'BlueGuardian Phase 6 backend integration build',
+  'BlueGuardian Phase 7 Secure Link build (BTGuard continuous trust binding)',
   `Commit: ${process.env.GITHUB_SHA ?? 'local'}`,
   `Node: ${process.version}`,
   `Capacitor core: ${capacitorCore.version}`,
@@ -133,6 +198,8 @@ const manifest = [
   'Combined mode scans BLE first and then classic Bluetooth to avoid concurrent permission prompts and adapter discovery sessions. Device merging uses normalized Android-reported address when available; randomized BLE addresses may remain separate.',
   'The default Phase 6 backend URL is configured at build time as https://blueguardian-backend-phase6.onrender.com/api and can be overridden in Settings. The server CORS allowlist must include the Capacitor WebView origin https://localhost. No owner token or secret is baked into this APK.',
   nativePluginNote,
+  'Secure Link: BLE advertising + L2CAP CoC transport (Android 10+), Noise_XX_25519_ChaChaPoly_SHA256 channel with 6-digit comparison codes, BTGuard trust engine, encrypted file transfer into app-private quarantine, Android Keystore wrapping for identity and peer secrets.',
+  ...hardeningNotes,
   ...notes,
   '',
 ].join('\n');

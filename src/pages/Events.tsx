@@ -6,6 +6,7 @@ import {
 import { SecurityTimeline } from '../components/SecurityTimeline';
 import { SecurityAuditLog } from '../components/SecurityAuditLog';
 import { mockEvents } from '../data/mockEvents';
+import { SIMULATOR_ENABLED } from '../config/buildFlags';
 import { useSecurity } from '../context/SecurityContext';
 import type { SecurityEvent } from '../types';
 import { visibleEvents } from '../utils/visibleEvents';
@@ -77,7 +78,7 @@ export function Events() {
         timestamp: action.timestamp,
         simulated: action.simulated,
       }))
-    : mockEvents.slice(0, 10);
+    : (SIMULATOR_ENABLED ? mockEvents.slice(0, 10) : []);
   const usingBackendEvents = backendReady && backendEvents !== null;
   const availableEvents = usingBackendEvents ? backendEvents : localOrDemoEvents;
   const systemEvents = visibleEvents(availableEvents, securityState.policy.showSimulatedEvents);

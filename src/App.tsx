@@ -8,6 +8,7 @@ import { Recovery } from './pages/Recovery';
 import { Events } from './pages/Events';
 import { Analytics } from './pages/Analytics';
 import { SettingsPage } from './pages/Settings';
+import { SecureShare } from './pages/SecureShare';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
           <Route path="devices" element={<Devices />} />
           <Route path="threats" element={<Threats />} />
           <Route path="recovery" element={<Recovery />} />
+          <Route path="secure-share" element={<SecureShare />} />
           <Route path="events" element={<Events />} />
           <Route path="analytics" element={<Analytics />} />
           <Route path="settings" element={<SettingsPage />} />

@@ -6,6 +6,7 @@ import {
   Bluetooth,
   LayoutDashboard,
   LifeBuoy,
+  LockKeyhole,
   Settings,
   Shield,
   X,
@@ -17,6 +18,7 @@ const navItems = [
   { path: '/devices', label: 'Nearby Devices', icon: Bluetooth },
   { path: '/threats', label: 'Threat Detection', icon: AlertTriangle },
   { path: '/recovery', label: 'Find a Lost Device', icon: LifeBuoy },
+  { path: '/secure-share', label: 'Secure Share', icon: LockKeyhole },
   { path: '/events', label: 'Security Events', icon: Activity },
   { path: '/analytics', label: 'Analytics', icon: BarChart2 },
   { path: '/settings', label: 'Settings', icon: Settings },
@@ -81,7 +83,7 @@ export function Sidebar({
           </p>
 
           <nav className="space-y-1">
-            {navItems.slice(0, 4).map((item) => (
+            {navItems.slice(0, 5).map((item) => (
               <NavigationItem key={item.path} item={item} onClick={onMobileClose} />
             ))}
           </nav>
@@ -91,7 +93,7 @@ export function Sidebar({
           </p>
 
           <nav className="space-y-1">
-            {navItems.slice(4).map((item) => (
+            {navItems.slice(5).map((item) => (
               <NavigationItem key={item.path} item={item} onClick={onMobileClose} />
             ))}
           </nav>

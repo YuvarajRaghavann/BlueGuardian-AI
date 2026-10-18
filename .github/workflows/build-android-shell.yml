@@ -9,6 +9,7 @@ on:
       - 'android/phase5-combined-scanning-*'
       - 'android/phase6-backend-integration-*'
       - 'android/phase6-final-ux-*'
+      - 'android/phase7-*'
   workflow_dispatch:
 
 permissions:
@@ -42,10 +43,31 @@ jobs:
         working-directory: backend
         run: npm run test:ci
 
+  verify-btguard:
+    name: BTGuard trust-engine tests and app-model export check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the project branch
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run BTGuard tests
+        working-directory: btguard
+        run: |
+          pip install numpy
+          python -m unittest tests.test_btguard -v
+
   build-debug-apk:
     name: Build debug APK in GitHub-hosted runner
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      HAS_SIGNING_KEY: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
     steps:
       - name: Check out the project branch
         uses: actions/checkout@v5
@@ -109,5 +131,35 @@ jobs:
             android-build-info.txt
           if-no-files-found: error
           retention-days: 14
+
+      # Release APK: non-debuggable, signed with YOUR key. Runs only when the
+      # repository secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      # ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD are set.
+      - name: Build signed release APK
+        if: ${{ env.HAS_SIGNING_KEY == 'true' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          cd android
+          ./gradlew --no-daemon --stacktrace assembleRelease
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)
+          "$ANDROID_HOME/build-tools/$BT/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aligned.apk"
+          "$ANDROID_HOME/build-tools/$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" \
+            --ks-pass env:ANDROID_KEYSTORE_PASSWORD --ks-key-alias "$ANDROID_KEY_ALIAS" --key-pass env:ANDROID_KEY_PASSWORD \
+            --out app/build/outputs/apk/release/blueguardian-release.apk "$RUNNER_TEMP/aligned.apk"
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs app/build/outputs/apk/release/blueguardian-release.apk
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Upload signed release APK
+        if: ${{ hashFiles('android/app/build/outputs/apk/release/blueguardian-release.apk') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: blueguardian-android-release-${{ github.sha }}
+          path: android/app/build/outputs/apk/release/blueguardian-release.apk
+          retention-days: 30
 
 # Verification rerun requested after final UX changes.
