@@ -3,6 +3,7 @@ import type { BluetoothDevice, BluetoothScanState, DeviceType, SecurityPolicy } 
 import { generateSimulatedDevices } from '../services/bluetoothSimulator';
 import { isBluetoothSupported, requestBluetoothDevice, connectAndDiscover, readStandardCharacteristics, normalizeBluetoothName, resolveBluetoothDisplayName, getPreviouslyGrantedBluetoothDevices, watchBluetoothAdvertisements, type BluetoothPickerMode, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
+import { btGuardRegistry } from '../ml/btguard';
 import { calculateTrustScore } from '../utils/trustScore';
 import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { localDatabase } from '../services/localDatabase';
@@ -341,6 +342,14 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     void loadPhysicalDevices();
     return () => { cancelled = true; };
   }, []);
+
+  // Keep BTGuard's per-device trust history current as genuine observations change,
+  // even when the dedicated BTGuard page is not open. This never fabricates telemetry.
+  useEffect(() => {
+    for (const device of state.devices) {
+      if (device.discoverySource === 'REAL') btGuardRegistry.observe(device);
+    }
+  }, [state.devices]);
 
   useEffect(() => {
     const physicalDevices = state.devices.filter(device => device.discoverySource !== 'SIMULATED');

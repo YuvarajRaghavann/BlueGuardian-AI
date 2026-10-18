@@ -8,26 +8,22 @@ import { Recovery } from './pages/Recovery';
 import { Events } from './pages/Events';
 import { Analytics } from './pages/Analytics';
 import { SettingsPage } from './pages/Settings';
+import { BTGuard } from './pages/BTGuard';
 
 function App() {
-  return (
-    <>
-      <AndroidBackNavigation />
-      <Routes>
-        <Route path="/" element={<Navigate to="/dashboard" replace />} />
-        <Route element={<DashboardLayout />}>
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="devices" element={<Devices />} />
-          <Route path="threats" element={<Threats />} />
-          <Route path="recovery" element={<Recovery />} />
-          <Route path="events" element={<Events />} />
-          <Route path="analytics" element={<Analytics />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </>
-  );
+  return <><AndroidBackNavigation /><Routes>
+    <Route path="/" element={<Navigate to="/dashboard" replace />} />
+    <Route element={<DashboardLayout />}>
+      <Route path="dashboard" element={<Dashboard />} />
+      <Route path="devices" element={<Devices />} />
+      <Route path="threats" element={<Threats />} />
+      <Route path="btguard" element={<BTGuard />} />
+      <Route path="recovery" element={<Recovery />} />
+      <Route path="events" element={<Events />} />
+      <Route path="analytics" element={<Analytics />} />
+      <Route path="settings" element={<SettingsPage />} />
+    </Route>
+    <Route path="*" element={<Navigate to="/dashboard" replace />} />
+  </Routes></>;
 }
-
 export default App;
