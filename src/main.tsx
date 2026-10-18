@@ -5,6 +5,7 @@ import { DeviceProvider } from './context/DeviceContext'
 import { ThreatProvider } from './context/ThreatContext'
 import { SecurityProvider } from './context/SecurityContext'
 import { SecureLinkProvider } from './context/SecureLinkContext'
+import '@fontsource-variable/manrope'
 import './index.css'
 import App from './App.tsx'
 

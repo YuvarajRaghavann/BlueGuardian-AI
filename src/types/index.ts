@@ -80,6 +80,8 @@ export interface BluetoothDevice {
   tracker?: boolean;
   /** True only when the owner tapped Block. Older builds auto-blocked devices; those are released. */
   blockedByUser?: boolean;
+  /** Advertised transmit power, used for distance estimates. */
+  txPower?: number;
 }
 
 export interface ScanResult {

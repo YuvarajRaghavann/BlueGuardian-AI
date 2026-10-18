@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { AndroidBackNavigation } from './components/AndroidBackNavigation';
 import { DashboardLayout } from './layouts/DashboardLayout';
 import { Dashboard } from './pages/Dashboard';
-import { Devices } from './pages/Devices';
+import { AroundYou } from './pages/AroundYou';
 import { Threats } from './pages/Threats';
 import { Recovery } from './pages/Recovery';
 import { Events } from './pages/Events';
@@ -18,7 +18,7 @@ function App() {
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route element={<DashboardLayout />}>
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="devices" element={<Devices />} />
+          <Route path="devices" element={<AroundYou />} />
           <Route path="threats" element={<Threats />} />
           <Route path="recovery" element={<Recovery />} />
           <Route path="secure-share" element={<SecureShare />} />

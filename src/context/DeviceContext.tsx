@@ -153,6 +153,7 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
         family: incoming.family ?? existing.family,
         familyLabel: incoming.familyLabel ?? existing.familyLabel,
         tracker: incoming.tracker ?? existing.tracker,
+        txPower: incoming.txPower ?? existing.txPower,
         rssi: typeof incoming.rssi === 'number' ? incoming.rssi : existing.rssi,
         lastSeen: incoming.lastSeen,
         ...(shouldRefreshConnection ? {
@@ -748,6 +749,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       discoveryTransport: 'COMBINED',
       discoveryTransports: Array.from(seenTransports),
       paired,
+      ...('txPower' in observation && typeof observation.txPower === 'number' ? { txPower: observation.txPower } : {}),
       ...(advertInfo && advertInfo.family !== 'unknown'
         ? { family: advertInfo.family, familyLabel: advertInfo.label, tracker: advertInfo.isTracker }
         : {}),

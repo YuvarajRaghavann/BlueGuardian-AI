@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import {
-  Activity, Ban, CheckCircle, Database, Link, LoaderCircle, Lock, LockKeyhole, Radio, RefreshCw,
+  Activity, Ban, CheckCircle, Database, Link, LoaderCircle, Lock, Radio, RefreshCw,
   Search, Shield, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, Unlink, X,
 } from 'lucide-react';
 import { useSecureLink, type PendingOffer } from '../context/SecureLinkContext';
@@ -150,11 +150,7 @@ export function SecureShare() {
   return (
     <div className="relative space-y-5 sm:space-y-6">
       <header className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 sm:p-6">
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--accent)]">
-          <LockKeyhole className="h-3.5 w-3.5" />
-          Secure Share
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">Phone-to-phone, verified and encrypted</h1>
+        <h2 className="text-[24px] font-extrabold leading-tight text-[var(--text)]">Phone-to-phone, verified and encrypted</h2>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--text-secondary)]">
           Pair once by comparing a 6-digit code. Every message and file is end-to-end encrypted, and the link is
           re-checked every second: if the other phone starts behaving suspiciously it loses file access first, then is cut off.

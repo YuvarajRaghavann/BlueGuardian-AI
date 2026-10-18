@@ -27,8 +27,7 @@ export function Threats() {
   return (
     <div className="mx-auto max-w-3xl space-y-5">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)]">Alerts</h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">Raised only when a scan finds real evidence of a known attack pattern.</p>
+        <p className="text-sm text-[var(--text-secondary)]">Raised only when a scan finds real evidence of a known attack pattern.</p>
       </header>
 
       <div className="inline-flex rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1">

@@ -2,28 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  BlueGuardian design tokens
+  Night indigo base, periwinkle signal accent, mint for trust, coral for alerts.
+  One typeface (Manrope) with tabular figures for scores.
+*/
 :root {
-  font-family: "Inter", "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+  font-family: 'Manrope Variable', 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-feature-settings: 'tnum' 1, 'cv01' 1;
   color-scheme: dark;
-  --bg: #060b12;
-  --bg-elevated: #0a121d;
-  --surface: #0d1925;
-  --surface-raised: #122231;
-  --surface-hover: #172c3c;
-  --border: #1d3545;
-  --border-strong: #2b5061;
-  --text: #f2f8fb;
-  --text-secondary: #a8bdc9;
-  --text-muted: #6f8b9a;
-  --accent: #39d7e8;
-  --accent-strong: #13b9d0;
-  --accent-soft: rgba(57, 215, 232, 0.12);
-  --success: #69e5b1;
-  --warning: #ffd166;
-  --danger: #ff6b7a;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 18px;
+
+  --bg: #0e1424;
+  --bg-elevated: #121a2e;
+  --surface: #161f36;
+  --surface-raised: #1c2742;
+  --surface-hover: #232f4e;
+  --border: rgba(169, 180, 208, 0.12);
+  --border-strong: rgba(140, 124, 255, 0.38);
+  --text: #eef1fa;
+  --text-secondary: #a9b4d0;
+  --text-muted: #7381a3;
+  --accent: #8c7cff;
+  --accent-strong: #7563f5;
+  --accent-soft: rgba(140, 124, 255, 0.14);
+  --success: #7cf2c8;
+  --warning: #ffd27a;
+  --danger: #ff8a6b;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --tabbar-h: 72px;
 }
 
 * { box-sizing: border-box; }
@@ -33,308 +43,51 @@ body {
   min-width: 320px;
   min-height: 100vh;
   background:
-    radial-gradient(ellipse at 88% -12%, rgba(57,215,232,.12), transparent 34rem),
-    radial-gradient(ellipse at 0% 45%, rgba(32,110,150,.08), transparent 28rem),
-    linear-gradient(145deg, #060b12 0%, #08111a 58%, #07121b 100%);
+    radial-gradient(60rem 28rem at 50% -14rem, rgba(140, 124, 255, 0.16), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  overscroll-behavior-y: none;
 }
 button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 a { color: inherit; text-decoration: none; }
-::selection { background: rgba(57,215,232,.28); color: white; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #244151; border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: #356274; }
+::selection { background: rgba(140, 124, 255, 0.35); color: white; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 6px; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: rgba(169, 180, 208, 0.18); border-radius: 999px; }
 #root { min-height: 100vh; width: 100%; }
+h1, h2, h3 { text-wrap: balance; letter-spacing: -0.02em; }
+p { text-wrap: pretty; }
 
-/* Distinctive BlueGuardian visual language: instrument-panel grid, cool glass,
-   high-contrast cyan signal accents, and deeper card separation. */
-#root aside {
-  background-image: linear-gradient(180deg, rgba(18,40,54,.42), transparent 38%);
-  box-shadow: 14px 0 44px rgba(0,0,0,.16);
+/* Press feedback for every tappable surface */
+.tap { transition: transform 160ms var(--ease-out), background-color 160ms ease, border-color 160ms ease; }
+.tap:active { transform: scale(0.97); }
+
+/* Hide scrollbars on horizontal carousels */
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
+/* Legacy classes still used by older pages */
+.guardian-status-chip {
+  display: inline-flex; align-items: center; gap: 6px; border-radius: 999px;
+  border: 1px solid var(--border); padding: 4px 10px; font-size: 12px; color: var(--text-secondary);
 }
-#root header {
-  background: rgba(6,11,18,.82);
-  border-color: rgba(57,215,232,.12);
+.guardian-status-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--success); }
+
+@keyframes radar-sweep { to { transform: rotate(360deg); } }
+@keyframes ping-soft {
+  0% { transform: scale(0.6); opacity: 0.55; }
+  100% { transform: scale(1.9); opacity: 0; }
 }
-#root main {
-  background-image:
-    linear-gradient(rgba(57,215,232,.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(57,215,232,.025) 1px, transparent 1px);
-  background-size: 34px 34px;
-  background-position: center top;
-}
-#root main section,
-#root main article {
-  animation: bg-fade-rise 420ms cubic-bezier(.22,1,.36,1) both;
-}
-#root main section[class*="rounded-2xl"],
-#root main article[class*="rounded-"] {
-  border-color: rgba(76,132,154,.25);
-  box-shadow: 0 12px 34px rgba(0,0,0,.16), inset 0 1px 0 rgba(220,250,255,.025);
-}
-#root main section[class*="rounded-2xl"]:hover,
-#root main article[class*="rounded-"]:hover {
-  border-color: rgba(57,215,232,.38);
-}
-#root aside nav a[aria-current="page"] {
-  background: linear-gradient(100deg, rgba(57,215,232,.16), rgba(57,215,232,.035));
-  box-shadow: inset 0 0 0 1px rgba(57,215,232,.12);
-}
-#root aside nav a[aria-current="page"] span:first-child {
-  box-shadow: 0 0 14px rgba(57,215,232,.75);
-}
-#root button, #root a {
-  transition: transform 180ms cubic-bezier(.22,1,.36,1), border-color 180ms ease,
-    background-color 180ms ease, box-shadow 180ms ease, color 180ms ease;
-}
-#root button:active, #root a:active { transform: scale(.985); }
-#root button:not(:disabled):hover {
-  box-shadow: 0 5px 20px rgba(0,0,0,.12);
-}
-#root h1, #root h2, #root h3 { text-wrap: balance; }
-#root main h1 { letter-spacing: -.035em; }
-@keyframes bg-fade-rise {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes signal-breathe {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(57,215,232,0); }
-  50% { box-shadow: 0 0 0 4px rgba(57,215,232,.055); }
-}
-@media (max-width: 640px) {
-  #root main { background-size: 26px 26px; }
-  #root main { padding-top: 1rem; padding-bottom: 1.5rem; }
-  #root main section[class*="rounded-2xl"] { border-radius: 16px; }
-  #root aside { box-shadow: 22px 0 60px rgba(0,0,0,.4); }
-}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    scroll-behavior: auto !important;
-    animation-duration: .01ms !important;
+    animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: .01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
-  #root main section, #root main article { animation: none; }
-}
-
-/* Dashboard hero: a visible identity for the native security workspace. */
-.guardian-hero::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background:
-    linear-gradient(115deg, rgba(57,215,232,.08), transparent 48%),
-    radial-gradient(ellipse at 82% 18%, rgba(57,215,232,.13), transparent 42%);
-  pointer-events: none;
-}
-.guardian-hero-orbit {
-  animation: guardian-orbit-drift 18s linear infinite;
-  mask-image: linear-gradient(135deg, black, transparent 82%);
-}
-.guardian-status-chip {
-  display: inline-flex;
-  min-height: 30px;
-  align-items: center;
-  gap: 7px;
-  border: 1px solid rgba(57,215,232,.17);
-  border-radius: 999px;
-  background: rgba(5,17,26,.58);
-  padding: 5px 10px;
-  color: var(--text-secondary);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .015em;
-}
-.guardian-status-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 12px rgba(105,229,177,.7);
-}
-#root main button:focus-visible,
-#root main a:focus-visible,
-#root main input:focus-visible,
-#root main select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-@keyframes guardian-orbit-drift {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .guardian-hero-orbit { animation: none; }
-}
-
-
-/* Calm the page rhythm: align section widths and make dense security screens easier to scan. */
-#root main > * {
-  width: 100%;
-  max-width: 1480px;
-  margin-inline: auto;
-}
-#root main section + section,
-#root main article + section {
-  scroll-margin-top: 1.5rem;
-}
-#root main h1 {
-  text-wrap: balance;
-}
-#root main p {
-  text-wrap: pretty;
-}
-@media (min-width: 1024px) {
-  #root main {
-    padding-inline: clamp(1.25rem, 2.2vw, 2.25rem);
-  }
-}
-@media (max-width: 640px) {
-  #root main {
-    background-size: 44px 44px;
-  }
-  #root main section,
-  #root main article {
-    border-radius: 14px;
-  }
-}
-
-/* Final BlueGuardian UI polish inspired by the supplied mobile references. */
-:root {
-  --bg: #070914;
-  --bg-elevated: #0b0d1b;
-  --surface: #111426;
-  --surface-raised: #191d34;
-  --surface-hover: #222743;
-  --border: rgba(139, 147, 194, .17);
-  --border-strong: rgba(116, 125, 255, .34);
-  --text: #f5f6ff;
-  --text-secondary: #b8bdd4;
-  --text-muted: #8188a6;
-  --accent: #5267ff;
-  --accent-strong: #3d54ef;
-  --accent-soft: rgba(82, 103, 255, .15);
-  --success: #62e5c2;
-  --warning: #ffd479;
-  --danger: #ff718b;
-}
-body {
-  background:
-    radial-gradient(ellipse at 92% -8%, rgba(77, 77, 204, .22), transparent 34rem),
-    radial-gradient(ellipse at 0% 36%, rgba(38, 65, 133, .15), transparent 32rem),
-    linear-gradient(145deg, #070914 0%, #0b0e1d 56%, #0d1023 100%);
-}
-#root aside {
-  background-image: linear-gradient(180deg, rgba(39, 42, 78, .64), rgba(12, 14, 28, .9) 48%, rgba(9, 11, 22, .98));
-  border-color: rgba(133, 141, 255, .13);
-}
-#root header {
-  background: rgba(8, 10, 22, .84);
-  border-color: rgba(130, 139, 255, .16);
-  backdrop-filter: blur(18px);
-}
-#root main {
-  background-image:
-    radial-gradient(circle at 1px 1px, rgba(132, 144, 255, .055) 1px, transparent 0);
-  background-size: 28px 28px;
-}
-#root main section[class*="rounded-2xl"],
-#root main article[class*="rounded-"] {
-  border-color: rgba(137, 145, 214, .18);
-  background-color: rgba(17, 20, 39, .86);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .23), inset 0 1px 0 rgba(245, 246, 255, .035);
-}
-#root main section[class*="rounded-2xl"]:hover,
-#root main article[class*="rounded-"]:hover {
-  border-color: rgba(111, 125, 255, .42);
-}
-#root aside nav a[aria-current="page"] {
-  background: linear-gradient(100deg, rgba(82, 103, 255, .2), rgba(82, 103, 255, .045));
-  box-shadow: inset 0 0 0 1px rgba(112, 128, 255, .18);
-}
-#root aside nav a[aria-current="page"] span:first-child {
-  box-shadow: 0 0 14px rgba(94, 109, 255, .65);
-}
-.guardian-hero::before {
-  background:
-    linear-gradient(115deg, rgba(82, 103, 255, .12), transparent 48%),
-    radial-gradient(ellipse at 82% 18%, rgba(93, 104, 255, .2), transparent 42%);
-}
-.guardian-status-chip { border-color: rgba(111, 125, 255, .22); }
-.guardian-status-dot { background: var(--success); box-shadow: 0 0 12px rgba(98, 229, 194, .6); }
-@media (max-width: 640px) {
-  #root main { background-size: 22px 22px; }
-  #root main section[class*="rounded-2xl"] { border-radius: 18px; }
-}
-
-
-/* BlueGuardian final visual system, inspired by the supplied mobile references. */
-:root {
-  --bg: #070914;
-  --bg-elevated: #0b0d1b;
-  --surface: #111426;
-  --surface-raised: #191d34;
-  --surface-hover: #222743;
-  --border: rgba(139, 147, 194, .17);
-  --border-strong: rgba(116, 125, 255, .34);
-  --text: #f5f6ff;
-  --text-secondary: #b8bdd4;
-  --text-muted: #8188a6;
-  --accent: #5267ff;
-  --accent-strong: #3d54ef;
-  --accent-soft: rgba(82, 103, 255, .15);
-  --success: #62e5c2;
-  --warning: #ffd479;
-  --danger: #ff718b;
-}
-body {
-  background:
-    radial-gradient(ellipse at 92% -8%, rgba(77, 77, 204, .22), transparent 34rem),
-    radial-gradient(ellipse at 0% 36%, rgba(38, 65, 133, .15), transparent 32rem),
-    linear-gradient(145deg, #070914 0%, #0b0e1d 56%, #0d1023 100%);
-}
-#root aside {
-  background-image: linear-gradient(180deg, rgba(39, 42, 78, .64), rgba(12, 14, 28, .9) 48%, rgba(9, 11, 22, .98));
-  border-color: rgba(133, 141, 255, .13);
-}
-#root header {
-  background: rgba(8, 10, 22, .84);
-  border-color: rgba(130, 139, 255, .16);
-  backdrop-filter: blur(18px);
-}
-#root main {
-  background-image: radial-gradient(circle at 1px 1px, rgba(132, 144, 255, .055) 1px, transparent 0);
-  background-size: 28px 28px;
-}
-#root main section[class*="rounded-2xl"],
-#root main article[class*="rounded-"] {
-  border-color: rgba(137, 145, 214, .18);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, .23), inset 0 1px 0 rgba(245, 246, 255, .035);
-}
-#root main section[class*="rounded-2xl"]:hover,
-#root main article[class*="rounded-"]:hover {
-  border-color: rgba(111, 125, 255, .42);
-}
-#root aside nav a[aria-current="page"] {
-  background: linear-gradient(100deg, rgba(82, 103, 255, .2), rgba(82, 103, 255, .045));
-  box-shadow: inset 0 0 0 1px rgba(112, 128, 255, .18);
-}
-#root aside nav a[aria-current="page"] span:first-child {
-  box-shadow: 0 0 14px rgba(94, 109, 255, .65);
-}
-.guardian-hero::before {
-  background: linear-gradient(115deg, rgba(82, 103, 255, .12), transparent 48%), radial-gradient(ellipse at 82% 18%, rgba(93, 104, 255, .2), transparent 42%);
-}
-.guardian-status-chip { border-color: rgba(111, 125, 255, .22); }
-.guardian-status-dot { background: var(--success); box-shadow: 0 0 12px rgba(98, 229, 194, .6); }
-@media (max-width: 640px) {
-  #root main { background-size: 22px 22px; }
-  #root main section[class*="rounded-2xl"] { border-radius: 18px; }
 }

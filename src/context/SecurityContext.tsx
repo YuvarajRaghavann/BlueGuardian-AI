@@ -9,6 +9,7 @@ import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
+import { intel } from '../intel/store';
 import { SIMULATOR_ENABLED } from '../config/buildFlags';
 
 interface SecurityState {
@@ -178,6 +179,9 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
       : undefined;
     const actionRecord = createSecurityAction(type, device, reason, 'USER', simulated, previousState, newState);
     dispatch({ type: 'ADD_ACTION', payload: actionRecord });
+    // Owner decisions are evidence in the device's trust ledger.
+    const decision = type === 'TRUST' ? 'trust' : type === 'MARK_UNKNOWN' ? 'untrust' : type === 'BLOCK' ? 'block' : type === 'UNBLOCK' ? 'unblock' : null;
+    if (decision && device.address && !simulated) intel.recordDecision(device.address, decision, device.name);
 
     const updatedDeviceForStorage = type === 'FORGET'
       ? null

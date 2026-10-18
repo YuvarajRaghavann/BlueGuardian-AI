@@ -264,11 +264,7 @@ export function Recovery() {
   return (
     <div className="space-y-5">
       <header>
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--accent)]">
-          <MapPin className="h-3.5 w-3.5" />
-          Find my devices
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">Where did I leave it?</h1>
+        <h2 className="text-[26px] font-extrabold leading-tight text-[var(--text)]">Where did I leave it?</h2>
         <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
           BlueGuardian notes the time and place each time a device disconnects from this phone. That's usually where your earbuds fell out
           or got left behind. You can open the spot in Maps, share it, or use the signal meter to find the device.

@@ -10,6 +10,8 @@ export interface NativeBleObservation {
   manufacturerData?: Record<string, string>;
   /** service UUID -> payload hex */
   serviceData?: Record<string, string>;
+  /** Advertised transmit power (dBm at 0 m), when the device includes it. */
+  txPower?: number;
   connectable?: boolean;
   observedAt: number;
 }

@@ -49,6 +49,8 @@ export interface DeviceProfile {
   days: string[];
   rssi: Running;
   sightings: Sighting[];
+  /** Beta-reputation trust state (see trust section below). Missing on profiles from older builds. */
+  trust?: TrustState;
 }
 
 export type FindingKind = 'tracker_following' | 'popup_spam' | 'lookalike';
@@ -234,8 +236,44 @@ export class IntelEngine {
     return this.activeFindings().filter((f) => f.deviceAddress === key);
   }
 
+  /** Owner decisions are evidence too, and appear in the ledger. */
+  recordDecision(address: string, decision: 'trust' | 'untrust' | 'block' | 'unblock', name?: string, now = Date.now()): void {
+    const key = address.toUpperCase();
+    const p: DeviceProfile = this.snap.profiles[key] ?? {
+      address: key, name, family: 'unknown', tracker: false, separated: null, paired: false,
+      firstSeen: now, lastSeen: now, scans: 0, days: [], rssi: emptyRunning(), sightings: [],
+    };
+    const t = p.trust ?? newTrust(now);
+    p.trust = t;
+    const W = TRUST.weights;
+    if (decision === 'trust' && !t.credited.user_trust) {
+      t.credited.user_trust = now;
+      addEvidence(t, now, 'user_trust', W.user_trust, 'You marked it as trusted');
+    } else if (decision === 'untrust') {
+      delete t.credited.user_trust;
+      addEvidence(t, now, 'user_untrust', W.user_untrust, 'You removed your trust');
+    } else if (decision === 'block') {
+      addEvidence(t, now, 'user_block', W.user_block, 'You blocked it');
+    }
+    this.snap.profiles[key] = p;
+    this.commit();
+  }
+
+  /** "Trusted" also needs your consent: pairing or an explicit Trust. Otherwise the best level is "Likely safe". */
+  trustOf(address?: string, now = Date.now()): TrustOpinion {
+    const t = address ? this.snap.profiles[address.toUpperCase()]?.trust : undefined;
+    const o = trustOpinion(t, now);
+    if (o.level === 'trusted' && !(t?.credited.paired || t?.credited.user_trust)) return { ...o, level: 'likely_safe' };
+    return o;
+  }
+
   markMine(address: string): void {
     const key = address.toUpperCase();
+    const prof = this.snap.profiles[key];
+    if (prof) {
+      prof.trust = prof.trust ?? newTrust(Date.now());
+      addEvidence(prof.trust, Date.now(), 'user_mine', TRUST.weights.user_mine, 'You said this tracker is yours');
+    }
     if (!this.snap.mine.includes(key)) this.snap.mine = [...this.snap.mine, key];
     this.snap.findings = this.snap.findings.filter((f) => f.deviceAddress !== key);
     this.commit();
@@ -266,11 +304,48 @@ export class IntelEngine {
         address: key, family: 'unknown', tracker: false, separated: null, paired: false,
         firstSeen: now, lastSeen: now, scans: 0, days: [], rssi: emptyRunning(), sightings: [],
       };
+      const trust = p.trust ?? newTrust(now);
+      p.trust = trust;
+      const W = TRUST.weights;
+      let identityChanged = false;
+      if (o.name && p.name && norm(o.name) !== norm(p.name) && p.scans > 0) {
+        identityChanged = true;
+        addEvidence(trust, now, 'identity_change', W.identity_change, `Name changed from “${p.name}” to “${o.name}”`);
+      }
+      if (advert && advert.family !== 'unknown' && p.family !== 'unknown' && p.family !== advert.family) {
+        identityChanged = true;
+        addEvidence(trust, now, 'identity_change', W.identity_change, `Advertised type changed (${p.family} → ${advert.family})`);
+      }
       if (o.name) p.name = o.name;
       if (advert && advert.family !== 'unknown') {
         p.family = advert.family;
         p.tracker = advert.isTracker;
         p.separated = advert.separated;
+      }
+      if (o.paired && !trust.credited.paired) {
+        trust.credited.paired = now;
+        addEvidence(trust, now, 'paired', W.paired, 'Paired with this phone (keys exchanged with your approval)');
+      }
+      if (o.connected && !sameDay(trust.credited.connected, now)) {
+        trust.credited.connected = now;
+        addEvidence(trust, now, 'connected', W.connected, 'Connected to your phone today');
+      }
+      let anomalous = false;
+      if (typeof o.rssi === 'number' && p.rssi.n >= TRUST.signalMinSamples) {
+        const z = (o.rssi - p.rssi.mean) / Math.max(3, sd(p.rssi));
+        if (Math.abs(z) > TRUST.signalAnomalyZ) {
+          anomalous = true;
+          addEvidence(trust, now, 'signal_anomaly', W.signal_anomaly, `Signal ${o.rssi} dBm is far from its usual ${p.rssi.mean.toFixed(0)} dBm (z = ${z.toFixed(1)})`);
+        }
+      }
+      if (!identityChanged && !anomalous) {
+        const today = sameDay(trust.credited.consistentDay, now) ? (trust.credited.consistentAmount ?? 0) : 0;
+        const credit = Math.min(W.consistent, W.consistentDailyCap - today);
+        if (credit > 1e-9) {
+          trust.credited.consistentDay = now;
+          trust.credited.consistentAmount = today + credit;
+          addEvidence(trust, now, 'consistent', credit, 'Seen again, behaving as before');
+        }
       }
       p.paired = Boolean(o.paired);
       p.lastSeen = now;
@@ -292,6 +367,18 @@ export class IntelEngine {
       const full: Finding = { ...f, detectedAt: existing?.detectedAt ?? now, updatedAt: now };
       this.snap.findings = [...this.snap.findings.filter((x) => x.id !== f.id), full];
       raised.push(full);
+      // A finding is negative evidence for the device it concerns (at most once a day per finding).
+      const target = f.deviceAddress ? this.snap.profiles[f.deviceAddress] : undefined;
+      if (target) {
+        const t = target.trust ?? newTrust(now);
+        target.trust = t;
+        const key = 'finding:' + f.id;
+        if (!sameDay(t.credited[key], now)) {
+          t.credited[key] = now;
+          const kind = f.severity === 'high' ? 'finding_high' : f.severity === 'medium' ? 'finding_medium' : 'finding_low';
+          addEvidence(t, now, kind, TRUST.weights[kind], f.title);
+        }
+      }
     };
 
     // 1. Trackers following you
@@ -361,6 +448,124 @@ export class IntelEngine {
     }
   }
 }
+
+// ----------------------------------------------------------------------------
+// Trust score: Beta Reputation System / Subjective Logic (Jøsang & Ismail 2002;
+// Jøsang 2016). Positive evidence r and negative evidence s from real
+// observations form a Beta(r+1, s+1)-style opinion:
+//   belief b = r/(r+s+W)   disbelief d = s/(r+s+W)   uncertainty u = W/(r+s+W)
+//   trust  P = b + a·u   (a = 0.5 base rate, W = 2 non-informative prior)
+// Evidence fades with a 14-day half-life, so trust must keep being earned and
+// old mistakes are forgiven slowly. Every change is written to a ledger.
+// ----------------------------------------------------------------------------
+
+export interface Evidence {
+  at: number;
+  kind: EvidenceKind;
+  /** Positive = adds to r (good evidence), negative = adds to s (bad evidence). */
+  delta: number;
+  note: string;
+}
+
+export type EvidenceKind =
+  | 'paired' | 'user_trust' | 'user_untrust' | 'user_block' | 'user_mine'
+  | 'consistent' | 'connected' | 'identity_change' | 'signal_anomaly'
+  | 'finding_high' | 'finding_medium' | 'finding_low';
+
+export interface TrustState {
+  r: number;
+  s: number;
+  at: number;
+  ledger: Evidence[];
+  history: Array<{ at: number; p: number; c: number }>;
+  /** Last time each once-per-period credit was given. */
+  credited: Record<string, number>;
+}
+
+export const TRUST = {
+  W: 2,
+  baseRate: 0.5,
+  halfLifeMs: 14 * 86_400_000,
+  weights: {
+    paired: 3,
+    user_trust: 5,
+    user_untrust: -2,
+    user_block: -10,
+    user_mine: 2,
+    consistent: 0.3,
+    consistentDailyCap: 1,
+    connected: 0.5,
+    identity_change: -1.5,
+    signal_anomaly: -0.4,
+    finding_high: -5,
+    finding_medium: -2,
+    finding_low: -0.75,
+  },
+  signalAnomalyZ: 4,
+  signalMinSamples: 8,
+  maxLedger: 40,
+  maxHistory: 120,
+};
+
+export type TrustLevel = 'unverified' | 'trusted' | 'likely_safe' | 'uncertain' | 'untrusted';
+
+export interface TrustOpinion {
+  belief: number;
+  disbelief: number;
+  uncertainty: number;
+  /** Projected trust probability 0..1 (shown as 0–100). */
+  p: number;
+  /** 1 − uncertainty: how much evidence backs the score. */
+  confidence: number;
+  level: TrustLevel;
+  positive: number;
+  negative: number;
+}
+
+export function newTrust(now: number): TrustState {
+  return { r: 0, s: 0, at: now, ledger: [], history: [], credited: {} };
+}
+
+function decayed(t: TrustState, now: number): { r: number; s: number } {
+  const f = Math.pow(0.5, Math.max(0, now - t.at) / TRUST.halfLifeMs);
+  return { r: t.r * f, s: t.s * f };
+}
+
+export function opinionFrom(r: number, s: number): TrustOpinion {
+  const total = r + s + TRUST.W;
+  const belief = r / total;
+  const disbelief = s / total;
+  const uncertainty = TRUST.W / total;
+  const p = belief + TRUST.baseRate * uncertainty;
+  const confidence = 1 - uncertainty;
+  const level: TrustLevel = confidence < 0.35 ? 'unverified'
+    : p >= 0.8 ? 'trusted'
+      : p >= 0.6 ? 'likely_safe'
+        : p >= 0.4 ? 'uncertain' : 'untrusted';
+  return { belief, disbelief, uncertainty, p, confidence, level, positive: r, negative: s };
+}
+
+export function trustOpinion(t: TrustState | undefined, now = Date.now()): TrustOpinion {
+  if (!t) return opinionFrom(0, 0);
+  const { r, s } = decayed(t, now);
+  return opinionFrom(r, s);
+}
+
+/** Apply one piece of evidence: decay to now, add, log it, record a history point. */
+export function addEvidence(t: TrustState, now: number, kind: EvidenceKind, delta: number, note: string): void {
+  const { r, s } = decayed(t, now);
+  t.r = r + Math.max(0, delta);
+  t.s = s + Math.max(0, -delta);
+  t.at = now;
+  t.ledger = [...t.ledger, { at: now, kind, delta, note }].slice(-TRUST.maxLedger);
+  const o = opinionFrom(t.r, t.s);
+  const last = t.history[t.history.length - 1];
+  const point = { at: now, p: Math.round(o.p * 1000) / 1000, c: Math.round(o.confidence * 1000) / 1000 };
+  if (last && now - last.at < 60_000) t.history[t.history.length - 1] = point;
+  else t.history = [...t.history, point].slice(-TRUST.maxHistory);
+}
+
+const sameDay = (a: number | undefined, b: number) => a !== undefined && dayKey(a) === dayKey(b);
 
 export type Standing = 'yours' | 'familiar' | 'new';
 

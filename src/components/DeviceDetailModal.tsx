@@ -1,16 +1,19 @@
 import { useState } from 'react';
-import {
-  Ban, Bluetooth, CheckCircle, Cpu, Headphones, HelpCircle, Laptop, MapPin, RotateCcw, ShieldAlert, ShieldCheck, Smartphone, Trash2, Watch, X,
-} from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Ban, CheckCircle, ChevronRight, MapPin, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
-import type { BluetoothDevice, DeviceType, SecurityActionType } from '../types';
+import type { BluetoothDevice, SecurityActionType } from '../types';
 import { useSecurity } from '../context/SecurityContext';
 import { useBluetoothDevices } from '../context/DeviceContext';
 import { NativeConnectPanel } from './NativeConnectPanel';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 import { useIntel } from '../intel/store';
-import { standingOf } from '../intel/engine';
-import { proximityBand } from '../services/myDevices';
+import { TRUST, opinionFrom } from '../intel/engine';
+import { estimateDistanceM, formatDistance } from '../intel/distance';
+import { BottomSheet } from '../ui/BottomSheet';
+import { TrustDial } from '../ui/TrustDial';
+import { EvidenceLedger, TrustHistory } from '../ui/TrustHistory';
+import { LEVEL, score } from '../ui/trust';
 import { cn } from '../utils/cn';
 
 interface DeviceDetailModalProps {
@@ -18,121 +21,129 @@ interface DeviceDetailModalProps {
   onClose: () => void;
 }
 
-const typeIcons: Record<DeviceType, typeof Bluetooth> = {
-  smartphone: Smartphone,
-  earbuds: Headphones,
-  headphones: Headphones,
-  smartwatch: Watch,
-  laptop: Laptop,
-  iot: Cpu,
-  unknown: HelpCircle,
-};
-
-const STANDING = {
-  yours: { label: 'Yours', className: 'bg-[var(--success)]/15 text-[var(--success)]' },
-  familiar: { label: 'Familiar', className: 'bg-[var(--accent-soft)] text-[var(--accent)]' },
-  new: { label: 'New', className: 'bg-[var(--surface-hover)] text-[var(--text-secondary)]' },
-} as const;
-
-const ACTION_LABEL: Record<SecurityActionType, string> = {
-  TRUST: 'Trust',
-  MARK_UNKNOWN: 'Untrust',
-  BLOCK: 'Block',
-  UNBLOCK: 'Unblock',
-  FORGET: 'Forget',
-  INVESTIGATE: 'Investigate',
-  RESOLVE_THREAT: 'Resolve',
-  DISMISS_THREAT: 'Dismiss',
-} as Record<SecurityActionType, string>;
-
-function Fact({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Fact({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">{label}</p>
-      <p className="mt-1 text-sm font-semibold text-[var(--text)]">{value}</p>
-      {sub && <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{sub}</p>}
+    <div className="rounded-2xl bg-[var(--surface)] px-3 py-2.5">
+      <p className="text-[11px] text-[var(--text-muted)]">{label}</p>
+      <p className="mt-0.5 truncate text-sm font-semibold text-[var(--text)]">{value}</p>
     </div>
   );
 }
 
-/** Short, factual device view: who it is, what we know from real history, and any evidence-based alert. */
+/** How the number was produced, using this device's actual evidence. */
+function HowCalculated({ r, s }: { r: number; s: number }) {
+  const o = opinionFrom(r, s);
+  const W = TRUST.W;
+  const a = TRUST.baseRate;
+  return (
+    <div className="space-y-3 text-sm leading-6 text-[var(--text-secondary)]">
+      <p>
+        BlueGuardian uses a Beta reputation model (subjective logic, Jøsang). Every real observation is evidence:
+        good behaviour adds to <b className="text-[var(--success)]">r</b>, warning signs add to <b className="text-[var(--danger)]">s</b>.
+        Evidence loses half its weight every 14 days, so trust has to keep being earned.
+      </p>
+      <div className="rounded-2xl bg-[var(--surface)] p-3 text-[13px] text-[var(--text)]">
+        <p>Good evidence r = {r.toFixed(2)}, warning evidence s = {s.toFixed(2)}</p>
+        <p className="mt-1">Score = (r + {a} × {W}) ÷ (r + s + {W}) = ({r.toFixed(2)} + {a * W}) ÷ {(r + s + W).toFixed(2)} = <b>{score(o)}</b></p>
+        <p className="mt-1">Certainty = (r + s) ÷ (r + s + {W}) = <b>{Math.round(o.confidence * 100)}%</b></p>
+      </div>
+      <p>
+        “Trusted” also needs your consent (pairing or tapping Trust); without it the best level is “Likely safe”.
+        A new device starts at 50 with 0% certainty, which means unknown, not risky. Pairing (+3), your trust (+5) and
+        consistent sightings (+0.3 each, at most +1 a day) raise it. Alerts (−5, −2 or −0.75), identity changes (−1.5),
+        unusual signal (−0.4) and blocking (−10) lower it.
+      </p>
+    </div>
+  );
+}
+
 export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
   const { executeAction, getAllowedActions } = useSecurity();
   const { state: deviceState } = useBluetoothDevices();
   const engine = useIntel();
   const [confirm, setConfirm] = useState<SecurityActionType | null>(null);
+  const [showHow, setShowHow] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const current = device ? deviceState.devices.find((d) => d.id === device.id) ?? device : null;
-  if (!current) return null;
 
-  const profile = current.address ? engine.profile(current.address) : undefined;
-  const { standing, detail } = standingOf(profile, Boolean(current.paired), current.trusted);
-  const findings = engine.findingsFor(current.address);
-  const Icon = typeIcons[current.type] ?? HelpCircle;
-  const band = proximityBand(typeof current.rssi === 'number' ? current.rssi : null);
-  const connection = current.connectionStatus === 'connected' ? 'Connected' : current.paired ? 'Paired' : 'Nearby';
-  const actions = getAllowedActions(current).filter((a) => ['TRUST', 'MARK_UNKNOWN', 'BLOCK', 'UNBLOCK', 'FORGET'].includes(a));
-  const isTracker = Boolean(current.tracker || profile?.tracker);
-  const owned = Boolean(current.address && engine.snapshot.mine.includes(current.address.toUpperCase()));
+  const profile = current?.address ? engine.profile(current.address) : undefined;
+  const trust = profile?.trust;
+  const opinion = engine.trustOf(current?.address);
+  const findings = engine.findingsFor(current?.address);
+  const actions = current ? getAllowedActions(current).filter((a) => ['TRUST', 'MARK_UNKNOWN', 'BLOCK', 'UNBLOCK', 'FORGET'].includes(a)) : [];
+  const isTracker = Boolean(current?.tracker || profile?.tracker);
+  const owned = Boolean(current?.address && engine.snapshot.mine.includes(current.address.toUpperCase()));
+  const distance = estimateDistanceM(current?.rssi, current?.txPower);
 
   const run = (type: SecurityActionType) => {
-    if (type === 'BLOCK' || type === 'FORGET') {
-      setConfirm(type);
-      return;
-    }
-    executeAction(type, current, 'Changed by the owner from the device view.');
+    if (!current) return;
+    if (type === 'BLOCK' || type === 'FORGET') { setConfirm(type); return; }
+    executeAction(type, current, 'Changed by the owner.');
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={current.name}>
-      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-[var(--border)] bg-[var(--bg-elevated)] sm:rounded-3xl">
-        <div className="flex items-center gap-3 border-b border-[var(--border)] p-4">
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
-            <Icon className="h-5 w-5" />
+    <BottomSheet open={Boolean(current)} onClose={onClose} label={current?.name ?? 'Device'}>
+      {current && (
+        <div className="space-y-5 px-5 pb-8 pt-2">
+          <div className="text-center">
+            <h2 className="text-xl font-bold">{current.name}</h2>
+            <p className="mt-0.5 text-sm text-[var(--text-muted)]">
+              {current.familyLabel ?? (current.paired ? 'Paired with this phone' : 'Bluetooth device')}
+            </p>
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-semibold text-[var(--text)]">{current.name}</p>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-semibold', STANDING[standing].className)}>{STANDING[standing].label}</span>
-              {current.familyLabel && <span className="rounded-full bg-[var(--surface-hover)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">{current.familyLabel}</span>}
-              {current.blocked && <span className="rounded-full bg-[var(--danger)]/15 px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]">Blocked</span>}
-            </div>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface)]"><X className="h-5 w-5" /></button>
-        </div>
 
-        <div className="space-y-4 p-4">
+          <div className="flex flex-col items-center">
+            <TrustDial opinion={opinion} />
+            <p className="mt-3 text-base font-semibold" style={{ color: LEVEL[opinion.level].color }}>{LEVEL[opinion.level].label}</p>
+            <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+              From {trust?.ledger.length ?? 0} piece{trust?.ledger.length === 1 ? '' : 's'} of evidence
+            </p>
+          </div>
+
           <div className="grid grid-cols-3 gap-2">
-            <Fact label="Status" value={connection} />
-            <Fact label="Signal" value={typeof current.rssi === 'number' ? `${current.rssi} dBm` : '—'} sub={typeof current.rssi === 'number' ? band.label.split(' (')[0] : undefined} />
-            <Fact label="History" value={standing === 'yours' ? 'Yours' : profile ? `${profile.scans} scan${profile.scans === 1 ? '' : 's'}` : 'New'} sub={detail} />
+            <Fact label="Status" value={current.connectionStatus === 'connected' ? 'Connected' : current.paired ? 'Paired' : current.blocked ? 'Blocked' : 'Nearby'} />
+            <Fact label="Distance" value={formatDistance(distance)} />
+            <Fact label="Seen" value={profile ? `${profile.scans} time${profile.scans === 1 ? '' : 's'}` : 'Once'} />
           </div>
 
-          {findings.length > 0 ? (
-            findings.map((f) => (
-              <div key={f.id} className={cn('rounded-xl border p-3', f.severity === 'high' ? 'border-[var(--danger)]/40 bg-[var(--danger)]/10' : 'border-[var(--warning)]/40 bg-[var(--warning)]/10')}>
-                <p className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-                  <ShieldAlert className={cn('h-4 w-4', f.severity === 'high' ? 'text-[var(--danger)]' : 'text-[var(--warning)]')} /> {f.title}
-                </p>
-                <ul className="mt-2 space-y-0.5 text-xs text-[var(--text-secondary)]">
-                  {f.evidence.map((e) => <li key={e}>• {e}</li>)}
-                </ul>
-                <p className="mt-2 text-xs font-medium text-[var(--text)]">{f.action}</p>
-              </div>
-            ))
-          ) : (
-            <div className="flex items-start gap-2.5 rounded-xl border border-[var(--success)]/30 bg-[var(--success)]/10 p-3">
-              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--success)]" />
-              <div>
-                <p className="text-sm font-semibold text-[var(--text)]">No issues found</p>
-                <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Checked for tracking, impersonation and popup spam.</p>
-              </div>
+          {findings.map((f) => (
+            <div key={f.id} className={cn('rounded-2xl p-4', f.severity === 'high' ? 'bg-[var(--danger)]/12' : 'bg-[var(--warning)]/12')}>
+              <p className="flex items-center gap-2 font-semibold"><ShieldAlert className="h-4 w-4" style={{ color: f.severity === 'high' ? 'var(--danger)' : 'var(--warning)' }} />{f.title}</p>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">{f.summary}</p>
+              <p className="mt-2 text-sm font-medium">{f.action}</p>
             </div>
-          )}
+          ))}
+
+          <section>
+            <h3 className="mb-2 text-sm font-semibold">Trust over time</h3>
+            <TrustHistory trust={trust} />
+          </section>
+
+          <section>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Why this score</h3>
+              {(trust?.ledger.length ?? 0) > 6 && (
+                <button type="button" onClick={() => setShowAll((v) => !v)} className="text-xs font-semibold text-[var(--accent)]">{showAll ? 'Show less' : 'Show all'}</button>
+              )}
+            </div>
+            <EvidenceLedger ledger={trust?.ledger ?? []} limit={showAll ? 40 : 6} />
+          </section>
+
+          <button type="button" onClick={() => setShowHow((v) => !v)} className="tap flex w-full items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3 text-left text-sm font-semibold">
+            How this score is calculated
+            <ChevronRight className={cn('h-4 w-4 transition-transform', showHow && 'rotate-90')} />
+          </button>
+          <AnimatePresence initial={false}>
+            {showHow && (
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                <HowCalculated r={opinion.positive} s={opinion.negative} />
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {isTracker && !current.paired && current.address && (
-            <button type="button" disabled={owned}
-              onClick={() => current.address && engine.markMine(current.address)}
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] py-2.5 text-sm font-semibold text-[var(--text)] disabled:opacity-50">
+            <button type="button" disabled={owned} onClick={() => current.address && engine.markMine(current.address)}
+              className="tap flex w-full items-center justify-center gap-2 rounded-2xl bg-[var(--surface)] py-3 text-sm font-semibold disabled:opacity-50">
               <MapPin className="h-4 w-4" /> {owned ? 'Marked as your tracker' : 'This tracker is mine'}
             </button>
           )}
@@ -142,51 +153,43 @@ export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
           )}
 
           {actions.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="grid grid-cols-2 gap-2">
               {actions.map((a) => (
                 <button key={a} type="button" onClick={() => run(a)}
-                  className={cn('inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-sm font-medium',
-                    a === 'TRUST' ? 'border-[var(--success)]/30 text-[var(--success)]'
-                      : a === 'BLOCK' ? 'border-[var(--danger)]/30 text-[var(--danger)]'
-                        : 'border-[var(--border)] text-[var(--text-secondary)]')}>
+                  className={cn('tap flex min-h-12 items-center justify-center gap-2 rounded-2xl text-sm font-semibold',
+                    a === 'TRUST' ? 'bg-[var(--success)] text-[#06231a]'
+                      : a === 'BLOCK' ? 'bg-[var(--danger)]/15 text-[var(--danger)]'
+                        : 'bg-[var(--surface)] text-[var(--text-secondary)]')}>
                   {a === 'TRUST' && <CheckCircle className="h-4 w-4" />}
                   {a === 'BLOCK' && <Ban className="h-4 w-4" />}
                   {a === 'UNBLOCK' && <RotateCcw className="h-4 w-4" />}
                   {a === 'FORGET' && <Trash2 className="h-4 w-4" />}
-                  {ACTION_LABEL[a] ?? a}
+                  {a === 'TRUST' ? 'Trust' : a === 'MARK_UNKNOWN' ? 'Remove trust' : a === 'BLOCK' ? 'Block' : a === 'UNBLOCK' ? 'Unblock' : 'Forget'}
                 </button>
               ))}
             </div>
           )}
 
-          <p className="text-[11px] text-[var(--text-muted)]">
-            {current.address ?? 'Address hidden by browser'} · last seen {formatDistanceToNow(new Date(current.lastSeen), { addSuffix: true })}
+          <p className="text-center text-[11px] text-[var(--text-muted)]">
+            {current.address ?? 'Address hidden'}, last seen {formatDistanceToNow(new Date(current.lastSeen), { addSuffix: true })}
           </p>
-        </div>
-      </div>
 
-      {confirm && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-5">
-            <p className="text-base font-semibold text-[var(--text)]">{confirm === 'BLOCK' ? `Block ${current.name}?` : `Forget ${current.name}?`}</p>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {confirm === 'BLOCK' ? 'BlueGuardian will warn you and refuse to connect to it.' : 'Its history in BlueGuardian will be removed.'}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button type="button" onClick={() => setConfirm(null)} className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm text-[var(--text-secondary)]">Cancel</button>
-              <button type="button"
-                onClick={() => {
-                  executeAction(confirm, current, 'Confirmed by the owner.');
-                  setConfirm(null);
-                  if (confirm === 'FORGET') onClose();
-                }}
-                className="rounded-xl bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white">
-                {confirm === 'BLOCK' ? 'Block' : 'Forget'}
-              </button>
-            </div>
-          </div>
+          <AnimatePresence>
+            {confirm && (
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+                className="rounded-2xl border border-[var(--danger)]/30 bg-[var(--surface)] p-4">
+                <p className="font-semibold">{confirm === 'BLOCK' ? `Block ${current.name}?` : `Forget ${current.name}?`}</p>
+                <p className="mt-1 text-sm text-[var(--text-secondary)]">{confirm === 'BLOCK' ? 'Its trust drops to untrusted and BlueGuardian will refuse to connect to it.' : 'Its history and trust record in BlueGuardian are removed.'}</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button type="button" onClick={() => setConfirm(null)} className="tap rounded-xl bg-[var(--surface-raised)] py-2.5 text-sm">Cancel</button>
+                  <button type="button" onClick={() => { executeAction(confirm, current, 'Confirmed by the owner.'); setConfirm(null); if (confirm === 'FORGET') onClose(); }}
+                    className="tap rounded-xl bg-[var(--danger)] py-2.5 text-sm font-semibold text-[#1a0d08]">{confirm === 'BLOCK' ? 'Block' : 'Forget'}</button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
-    </div>
+    </BottomSheet>
   );
 }

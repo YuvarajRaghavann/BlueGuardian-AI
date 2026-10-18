@@ -277,6 +277,9 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         observation.put("serviceUuids", serviceUuids);
         observation.put("manufacturerData", manufacturerData);
         observation.put("serviceData", serviceData);
+        if (record != null && record.getTxPowerLevel() != Integer.MIN_VALUE) {
+            observation.put("txPower", record.getTxPowerLevel());
+        }
         observation.put("observedAt", now);
         observation.put("transport", "BLE");
         observation.put("source", "REAL");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyAdvert, isGenericName } from './advert';
-import { IntelEngine, standingOf, type ScanObservation } from './engine';
+import { IntelEngine, opinionFrom, standingOf, type ScanObservation } from './engine';
 
 const MIN = 60_000;
 const airtagSeparated = { manufacturerData: { '004c': '1219' + '00'.repeat(25) } };
@@ -140,5 +140,61 @@ describe('look-alikes and standing', () => {
       { address: 'CA:R0:00', name: 'CAR AUDIO', transport: 'CLASSIC' },
     ]);
     expect(raised).toHaveLength(0);
+  });
+});
+
+describe('trust score (Beta reputation with decay)', () => {
+  it('starts at 50 with no confidence, not a made-up number', () => {
+    const o = opinionFrom(0, 0);
+    expect(o.p).toBe(0.5);
+    expect(o.confidence).toBe(0);
+    expect(o.level).toBe('unverified');
+  });
+
+  it('earns trust from pairing and consistent behaviour, recorded in a ledger and history', () => {
+    const e = new IntelEngine();
+    const t0 = 1_000_000_000_000;
+    for (let d = 0; d < 4; d++) {
+      scanAt(e, t0 + d * 86_400_000, [{ address: 'B5:60:99:3A:6A:C1', name: 'boAt Rockerz 255', transport: 'PAIRED', paired: true, connected: true }]);
+    }
+    const o = e.trustOf('B5:60:99:3A:6A:C1', t0 + 3 * 86_400_000);
+    expect(o.level).toBe('trusted');
+    const t = e.profile('B5:60:99:3A:6A:C1')!.trust!;
+    expect(t.ledger.some((x) => x.kind === 'paired')).toBe(true);
+    expect(t.ledger.filter((x) => x.kind === 'paired')).toHaveLength(1);
+    expect(t.history.length).toBeGreaterThan(3);
+  });
+
+  it('caps daily credit so one busy day cannot buy trust', () => {
+    const e = new IntelEngine();
+    const t0 = 1_000_000_000_000;
+    for (let i = 0; i < 50; i++) scanAt(e, t0 + i * MIN, [{ address: 'CC:00:00:00:00:01', name: 'Speaker X1', transport: 'BLE' }]);
+    expect(e.trustOf('CC:00:00:00:00:01', t0 + 50 * MIN).positive).toBeLessThanOrEqual(1.0001);
+  });
+
+  it('drops sharply on evidence of a threat and on identity changes', () => {
+    const e = new IntelEngine();
+    const t0 = 1_000_000_000_000;
+    const tag: ScanObservation = { address: 'AA:BB:CC:00:11:22', transport: 'BLE', rssi: -60, advert: airtagSeparated };
+    scanAt(e, t0, [tag], { lat: 12.97, lng: 77.59 });
+    scanAt(e, t0 + 20 * MIN, [tag], { lat: 12.98, lng: 77.60 });
+    scanAt(e, t0 + 45 * MIN, [tag], { lat: 12.99, lng: 77.61 });
+    const o = e.trustOf(tag.address, t0 + 45 * MIN);
+    expect(o.p).toBeLessThan(0.4);
+    expect(o.level).toBe('untrusted');
+
+    const f = new IntelEngine();
+    scanAt(f, t0, [{ address: 'DD:00:00:00:00:01', name: 'Office Printer', transport: 'BLE' }]);
+    scanAt(f, t0 + MIN, [{ address: 'DD:00:00:00:00:01', name: 'Free Headphones', transport: 'BLE' }]);
+    expect(f.profile('DD:00:00:00:00:01')!.trust!.ledger.some((x) => x.kind === 'identity_change')).toBe(true);
+  });
+
+  it('forgets old evidence with a 14-day half-life', () => {
+    const e = new IntelEngine();
+    const t0 = 1_000_000_000_000;
+    e.recordDecision('EE:00:00:00:00:01', 'trust', 'Watch', t0);
+    const fresh = e.trustOf('EE:00:00:00:00:01', t0).positive;
+    const later = e.trustOf('EE:00:00:00:00:01', t0 + 14 * 86_400_000).positive;
+    expect(Math.round(later * 100) / 100).toBe(Math.round((fresh / 2) * 100) / 100);
   });
 });
