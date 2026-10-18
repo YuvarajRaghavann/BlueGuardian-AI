@@ -9,6 +9,7 @@ on:
       - 'android/phase5-combined-scanning-*'
       - 'android/phase6-backend-integration-*'
       - 'android/phase6-final-ux-*'
+      - 'feature/btguard-*'
   workflow_dispatch:
 
 permissions:
