@@ -12,6 +12,7 @@ import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
 import { API_BASE_CHANGED_EVENT } from '../services/apiBase';
 import { loadSecurityPolicy } from '../services/localSettings';
+import { myDevices, type KnownDevice } from '../services/myDevices';
 import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
 
 const DEFAULT_SECURITY_POLICY: SecurityPolicy = {
@@ -149,7 +150,10 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
         rssi: typeof incoming.rssi === 'number' ? incoming.rssi : existing.rssi,
         lastSeen: incoming.lastSeen,
         ...(shouldRefreshConnection ? {
-          connectionStatus: incoming.connectionStatus,
+          // A scan sighting ("unknown") must not erase a live "connected" state read from Android.
+          connectionStatus: incoming.connectionStatus === 'unknown' && existing.connectionStatus === 'connected'
+            ? existing.connectionStatus
+            : incoming.connectionStatus,
           gattConnected: incoming.gattConnected,
           connectionHealth: incoming.connectionHealth,
         } : {}),
@@ -741,6 +745,45 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  /**
+   * Paired and currently-connected devices reported by Android itself. Connected
+   * earbuds/speakers stop advertising, so scans alone never list them.
+   */
+  const registerKnownDevice = (known: KnownDevice) => {
+    const address = String(known.address || '').trim();
+    if (!address) return;
+    const now = new Date();
+    const deviceName = resolveBluetoothDisplayName(known.name);
+    const transports: Array<'BLE' | 'CLASSIC'> = known.type === 'LE' ? ['BLE'] : known.type === 'DUAL' ? ['BLE', 'CLASSIC'] : ['CLASSIC'];
+    const device: BluetoothDevice = {
+      id: 'android-combined:' + address.toLowerCase(),
+      name: deviceName,
+      type: known.category === 'audio' ? inferDeviceType(deviceName || 'headphones') : inferDeviceType(deviceName),
+      address,
+      rssi: undefined,
+      trusted: false,
+      trustScore: 0,
+      riskLevel: 'high',
+      connectionStatus: known.connected ? 'connected' : 'disconnected',
+      firstSeen: now,
+      lastSeen: now,
+      isKnown: false,
+      services: [],
+      discoverySource: 'REAL',
+      discoveryTransport: 'COMBINED',
+      discoveryTransports: transports,
+      paired: known.paired,
+      gattConnected: false,
+      connectionHealth: 'UNAVAILABLE',
+    };
+    const assessment = assessDeviceSecurity(device);
+    device.trustScore = assessment.trustScore;
+    device.riskLevel = assessment.trustRiskLevel;
+    const guardedDevice = applySecurityPolicy(device);
+    dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
+    void localDatabase.saveDevice(guardedDevice).catch(() => undefined);
+  };
+
   const scanClassicDevices = async (): Promise<void> => {
     if (!isNativeAndroidApp()) {
       dispatch({
@@ -837,6 +880,17 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     }, 200);
 
     try {
+      // Step 0: what Android already knows — paired devices and live connections.
+      try {
+        const { devices: known } = await myDevices.listKnownDevices();
+        for (const item of known) {
+          observedIdentities.add(item.address.toLowerCase());
+          registerKnownDevice(item);
+        }
+      } catch (error: unknown) {
+        messages.push('Paired devices: ' + (error instanceof Error ? error.message : 'unavailable'));
+      }
+
       // The transports are intentionally sequential, not simultaneous. This avoids
       // competing Android runtime-permission prompts and adapter discovery sessions
       // while still presenting a single combined action and deduplicated results.

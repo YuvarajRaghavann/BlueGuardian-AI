@@ -100,6 +100,12 @@ export function Devices() {
         return Number.isFinite(seenAt) && seenAt >= combinedScanStartedAt - 2000;
       })
       .sort((a, b) => {
+        // Devices connected to this phone first, then paired ones, then strongest signal.
+        const rank = (d: typeof a) => (d.connectionStatus === 'connected' ? 2 : 0) + (d.paired ? 1 : 0);
+        if (rank(a) !== rank(b)) return rank(b) - rank(a);
+        const aRssi = typeof a.rssi === 'number' ? a.rssi : -200;
+        const bRssi = typeof b.rssi === 'number' ? b.rssi : -200;
+        if (aRssi !== bRssi) return bRssi - aRssi;
         const aSeen = a.lastSeen instanceof Date ? a.lastSeen.getTime() : Date.parse(String(a.lastSeen));
         const bSeen = b.lastSeen instanceof Date ? b.lastSeen.getTime() : Date.parse(String(b.lastSeen));
         return bSeen - aSeen;

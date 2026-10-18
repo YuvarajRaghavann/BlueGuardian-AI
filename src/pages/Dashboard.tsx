@@ -26,12 +26,12 @@ import type { BluetoothDevice } from '../types';
 import { needsManualApproval } from '../utils/connectionPolicy';
 import { visibleEvents } from '../utils/visibleEvents';
 import { getCurrentModelMetadata } from '../ml/mlService';
-import { NativeBleResultsModal } from '../components/NativeBleResultsModal';
+import { NativeCombinedResultsModal } from '../components/NativeCombinedResultsModal';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 import { SIMULATOR_ENABLED } from '../config/buildFlags';
 
 export function Dashboard() {
-  const { state, dispatch: deviceDispatch, scanRealDevices, scanSimulatedDevices } = useBluetoothDevices();
+  const { state, dispatch: deviceDispatch, scanRealDevices, scanCombinedDevices, scanSimulatedDevices } = useBluetoothDevices();
   const { state: threatState } = useThreats();
   const { state: securityState, executeAction } = useSecurity();
   const modelMetadata = getCurrentModelMetadata();
@@ -207,7 +207,12 @@ export function Dashboard() {
           <button
             type="button"
             onClick={() => {
-              if (isNativeAndroidApp()) setNativeDiscoveryOpen(true);
+              if (isNativeAndroidApp()) {
+                // Paired + connected + BLE + classic in one pass, so connected earbuds show up too.
+                setNativeDiscoveryOpen(true);
+                void scanCombinedDevices();
+                return;
+              }
               void scanRealDevices();
             }}
             disabled={scanActive}
@@ -683,10 +688,12 @@ export function Dashboard() {
           />
         </div>
       </section>
-      <NativeBleResultsModal
+      <NativeCombinedResultsModal
         open={nativeDiscoveryOpen && isNativeAndroidApp()}
         scan={state.scan}
-        devices={state.devices.filter((device) => device.discoverySource === 'REAL')}
+        devices={state.devices
+          .filter((device) => device.discoverySource === 'REAL')
+          .sort((a, b) => ((b.connectionStatus === 'connected' ? 2 : 0) + (b.paired ? 1 : 0)) - ((a.connectionStatus === 'connected' ? 2 : 0) + (a.paired ? 1 : 0)))}
         onClose={() => setNativeDiscoveryOpen(false)}
         onSelect={() => {
           setNativeDiscoveryOpen(false);

@@ -31,6 +31,8 @@ import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
 import { useThreats } from '../context/ThreatContext';
 import { useSecurity } from '../context/SecurityContext';
 import { useBluetoothDevices } from '../context/DeviceContext';
+import { NativeConnectPanel } from './NativeConnectPanel';
+import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 
 interface DeviceDetailModalProps {
   device: BluetoothDevice | null;
@@ -666,6 +668,13 @@ export function DeviceDetailModal({
 
               {/* Actions */}
               <div className="border-t border-[var(--border)] pt-4">
+                {isNativeAndroidApp() && currentDevice.address && !currentDevice.blocked && (
+                  <NativeConnectPanel
+                    address={currentDevice.address}
+                    paired={Boolean(currentDevice.paired)}
+                    connected={currentDevice.connectionStatus === 'connected'}
+                  />
+                )}
                 {canConnectSelectedDevice(currentDevice.id) && !currentDevice.gattConnected && !currentDevice.blocked && (
                   <div className="mb-4 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3">
                     <p className="text-sm font-medium text-[var(--text)]">Bluetooth connection approval</p>

@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(BlueGuardianBluetoothPlugin.class);
         registerPlugin(BlueGuardianSecureLinkPlugin.class);
+        registerPlugin(BlueGuardianDevicesPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Intercept Android system and predictive-gesture Back before the Activity

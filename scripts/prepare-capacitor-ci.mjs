@@ -36,6 +36,10 @@ if (!fs.existsSync(path.join(root, 'android', 'app'))) {
 function installNativeBluetoothPlugin() {
   const pluginSource = path.join(nativeSourceDir, 'BlueGuardianBluetoothPlugin.java');
   const secureLinkSource = path.join(nativeSourceDir, 'BlueGuardianSecureLinkPlugin.java');
+  const extraNativeSources = ['BlueGuardianDevicesPlugin.java', 'BlueGuardianPresenceReceiver.java'];
+  for (const file of extraNativeSources) {
+    if (!fs.existsSync(path.join(nativeSourceDir, file))) throw new Error(`Native source ${file} is missing from native/android.`);
+  }
   const activitySource = path.join(nativeSourceDir, 'MainActivity.java');
   if (!fs.existsSync(pluginSource) || !fs.existsSync(activitySource) || !fs.existsSync(secureLinkSource)) {
     throw new Error('Native Bluetooth source files are missing from native/android.');
@@ -48,6 +52,7 @@ function installNativeBluetoothPlugin() {
   fs.copyFileSync(pluginSource, path.join(nativePackageDir, 'BlueGuardianBluetoothPlugin.java'));
   fs.copyFileSync(activitySource, path.join(nativePackageDir, 'MainActivity.java'));
   fs.copyFileSync(secureLinkSource, path.join(nativePackageDir, 'BlueGuardianSecureLinkPlugin.java'));
+  for (const file of extraNativeSources) fs.copyFileSync(path.join(nativeSourceDir, file), path.join(nativePackageDir, file));
 
   let xml = fs.readFileSync(androidManifestPath, 'utf8');
   // Android's classic BluetoothAdapter.startDiscovery() permission contract
@@ -72,6 +77,7 @@ function installNativeBluetoothPlugin() {
     '<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />',
     '<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />',
+    '<uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />',
     '<uses-feature android:name="android.hardware.bluetooth" android:required="false" />',
     '<uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />',
   ];
@@ -92,6 +98,18 @@ function installNativeBluetoothPlugin() {
     throw new Error('Cannot safely add Bluetooth declarations: <application> tag is missing.');
   }
   xml = hardenApplicationTag(xml);
+  // Records connect/disconnect time (and place, when allowed) even when the app is closed.
+  if (!xml.includes('BlueGuardianPresenceReceiver')) {
+    const receiver = [
+      '        <receiver android:name=".BlueGuardianPresenceReceiver" android:exported="true">',
+      '            <intent-filter>',
+      '                <action android:name="android.bluetooth.device.action.ACL_CONNECTED" />',
+      '                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED" />',
+      '            </intent-filter>',
+      '        </receiver>',
+    ].join('\n');
+    xml = xml.replace('</application>', receiver + '\n    </application>');
+  }
   fs.writeFileSync(androidManifestPath, xml);
   writeNetworkSecurityConfig();
 

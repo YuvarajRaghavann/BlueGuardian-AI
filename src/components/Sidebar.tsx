@@ -17,7 +17,7 @@ const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/devices', label: 'Nearby Devices', icon: Bluetooth },
   { path: '/threats', label: 'Threat Detection', icon: AlertTriangle },
-  { path: '/recovery', label: 'Find a Lost Device', icon: LifeBuoy },
+  { path: '/recovery', label: 'Find my devices', icon: LifeBuoy },
   { path: '/secure-share', label: 'Secure Share', icon: LockKeyhole },
   { path: '/events', label: 'Security Events', icon: Activity },
   { path: '/analytics', label: 'Analytics', icon: BarChart2 },

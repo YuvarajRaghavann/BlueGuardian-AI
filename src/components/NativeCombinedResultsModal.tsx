@@ -125,8 +125,10 @@ export function NativeCombinedResultsModal({
                         <p className="mt-1 truncate text-xs text-[var(--text-muted)]">{device.address || device.id}</p>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--text-secondary)]">
                           <span className="rounded-md border border-[var(--border)] px-1.5 py-0.5 font-semibold">{label}</span>
-                          <span>{typeof device.rssi === 'number' ? String(device.rssi) + ' dBm' : 'RSSI unavailable'}</span>
-                          <span>{device.paired ? 'Paired in Android' : 'Not connected'}</span>
+                          {typeof device.rssi === 'number' && <span>{String(device.rssi) + ' dBm'}</span>}
+                          <span className={device.connectionStatus === 'connected' ? 'font-semibold text-[var(--success)]' : undefined}>
+                            {device.connectionStatus === 'connected' ? 'Connected to this phone' : device.paired ? 'Paired · not connected' : 'Not paired'}
+                          </span>
                           {device.services.length > 0 && <span>{device.services.length} advertised service UUID(s)</span>}
                         </div>
                       </div>
