@@ -13,6 +13,9 @@ import { useOwnerToken } from '../services/ownerSession';
 import { API_BASE_CHANGED_EVENT } from '../services/apiBase';
 import { loadSecurityPolicy } from '../services/localSettings';
 import { myDevices, type KnownDevice } from '../services/myDevices';
+import { intel } from '../intel/store';
+import { classifyAdvert } from '../intel/advert';
+import type { ScanObservation } from '../intel/engine';
 import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
 
 const DEFAULT_SECURITY_POLICY: SecurityPolicy = {
@@ -147,6 +150,9 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
         discoveryTransport: incoming.discoveryTransport ?? existing.discoveryTransport,
         discoveryTransports: mergedTransports.length > 0 ? mergedTransports : existing.discoveryTransports,
         paired: incoming.paired ?? existing.paired,
+        family: incoming.family ?? existing.family,
+        familyLabel: incoming.familyLabel ?? existing.familyLabel,
+        tracker: incoming.tracker ?? existing.tracker,
         rssi: typeof incoming.rssi === 'number' ? incoming.rssi : existing.rssi,
         lastSeen: incoming.lastSeen,
         ...(shouldRefreshConnection ? {
@@ -337,7 +343,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         const devices = await localDatabase.listDevices();
         if (!cancelled) dispatch({
           type: 'SET_DEVICES',
-          payload: devices.filter(device => device.discoverySource !== 'SIMULATED'),
+          payload: devices
+            .filter(device => device.discoverySource !== 'SIMULATED')
+            // Earlier builds blocked devices automatically from guessed risk. Only owner blocks stay.
+            .map(device => (device.blocked && !device.blockedByUser ? { ...device, blocked: false, riskLevel: 'low' as const } : device)),
         });
       } catch (error: unknown) {
         console.warn('Could not load local devices; continuing for this session.', error);
@@ -710,6 +719,14 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       characteristics: [],
     }));
     const paired = transport === 'CLASSIC' && 'paired' in observation ? observation.paired : undefined;
+    const advertInfo = transport === 'BLE' && 'manufacturerData' in observation
+      ? classifyAdvert({
+        name: observation.name,
+        serviceUuids,
+        manufacturerData: observation.manufacturerData,
+        serviceData: observation.serviceData,
+      })
+      : null;
     const device: BluetoothDevice = {
       // In a combined pass, BLE and classic reports sharing the same normalized
       // Android address merge into one record. BLE privacy/random addresses can
@@ -731,6 +748,9 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       discoveryTransport: 'COMBINED',
       discoveryTransports: Array.from(seenTransports),
       paired,
+      ...(advertInfo && advertInfo.family !== 'unknown'
+        ? { family: advertInfo.family, familyLabel: advertInfo.label, tracker: advertInfo.isTracker }
+        : {}),
       gattConnected: false,
       connectionHealth: 'UNAVAILABLE',
     };
@@ -857,6 +877,18 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
     const startedAt = Date.now();
     const observedIdentities = new Set<string>();
+    // Every real scan is fed to the evidence engine, which learns your normal surroundings.
+    const scanObservations: ScanObservation[] = [];
+    const locationPromise = (async () => {
+      try {
+        const status = await myDevices.locationStatus();
+        if (!status.location) return null;
+        const fix = await myDevices.getLocation();
+        return { lat: fix.lat, lng: fix.lng, accuracy: fix.accuracy };
+      } catch {
+        return null;
+      }
+    })();
     const combinedTransportHistory = new Map<string, Set<'BLE' | 'CLASSIC'>>();
     const messages: string[] = [];
     let bleError: string | undefined;
@@ -886,6 +918,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         for (const item of known) {
           observedIdentities.add(item.address.toLowerCase());
           registerKnownDevice(item);
+          scanObservations.push({ address: item.address, name: item.name, transport: 'PAIRED', paired: item.paired, connected: item.connected });
         }
       } catch (error: unknown) {
         messages.push('Paired devices: ' + (error instanceof Error ? error.message : 'unavailable'));
@@ -899,6 +932,19 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           const identity = String(observation.address || observation.id || '').trim().toLowerCase();
           if (identity) observedIdentities.add(identity);
           registerCombinedObservation(observation, 'BLE', combinedTransportHistory);
+          if (identity) {
+            scanObservations.push({
+              address: identity,
+              name: observation.name,
+              rssi: observation.rssi,
+              transport: 'BLE',
+              advert: {
+                serviceUuids: observation.serviceUuids,
+                manufacturerData: observation.manufacturerData,
+                serviceData: observation.serviceData,
+              },
+            });
+          }
         }, 9000);
 
         if (bleResult.ok === false) {
@@ -920,6 +966,9 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           const identity = String(observation.address || observation.id || '').trim().toLowerCase();
           if (identity) observedIdentities.add(identity);
           registerCombinedObservation(observation, 'CLASSIC', combinedTransportHistory);
+          if (identity) {
+            scanObservations.push({ address: identity, name: observation.name, rssi: observation.rssi, transport: 'CLASSIC', paired: observation.paired });
+          }
         }, 9000);
 
         if (classicResult.ok === false) {
@@ -930,6 +979,14 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       } catch (error: unknown) {
         classicError = error instanceof Error ? error.message : 'Unknown classic discovery error.';
       }
+
+      void locationPromise.then((location) => {
+        try {
+          intel.ingestScan({ at: Date.now(), observations: scanObservations, location });
+        } catch (error: unknown) {
+          console.warn('[BlueGuardian][Intel] Scan analysis failed.', error);
+        }
+      });
 
       if (bleError) messages.push('BLE scan failed: ' + bleError);
       if (classicError) messages.push('Classic scan failed: ' + classicError);

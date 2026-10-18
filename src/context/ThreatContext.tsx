@@ -1,11 +1,39 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { BluetoothDevice, Threat, ThreatSeverity, ThreatStatus, ThreatReason } from '../types';
+import type { BluetoothDevice, Threat, ThreatSeverity, ThreatStatus } from '../types';
 import { deduplicateThreats } from '../services/threatService';
 import { useBluetoothDevices } from './DeviceContext';
-import { assessDeviceSecurity } from '../utils/securityAssessment';
 import { localDatabase, type StoredAssessment } from '../services/localDatabase';
 import { api } from '../services/api';
 import { useOwnerToken } from '../services/ownerSession';
+import { intel } from '../intel/store';
+import type { Finding } from '../intel/engine';
+
+const FINDING_CATEGORY: Record<Finding['kind'], Threat['category']> = {
+  tracker_following: 'TRACKER_FOLLOWING',
+  popup_spam: 'POPUP_SPAM',
+  lookalike: 'LOOKALIKE_DEVICE',
+};
+
+/** Alerts come only from concrete evidence found by the on-device engine. */
+function findingToThreat(f: Finding): Threat {
+  return {
+    id: 'intel:' + f.id,
+    deviceId: f.deviceAddress ? 'android-combined:' + f.deviceAddress.toLowerCase() : 'environment',
+    deviceName: f.deviceName,
+    category: FINDING_CATEGORY[f.kind],
+    severity: f.severity,
+    score: f.severity === 'high' ? 85 : f.severity === 'medium' ? 55 : 25,
+    title: f.title,
+    description: f.summary,
+    reasons: f.evidence.map((message) => ({ code: f.kind.toUpperCase(), message })),
+    recommendedAction: f.action,
+    status: 'ACTIVE',
+    detectedAt: new Date(f.detectedAt),
+    updatedAt: new Date(f.updatedAt),
+    discoverySource: 'REAL',
+    finalClassification: f.strength === 'strong' ? 'Strong evidence' : 'Moderate evidence',
+  };
+}
 
 interface ThreatState {
   threats: Threat[];
@@ -17,6 +45,7 @@ interface ThreatState {
 
 type Action =
   | { type: 'SET_THREATS'; payload: Threat[] }
+  | { type: 'SET_INTEL_THREATS'; payload: Threat[] }
   | { type: 'MERGE_SERVER_THREATS'; payload: { threats: Threat[]; assessedDeviceIds: string[] } }
   | { type: 'ADD_THREAT'; payload: Threat }
   | { type: 'UPDATE_THREAT'; payload: Threat }
@@ -98,6 +127,15 @@ function threatReducer(state: ThreatState, action: Action): ThreatState {
       next[idx] = { ...next[idx], status: 'INVESTIGATING', updatedAt: new Date() };
       return { ...state, threats: next };
     }
+    case 'SET_INTEL_THREATS': {
+      // Old heuristic "unknown device" alerts are dropped; intel alerts keep the user's status choices.
+      const kept = state.threats.filter((t) => !t.id.startsWith('intel:') && t.status !== 'ACTIVE' && t.discoverySource !== 'SIMULATED');
+      const merged = action.payload.map((t) => {
+        const previous = state.threats.find((p) => p.id === t.id);
+        return previous && previous.status !== 'ACTIVE' ? { ...t, status: previous.status, resolved: previous.resolved } : t;
+      });
+      return { ...state, threats: [...merged, ...kept] };
+    }
     case 'CLEAR_RESOLVED':
       return { ...state, threats: state.threats.filter(t => t.status !== 'RESOLVED' && t.status !== 'DISMISSED') };
     case 'REFRESH_ANALYSIS': {
@@ -124,47 +162,8 @@ function threatReducer(state: ThreatState, action: Action): ThreatState {
   }
 }
 
-function isActionableThreat(assessment: ReturnType<typeof assessDeviceSecurity>): boolean {
-  const codes = new Set(assessment.reasons.map(reason => reason.code));
-  const corroboratedSuspicion = assessment.finalThreatScore >= 35
-    && codes.has('SUSPICIOUS_NAME')
-    && codes.has('UNSTABLE_CONNECTION');
-  return assessment.finalThreatScore >= 50 || corroboratedSuspicion;
-}
 
-function createAnalysisPayload(devices: BluetoothDevice[]): {
-  threats: Threat[];
-  assessments: StoredAssessment[];
-} {
-  const threats: Threat[] = [];
-  const assessments: StoredAssessment[] = [];
 
-  for (const device of devices) {
-    const assessment = assessDeviceSecurity(device);
-    if (isActionableThreat(assessment)) {
-      threats.push(assessmentToThreat(device, assessment));
-    }
-    assessments.push({
-      deviceId: device.id,
-      assessment,
-      analyzedAt: new Date(),
-      discoverySource: device.discoverySource,
-    });
-  }
-
-  return { threats, assessments };
-}
-
-function refreshThreats(
-  devices: BluetoothDevice[],
-  dispatch: React.Dispatch<Action>,
-): void {
-  const payload = createAnalysisPayload(devices);
-  dispatch({ type: 'REFRESH_ANALYSIS', payload });
-  void localDatabase.saveAssessments(payload.assessments).catch((error: unknown) => {
-    console.warn('Assessments are available for this session but were not saved locally.', error);
-  });
-}
 
 function deviceAssessmentSignature(device: BluetoothDevice): string {
   return JSON.stringify({
@@ -177,32 +176,6 @@ function deviceAssessmentSignature(device: BluetoothDevice): string {
   });
 }
 
-function assessmentToThreat(device: BluetoothDevice, a: ReturnType<typeof assessDeviceSecurity>): Threat {
-  const id = `thr-${device.id}-${Date.now()}`;
-  return {
-    id,
-    deviceId: device.id,
-    deviceName: device.name,
-    category: a.ruleBasedCategory,
-    severity: a.finalSeverity,
-    score: a.finalThreatScore,
-    title: `${a.ruleBasedCategory.replace(/_/g, ' ')} Detected`,
-    description: a.reasons.map((r: ThreatReason) => r.message).join(' '),
-    reasons: a.reasons,
-    recommendedAction: a.recommendedAction,
-    status: 'ACTIVE',
-    detectedAt: new Date(),
-    updatedAt: new Date(),
-    discoverySource: device.discoverySource,
-    // ML enrichment
-    mlPrediction: a.mlPrediction,
-    finalClassification: a.finalClassification,
-    confidence: a.confidence,
-    modelName: a.mlPrediction?.modelName,
-    modelVersion: a.mlPrediction?.modelVersion,
-    resolved: false,
-  };
-}
 
 const initialState: ThreatState = {
   threats: [],
@@ -264,7 +237,7 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
     // Keep the current UI useful when the backend is temporarily unavailable.
     // Re-evaluate local devices so stale ACTIVE alerts can still be cleared safely.
     if (!ownerToken || !backendReady) {
-      refreshThreats(deviceState.devices, dispatch);
+      // Local alerts come from the evidence engine (see SET_INTEL_THREATS), not per-device guesses.
       return;
     }
     if (serverThreatsReadyToken !== ownerToken) return;
@@ -331,9 +304,16 @@ export function ThreatProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, [ownerToken, backendReady, storedThreats]);
 
+  useEffect(() => {
+    if (storedThreats === null) return;
+    const sync = () => dispatch({ type: 'SET_INTEL_THREATS', payload: intel.activeFindings().map(findingToThreat) });
+    sync();
+    return intel.subscribe(sync);
+  }, [storedThreats]);
+
   const refreshThreatAnalysis = (devices: BluetoothDevice[]) => {
     if (!ownerToken) {
-      refreshThreats(devices, dispatch);
+      dispatch({ type: 'SET_INTEL_THREATS', payload: intel.activeFindings().map(findingToThreat) });
       return;
     }
     if (!backendReady) return;

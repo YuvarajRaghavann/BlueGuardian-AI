@@ -6,6 +6,10 @@ export interface NativeBleObservation {
   name?: string;
   rssi?: number;
   serviceUuids?: string[];
+  /** company id (4 hex chars) -> payload hex */
+  manufacturerData?: Record<string, string>;
+  /** service UUID -> payload hex */
+  serviceData?: Record<string, string>;
   connectable?: boolean;
   observedAt: number;
 }

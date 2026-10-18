@@ -1,773 +1,192 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import {
-  X,
-  ShieldCheck,
-  AlertTriangle,
-  Ban,
-  Trash2,
-  Wifi,
-  Cpu,
-  Shield,
-  Smartphone,
-  Headphones,
-  Watch,
-  HelpCircle,
-  Laptop,
-  Brain,
-  RotateCcw,
+  Ban, Bluetooth, CheckCircle, Cpu, Headphones, HelpCircle, Laptop, MapPin, RotateCcw, ShieldAlert, ShieldCheck, Smartphone, Trash2, Watch, X,
 } from 'lucide-react';
-import type { BluetoothDevice, DeviceType, SecurityActionType } from '../types';
-import { TrustScore } from './TrustScore';
-import { StatusBadge } from './StatusBadge';
 import { formatDistanceToNow } from 'date-fns';
-import { calculateTrustScore } from '../utils/trustScore';
-import {
-  calculateProtectionStatus,
-  getProtectionStatusLabel,
-  getProtectionStatusColor,
-} from '../utils/protectionStatus';
-import { getSecurityRecommendation } from '../utils/securityRecommendation';
-import { evaluateSecureBluetoothProfile } from '../utils/connectionPolicy';
-import { useThreats } from '../context/ThreatContext';
+import type { BluetoothDevice, DeviceType, SecurityActionType } from '../types';
 import { useSecurity } from '../context/SecurityContext';
 import { useBluetoothDevices } from '../context/DeviceContext';
 import { NativeConnectPanel } from './NativeConnectPanel';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
+import { useIntel } from '../intel/store';
+import { standingOf } from '../intel/engine';
+import { proximityBand } from '../services/myDevices';
+import { cn } from '../utils/cn';
 
 interface DeviceDetailModalProps {
   device: BluetoothDevice | null;
   onClose: () => void;
 }
 
-const typeIcons: Record<
-  DeviceType,
-  React.ComponentType<{ className?: string }>
-> = {
-  smartphone: ({ className }) => <Smartphone className={className} />,
-  earbuds: ({ className }) => <Headphones className={className} />,
-  headphones: ({ className }) => <Headphones className={className} />,
-  smartwatch: ({ className }) => <Watch className={className} />,
-  laptop: ({ className }) => <Laptop className={className} />,
-  iot: ({ className }) => <Cpu className={className} />,
-  unknown: ({ className }) => <HelpCircle className={className} />,
+const typeIcons: Record<DeviceType, typeof Bluetooth> = {
+  smartphone: Smartphone,
+  earbuds: Headphones,
+  headphones: Headphones,
+  smartwatch: Watch,
+  laptop: Laptop,
+  iot: Cpu,
+  unknown: HelpCircle,
 };
 
-function confidenceLabel(c: number) {
-  if (c >= 0.8) return 'High confidence';
-  if (c >= 0.6) return 'Moderate confidence';
-  return 'Low confidence';
+const STANDING = {
+  yours: { label: 'Yours', className: 'bg-[var(--success)]/15 text-[var(--success)]' },
+  familiar: { label: 'Familiar', className: 'bg-[var(--accent-soft)] text-[var(--accent)]' },
+  new: { label: 'New', className: 'bg-[var(--surface-hover)] text-[var(--text-secondary)]' },
+} as const;
+
+const ACTION_LABEL: Record<SecurityActionType, string> = {
+  TRUST: 'Trust',
+  MARK_UNKNOWN: 'Untrust',
+  BLOCK: 'Block',
+  UNBLOCK: 'Unblock',
+  FORGET: 'Forget',
+  INVESTIGATE: 'Investigate',
+  RESOLVE_THREAT: 'Resolve',
+  DISMISS_THREAT: 'Dismiss',
+} as Record<SecurityActionType, string>;
+
+function Fact({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">{label}</p>
+      <p className="mt-1 text-sm font-semibold text-[var(--text)]">{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">{sub}</p>}
+    </div>
+  );
 }
 
-function actionClass(action: SecurityActionType) {
-  switch (action) {
-    case 'TRUST':
-      return 'border-[var(--success)]/25 bg-[var(--success)]/10 text-[var(--success)] hover:bg-[var(--success)]/15';
-    case 'MARK_UNKNOWN':
-      return 'border-[var(--warning)]/25 bg-[var(--warning)]/10 text-[var(--warning)] hover:bg-[var(--warning)]/15';
-    case 'BLOCK':
-      return 'border-[var(--danger)]/25 bg-[var(--danger)]/10 text-[var(--danger)] hover:bg-[var(--danger)]/15';
-    case 'UNBLOCK':
-      return 'border-[var(--accent)]/25 bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/15';
-    case 'FORGET':
-      return 'border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]';
-    default:
-      return 'border-[var(--border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]';
-  }
-}
+/** Short, factual device view: who it is, what we know from real history, and any evidence-based alert. */
+export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
+  const { executeAction, getAllowedActions } = useSecurity();
+  const { state: deviceState } = useBluetoothDevices();
+  const engine = useIntel();
+  const [confirm, setConfirm] = useState<SecurityActionType | null>(null);
+  const current = device ? deviceState.devices.find((d) => d.id === device.id) ?? device : null;
+  if (!current) return null;
 
-export function DeviceDetailModal({
-  device,
-  onClose,
-}: DeviceDetailModalProps) {
-  const { state: threatState } = useThreats();
-  const { state: securityState, executeAction, getAllowedActions } = useSecurity();
-  const { state: deviceState, canConnectSelectedDevice, connectSelectedDevice } = useBluetoothDevices();
-  const currentDevice = device ? deviceState.devices.find(item => item.id === device.id) ?? device : null;
-  const [connectionBusy, setConnectionBusy] = useState(false);
-  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
+  const profile = current.address ? engine.profile(current.address) : undefined;
+  const { standing, detail } = standingOf(profile, Boolean(current.paired), current.trusted);
+  const findings = engine.findingsFor(current.address);
+  const Icon = typeIcons[current.type] ?? HelpCircle;
+  const band = proximityBand(typeof current.rssi === 'number' ? current.rssi : null);
+  const connection = current.connectionStatus === 'connected' ? 'Connected' : current.paired ? 'Paired' : 'Nearby';
+  const actions = getAllowedActions(current).filter((a) => ['TRUST', 'MARK_UNKNOWN', 'BLOCK', 'UNBLOCK', 'FORGET'].includes(a));
+  const isTracker = Boolean(current.tracker || profile?.tracker);
+  const owned = Boolean(current.address && engine.snapshot.mine.includes(current.address.toUpperCase()));
 
-  const [assessment, setAssessment] = useState(() =>
-    currentDevice ? calculateTrustScore(currentDevice) : null,
-  );
-  const [confirmAction, setConfirmAction] =
-    useState<SecurityActionType | null>(null);
-
-  useEffect(() => {
-    if (currentDevice) setAssessment(calculateTrustScore(currentDevice));
-  }, [currentDevice]);
-
-  useEffect(() => {
-    setConnectionMessage(null);
-    setConnectionBusy(false);
-  }, [currentDevice?.id]);
-
-  if (!currentDevice) return null;
-
-  const deviceThreats = threatState.threats.filter(
-    (t) => t.deviceId === currentDevice.id,
-  );
-  const activeThreats = deviceThreats.filter(
-    (t) => t.status === 'ACTIVE' || t.status === 'INVESTIGATING',
-  );
-  const mlThreat = deviceThreats.find((t) => t.mlPrediction);
-
-  const simpleAssessment = {
-    trustScore: currentDevice.trustScore,
-    trustRiskLevel: currentDevice.riskLevel,
-    ruleBasedThreatScore: 0,
-    ruleBasedSeverity: 'low' as const,
-    ruleBasedCategory: 'OTHER' as const,
-    ruleBasedReasons: [],
-    mlPrediction: undefined,
-    finalThreatScore:
-      currentDevice.riskLevel === 'high'
-        ? 80
-        : currentDevice.riskLevel === 'medium'
-          ? 50
-          : currentDevice.riskLevel === 'low'
-            ? 20
-            : 0,
-    finalSeverity:
-      currentDevice.riskLevel === 'high'
-        ? 'high'
-        : currentDevice.riskLevel === 'medium'
-          ? 'medium'
-          : 'low',
-    finalClassification: '',
-    confidence: 0,
-    reasons: [],
-    recommendedAction: '',
-  } as any;
-
-  const protection = calculateProtectionStatus(
-    currentDevice,
-    simpleAssessment,
-    activeThreats,
-  );
-  const protectionLabel = getProtectionStatusLabel(protection);
-  const protectionColor = getProtectionStatusColor(protection);
-
-  const recommendation = getSecurityRecommendation(
-    currentDevice,
-    simpleAssessment,
-    activeThreats,
-  );
-  const securityProfile = evaluateSecureBluetoothProfile(currentDevice, {
-    rssi: currentDevice.rssi,
-    fileName: currentDevice.name,
-    deviceType: currentDevice.type,
-  }, securityState.policy);
-  const allowedActions = getAllowedActions(currentDevice);
-
-  const handleAction = (type: SecurityActionType) => {
-    const requiresConfirmation =
-      (type === 'BLOCK' && securityState.policy.confirmBlock) ||
-      (type === 'TRUST' && securityState.policy.confirmTrust) ||
-      type === 'FORGET' ||
-      type === 'UNBLOCK';
-
-    if (requiresConfirmation) {
-      setConfirmAction(type);
+  const run = (type: SecurityActionType) => {
+    if (type === 'BLOCK' || type === 'FORGET') {
+      setConfirm(type);
       return;
     }
-
-    executeAction(type, currentDevice, recommendation.explanation);
+    executeAction(type, current, 'Changed by the owner from the device view.');
   };
-
-  const confirmExecute = () => {
-    if (confirmAction) {
-      executeAction(confirmAction, currentDevice, recommendation.explanation);
-      setConfirmAction(null);
-    }
-  };
-
-  const IconComp =
-    typeIcons[currentDevice.type] ||
-    (({ className }) => <HelpCircle className={className} />);
-
-  const sectionClass =
-    'rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4';
 
   return (
-    <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-3 backdrop-blur-sm sm:p-5">
-        <div className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-2xl">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4 sm:px-6">
-            <div className="flex min-w-0 items-center gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] text-[var(--accent)]">
-                <IconComp className="h-5 w-5" />
-              </div>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={current.name}>
+      <div className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-[var(--border)] bg-[var(--bg-elevated)] sm:rounded-3xl">
+        <div className="flex items-center gap-3 border-b border-[var(--border)] p-4">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+            <Icon className="h-5 w-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-base font-semibold text-[var(--text)]">{current.name}</p>
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-semibold', STANDING[standing].className)}>{STANDING[standing].label}</span>
+              {current.familyLabel && <span className="rounded-full bg-[var(--surface-hover)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-secondary)]">{current.familyLabel}</span>}
+              {current.blocked && <span className="rounded-full bg-[var(--danger)]/15 px-2 py-0.5 text-[11px] font-semibold text-[var(--danger)]">Blocked</span>}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface)]"><X className="h-5 w-5" /></button>
+        </div>
 
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="truncate text-base font-semibold text-[var(--text)] sm:text-lg">
-                    {currentDevice.name}
-                  </h2>
-                  <StatusBadge
-                    label={currentDevice.riskLevel}
-                    variant={
-                      currentDevice.riskLevel === 'trusted'
-                        ? 'success'
-                        : currentDevice.riskLevel === 'low'
-                          ? 'info'
-                          : currentDevice.riskLevel === 'medium'
-                            ? 'warning'
-                            : 'danger'
-                    }
-                  />
-                </div>
-                <p className="mt-0.5 text-xs capitalize text-[var(--text-muted)]">
-                  {currentDevice.type} · {currentDevice.manufacturer ?? 'Unknown manufacturer'}
+        <div className="space-y-4 p-4">
+          <div className="grid grid-cols-3 gap-2">
+            <Fact label="Status" value={connection} />
+            <Fact label="Signal" value={typeof current.rssi === 'number' ? `${current.rssi} dBm` : '—'} sub={typeof current.rssi === 'number' ? band.label.split(' (')[0] : undefined} />
+            <Fact label="History" value={standing === 'yours' ? 'Yours' : profile ? `${profile.scans} scan${profile.scans === 1 ? '' : 's'}` : 'New'} sub={detail} />
+          </div>
+
+          {findings.length > 0 ? (
+            findings.map((f) => (
+              <div key={f.id} className={cn('rounded-xl border p-3', f.severity === 'high' ? 'border-[var(--danger)]/40 bg-[var(--danger)]/10' : 'border-[var(--warning)]/40 bg-[var(--warning)]/10')}>
+                <p className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
+                  <ShieldAlert className={cn('h-4 w-4', f.severity === 'high' ? 'text-[var(--danger)]' : 'text-[var(--warning)]')} /> {f.title}
                 </p>
+                <ul className="mt-2 space-y-0.5 text-xs text-[var(--text-secondary)]">
+                  {f.evidence.map((e) => <li key={e}>• {e}</li>)}
+                </ul>
+                <p className="mt-2 text-xs font-medium text-[var(--text)]">{f.action}</p>
+              </div>
+            ))
+          ) : (
+            <div className="flex items-start gap-2.5 rounded-xl border border-[var(--success)]/30 bg-[var(--success)]/10 p-3">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[var(--success)]" />
+              <div>
+                <p className="text-sm font-semibold text-[var(--text)]">No issues found</p>
+                <p className="mt-0.5 text-[11px] text-[var(--text-muted)]">Checked for tracking, impersonation and popup spam.</p>
               </div>
             </div>
+          )}
 
-            <button
-              onClick={onClose}
-              aria-label="Close device details"
-              className="shrink-0 rounded-lg border border-transparent p-2 text-[var(--text-muted)] transition hover:border-[var(--border)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
-            >
-              <X className="h-5 w-5" />
+          {isTracker && !current.paired && current.address && (
+            <button type="button" disabled={owned}
+              onClick={() => current.address && engine.markMine(current.address)}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--border)] py-2.5 text-sm font-semibold text-[var(--text)] disabled:opacity-50">
+              <MapPin className="h-4 w-4" /> {owned ? 'Marked as your tracker' : 'This tracker is mine'}
             </button>
-          </div>
+          )}
 
-          <div className="overflow-y-auto px-5 py-5 sm:px-6">
-            <div className="space-y-5">
-              {/* Trust hero */}
-              <section className="grid gap-4 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:grid-cols-[auto_1fr] sm:items-center">
-                <div className="flex justify-center sm:justify-start">
-                  <TrustScore score={currentDevice.trustScore} size="lg" />
-                </div>
+          {isNativeAndroidApp() && current.address && !current.blocked && (
+            <NativeConnectPanel address={current.address} paired={Boolean(current.paired)} connected={current.connectionStatus === 'connected'} />
+          )}
 
-                <div>
-                  <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                    Device trust
-                  </p>
-                  <div className="mt-1 flex items-baseline gap-2">
-                    <span className="text-3xl font-semibold text-[var(--text)]">
-                      {currentDevice.trustScore}
-                    </span>
-                    <span className="text-sm text-[var(--text-muted)]">
-                      / 100
-                    </span>
-                  </div>
-                  <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                    {currentDevice.isKnown
-                      ? 'Recognized device with established trust history.'
-                      : 'Device has not been previously established as trusted.'}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {Boolean(currentDevice.approvalRequired) && (
-                      <StatusBadge
-                        label="Pending approval"
-                        variant="warning"
-                      />
-                    )}
-                    <StatusBadge
-                      label={`Connection gate: ${securityProfile.connectionDecision}`}
-                      variant={
-                        securityProfile.connectionDecision === 'BLOCK'
-                          ? 'danger'
-                          : securityProfile.connectionDecision === 'REQUIRE_APPROVAL'
-                            ? 'warning'
-                            : 'success'
-                      }
-                    />
-                    <StatusBadge
-                      label={`Transfer: ${securityProfile.fileTransferDecision}`}
-                      variant={
-                        securityProfile.fileTransferDecision === 'BLOCK'
-                          ? 'danger'
-                          : securityProfile.fileTransferDecision === 'REQUIRE_APPROVAL'
-                            ? 'warning'
-                            : 'success'
-                      }
-                    />
-                    <StatusBadge
-                      label={`RSSI: ${securityProfile.rssiRisk}`}
-                      variant={
-                        securityProfile.rssiRisk === 'BLOCK'
-                          ? 'danger'
-                          : securityProfile.rssiRisk === 'WARNING'
-                            ? 'warning'
-                            : 'success'
-                      }
-                    />
-                  </div>
-                </div>
-              </section>
-
-              {/* Protection status */}
-              <section className="rounded-xl border border-[var(--accent)]/20 bg-[var(--accent-soft)]/40 p-4">
-                <div className="mb-4 flex items-center gap-2">
-                  <Shield className="h-4 w-4 text-[var(--accent)]" />
-                  <h3 className="text-sm font-semibold text-[var(--text)]">
-                    BlueGuardian app status
-                  </h3>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <div>
-                    <p className="text-xs text-[var(--text-muted)]">
-                      Status
-                    </p>
-                    <div className="mt-1">
-                      <StatusBadge
-                        label={protectionLabel}
-                        variant={protectionColor.replace(
-                          'text-',
-                          '',
-                        ) as any}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-[var(--text-muted)]">
-                      Trust score
-                    </p>
-                    <p className="mt-1 text-lg font-semibold text-[var(--text)]">
-                      {currentDevice.trustScore}
-                    </p>
-                  </div>
-
-                  <div>
-                    <p className="text-xs text-[var(--text-muted)]">
-                      Threat level
-                    </p>
-                    <p className="mt-1 text-lg font-semibold uppercase text-[var(--text)]">
-                      {recommendation.priority}
-                    </p>
-                  </div>
-                </div>
-
-                <p className="mt-4 border-t border-[var(--border)] pt-3 text-sm leading-6 text-[var(--text-secondary)]">
-                  {recommendation.recommendation}
-                </p>
-                <p className="mt-2 text-xs text-[var(--text-muted)]">
-                  These are local assessment and trust records. This browser app cannot enforce operating-system Bluetooth pairing or file-transfer controls.
-                </p>
-              </section>
-
-              {/* AI/ML */}
-              {mlThreat && (
-                <section className={sectionClass}>
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2">
-                      <Brain className="h-4 w-4 text-[var(--accent)]" />
-                      <h3 className="text-sm font-semibold text-[var(--text)]">
-                        AI security analysis
-                      </h3>
-                    </div>
-                    <span className="rounded-full border border-[var(--warning)]/20 bg-[var(--warning)]/10 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-[var(--warning)]">
-                      Development model
-                    </span>
-                  </div>
-
-                  <dl className="divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]">
-                    <div className="flex justify-between gap-4 px-3 py-2.5 text-sm">
-                      <dt className="text-[var(--text-muted)]">Model</dt>
-                      <dd className="text-right font-medium text-[var(--text)]">
-                        {mlThreat.modelName ??
-                          mlThreat.mlPrediction?.modelName}
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between gap-4 px-3 py-2.5 text-sm">
-                      <dt className="text-[var(--text-muted)]">Version</dt>
-                      <dd className="text-[var(--text)]">
-                        {mlThreat.modelVersion ??
-                          mlThreat.mlPrediction?.modelVersion}
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between gap-4 px-3 py-2.5 text-sm">
-                      <dt className="text-[var(--text-muted)]">
-                        Classification
-                      </dt>
-                      <dd className="text-right font-medium capitalize text-[var(--text)]">
-                        {mlThreat.finalClassification ??
-                          mlThreat.mlPrediction?.label.replace(/_/g, ' ')}
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between gap-4 px-3 py-2.5 text-sm">
-                      <dt className="text-[var(--text-muted)]">Confidence</dt>
-                      <dd className="text-right font-medium text-[var(--text)]">
-                        {Math.round(
-                          (mlThreat.confidence ??
-                            mlThreat.mlPrediction?.confidence ??
-                            0) * 100,
-                        )}
-                        %{' '}
-                        {((mlThreat.confidence ?? mlThreat.mlPrediction?.confidence ?? 0) >= 0.6 ||
-                          securityState.policy.showLowConfidenceWarnings) && (
-                          <span className="font-normal text-[var(--text-muted)]">
-                            · {confidenceLabel(
-                              mlThreat.confidence ??
-                                mlThreat.mlPrediction?.confidence ??
-                                0,
-                            )}
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  <p className="mt-3 text-xs leading-5 text-[var(--text-muted)]">
-                    <strong className="text-[var(--text-secondary)]">
-                      Explanation:
-                    </strong>{' '}
-                    {mlThreat.mlPrediction?.explanation}
-                  </p>
-
-                  <p className="mt-2 text-[11px] italic text-[var(--text-muted)]">
-                    This deterministic development model is for integration
-                    testing and is not a production-trained threat model.
-                  </p>
-                </section>
-              )}
-
-              {/* Recommendation */}
-              <section className="rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-4">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
-                  <div>
-                    <h3 className="text-sm font-semibold text-[var(--text)]">
-                      Recommended action
-                    </h3>
-                    <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
-                      {recommendation.recommendation}
-                    </p>
-                    <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-                      {recommendation.explanation}
-                    </p>
-                  </div>
-                </div>
-              </section>
-
-              {/* Detail grid */}
-              <div className="grid gap-4 md:grid-cols-2">
-                <section className={sectionClass}>
-                  <div className="mb-4 flex items-center gap-2">
-                    <Shield className="h-4 w-4 text-[var(--accent)]" />
-                    <h3 className="text-sm font-semibold text-[var(--text)]">
-                      Overview
-                    </h3>
-                  </div>
-
-                  <dl className="space-y-3 text-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <dt className="text-[var(--text-muted)]">
-                        Discovery source
-                      </dt>
-                      <dd>
-                        <StatusBadge
-                          label={currentDevice.discoverySource}
-                          variant={
-                            currentDevice.discoverySource === 'REAL'
-                              ? 'info'
-                              : 'warning'
-                          }
-                        />
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between gap-3">
-                      <dt className="text-[var(--text-muted)]">First seen</dt>
-                      <dd className="text-right text-[var(--text-secondary)]">
-                        {formatDistanceToNow(currentDevice.firstSeen, {
-                          addSuffix: true,
-                        })}
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between gap-3">
-                      <dt className="text-[var(--text-muted)]">Last seen</dt>
-                      <dd className="text-right text-[var(--text-secondary)]">
-                        {formatDistanceToNow(currentDevice.lastSeen, {
-                          addSuffix: true,
-                        })}
-                      </dd>
-                    </div>
-
-                    <div className="flex items-center justify-between gap-3">
-                      <dt className="text-[var(--text-muted)]">Connection</dt>
-                      <dd>
-                        <StatusBadge
-                          label={currentDevice.connectionStatus}
-                          variant={
-                            currentDevice.connectionStatus === 'connected'
-                              ? 'success'
-                              : currentDevice.connectionStatus === 'connecting'
-                                ? 'warning'
-                                : 'info'
-                          }
-                        />
-                      </dd>
-                    </div>
-
-                    <div className="flex justify-between gap-3">
-                      <dt className="text-[var(--text-muted)]">
-                        Known device
-                      </dt>
-                      <dd className="text-[var(--text-secondary)]">
-                        {currentDevice.isKnown ? 'Yes' : 'No'}
-                      </dd>
-                    </div>
-                  </dl>
-                </section>
-
-                <section className={sectionClass}>
-                  <div className="mb-4 flex items-center gap-2">
-                    <ShieldCheck className="h-4 w-4 text-[var(--success)]" />
-                    <h3 className="text-sm font-semibold text-[var(--text)]">
-                      Trust analysis
-                    </h3>
-                  </div>
-
-                  {assessment && (
-                    <dl className="space-y-3 text-sm">
-                      {[
-                        ['Known device', assessment.factors.knownDevice ? 'Yes' : 'No'],
-                        ['Manufacturer reputation', `${assessment.factors.manufacturerReputation}/100`],
-                        ['Connection history', `${assessment.factors.connectionHistory}/100`],
-                        ['Suspicious behavior', `${assessment.factors.suspiciousBehavior}/100`],
-                        ['Signal consistency', `${assessment.factors.signalConsistency}/100`],
-                        ['Device type trust', `${assessment.factors.deviceTypeTrust}/100`],
-                      ].map(([label, value]) => (
-                        <div
-                          key={label}
-                          className="flex justify-between gap-3"
-                        >
-                          <dt className="text-[var(--text-muted)]">{label}</dt>
-                          <dd className="font-medium text-[var(--text-secondary)]">
-                            {value}
-                          </dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
-                </section>
-
-                <section className={`${sectionClass} md:col-span-2`}>
-                  <div className="mb-4 flex items-center gap-2">
-                    <Wifi className="h-4 w-4 text-[var(--accent)]" />
-                    <h3 className="text-sm font-semibold text-[var(--text)]">
-                      Bluetooth information
-                    </h3>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Signal strength
-                      </p>
-                      <p className="mt-1 font-mono text-sm text-[var(--text-secondary)]">
-                        {currentDevice.rssi ?? 'N/A'} dBm
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        MAC address
-                      </p>
-                      <p className="mt-1 break-all font-mono text-sm text-[var(--text-secondary)]">
-                        {currentDevice.address ?? 'N/A'}
-                      </p>
-                    </div>
-
-                    <div>
-                      <p className="text-xs text-[var(--text-muted)]">
-                        Services
-                      </p>
-                      <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                        {currentDevice.services.length}
-                      </p>
-                    </div>
-                  </div>
-
-                  {currentDevice.services.length > 0 && (
-                    <div className="mt-4 space-y-1.5 border-t border-[var(--border)] pt-3">
-                      {currentDevice.services.map((s, i) => (
-                        <div
-                          key={i}
-                          className="break-all rounded-md bg-[var(--bg)] px-2.5 py-2 font-mono text-[11px] text-[var(--text-muted)]"
-                        >
-                          {s.uuid}
-                          {s.name ? ` · ${s.name}` : ''}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </section>
-
-                <section className={`${sectionClass} md:col-span-2`}>
-                  <div className="mb-4 flex items-center gap-2">
-                    <AlertTriangle className="h-4 w-4 text-[var(--warning)]" />
-                    <h3 className="text-sm font-semibold text-[var(--text)]">
-                      Security assessment
-                    </h3>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="flex justify-between gap-3">
-                      <span className="text-sm text-[var(--text-muted)]">
-                        Known device
-                      </span>
-                      <span className="text-sm text-[var(--text-secondary)]">
-                        {currentDevice.isKnown ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between gap-3">
-                      <span className="text-sm text-[var(--text-muted)]">
-                        Suspicious activity
-                      </span>
-                      <span
-                        className={`text-sm ${
-                          currentDevice.riskLevel === 'high'
-                            ? 'text-[var(--danger)]'
-                            : 'text-[var(--text-secondary)]'
-                        }`}
-                      >
-                        {currentDevice.riskLevel === 'high' ? 'Detected' : 'Not detected'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <p className="mb-2 text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                      Risk factors
-                    </p>
-
-                    <ul className="space-y-1.5 text-sm text-[var(--text-secondary)]">
-                      {!currentDevice.isKnown && (
-                        <li>• Device not previously seen</li>
-                      )}
-                      {currentDevice.riskLevel === 'high' && (
-                        <li>• High risk classification</li>
-                      )}
-                      {currentDevice.connectionStatus === 'unknown' && (
-                        <li>• Connection state unknown</li>
-                      )}
-                      {!currentDevice.address && <li>• No MAC address available</li>}
-                      {currentDevice.isKnown &&
-                        currentDevice.riskLevel !== 'high' &&
-                        currentDevice.connectionStatus !== 'unknown' &&
-                        currentDevice.address && (
-                          <li className="text-[var(--success)]">
-                            • No immediate risk factors identified
-                          </li>
-                        )}
-                    </ul>
-                  </div>
-                </section>
-              </div>
-
-              {/* Actions */}
-              <div className="border-t border-[var(--border)] pt-4">
-                {isNativeAndroidApp() && currentDevice.address && !currentDevice.blocked && (
-                  <NativeConnectPanel
-                    address={currentDevice.address}
-                    paired={Boolean(currentDevice.paired)}
-                    connected={currentDevice.connectionStatus === 'connected'}
-                  />
-                )}
-                {canConnectSelectedDevice(currentDevice.id) && !currentDevice.gattConnected && !currentDevice.blocked && (
-                  <div className="mb-4 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3">
-                    <p className="text-sm font-medium text-[var(--text)]">Bluetooth connection approval</p>
-                    <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">Selecting a device does not connect it. Approve here to let BlueGuardian open a browser GATT connection and inspect services. Android system pairing remains controlled by Android Settings.</p>
-                    <button
-                      type="button"
-                      disabled={connectionBusy}
-                      onClick={() => {
-                        setConnectionBusy(true);
-                        setConnectionMessage(null);
-                        void connectSelectedDevice(currentDevice.id)
-                          .then(result => setConnectionMessage(result.message))
-                          .catch(error => setConnectionMessage(error instanceof Error ? error.message : 'Bluetooth connection failed.'))
-                          .finally(() => setConnectionBusy(false));
-                      }}
-                      className="mt-3 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50"
-                    >{connectionBusy ? 'Connecting…' : 'Approve & inspect services'}</button>
-                    {connectionMessage && <p role="status" className="mt-2 text-xs text-[var(--text-secondary)]">{connectionMessage}</p>}
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  {allowedActions.map((act) => (
-                    <button
-                      key={act}
-                      onClick={() => handleAction(act)}
-                      className={`inline-flex items-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition ${actionClass(
-                        act,
-                      )}`}
-                    >
-                      {act === 'TRUST' && <ShieldCheck className="h-4 w-4" />}
-                      {act === 'MARK_UNKNOWN' && (
-                        <AlertTriangle className="h-4 w-4" />
-                      )}
-                      {act === 'BLOCK' && <Ban className="h-4 w-4" />}
-                      {act === 'UNBLOCK' && <RotateCcw className="h-4 w-4" />}
-                      {act === 'FORGET' && <Trash2 className="h-4 w-4" />}
-                      {act === 'INVESTIGATE' && (
-                        <AlertTriangle className="h-4 w-4" />
-                      )}
-                      {act}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {actions.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {actions.map((a) => (
+                <button key={a} type="button" onClick={() => run(a)}
+                  className={cn('inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-sm font-medium',
+                    a === 'TRUST' ? 'border-[var(--success)]/30 text-[var(--success)]'
+                      : a === 'BLOCK' ? 'border-[var(--danger)]/30 text-[var(--danger)]'
+                        : 'border-[var(--border)] text-[var(--text-secondary)]')}>
+                  {a === 'TRUST' && <CheckCircle className="h-4 w-4" />}
+                  {a === 'BLOCK' && <Ban className="h-4 w-4" />}
+                  {a === 'UNBLOCK' && <RotateCcw className="h-4 w-4" />}
+                  {a === 'FORGET' && <Trash2 className="h-4 w-4" />}
+                  {ACTION_LABEL[a] ?? a}
+                </button>
+              ))}
             </div>
-          </div>
+          )}
+
+          <p className="text-[11px] text-[var(--text-muted)]">
+            {current.address ?? 'Address hidden by browser'} · last seen {formatDistanceToNow(new Date(current.lastSeen), { addSuffix: true })}
+          </p>
         </div>
       </div>
 
-      {/* Confirmation dialog */}
-      {confirmAction && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] shadow-2xl">
-            <div className="border-b border-[var(--border)] px-5 py-4">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 text-[var(--warning)]" />
-                <h3 className="text-base font-semibold text-[var(--text)]">
-                  Confirm {confirmAction}
-                </h3>
-              </div>
-            </div>
-
-            <div className="p-5">
-              <p className="text-sm leading-6 text-[var(--text-secondary)]">
-                {confirmAction === 'BLOCK' &&
-                  `Blocking ${currentDevice.name} will mark it as blocked in BlueGuardian. This is an application-level decision; browser Web Bluetooth cannot enforce OS-level blocking.`}
-                {confirmAction === 'FORGET' &&
-                  `Forgetting ${currentDevice.name} will remove it from BlueGuardian permanently. This action cannot be undone.`}
-                {confirmAction === 'TRUST' &&
-                  `Marking ${currentDevice.name} as trusted will lower its threat level. Ensure you recognize this currentDevice.`}
-                {confirmAction === 'UNBLOCK' &&
-                  `Unblocking ${currentDevice.name} will remove its BlueGuardian application-level block. This does not change its trust status or enforce an operating-system block.`}
-              </p>
-
-              <div className="mt-5 flex justify-end gap-2">
-                <button
-                  onClick={() => setConfirmAction(null)}
-                  className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
-                >
-                  Cancel
-                </button>
-
-                <button
-                  onClick={confirmExecute}
-                  className="rounded-lg border border-[var(--danger)]/25 bg-[var(--danger)]/10 px-4 py-2 text-sm font-medium text-[var(--danger)] transition hover:bg-[var(--danger)]/15"
-                >
-                  Confirm
-                </button>
-              </div>
+      {confirm && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-5">
+            <p className="text-base font-semibold text-[var(--text)]">{confirm === 'BLOCK' ? `Block ${current.name}?` : `Forget ${current.name}?`}</p>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">
+              {confirm === 'BLOCK' ? 'BlueGuardian will warn you and refuse to connect to it.' : 'Its history in BlueGuardian will be removed.'}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button type="button" onClick={() => setConfirm(null)} className="rounded-xl border border-[var(--border)] px-4 py-2 text-sm text-[var(--text-secondary)]">Cancel</button>
+              <button type="button"
+                onClick={() => {
+                  executeAction(confirm, current, 'Confirmed by the owner.');
+                  setConfirm(null);
+                  if (confirm === 'FORGET') onClose();
+                }}
+                className="rounded-xl bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white">
+                {confirm === 'BLOCK' ? 'Block' : 'Forget'}
+              </button>
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

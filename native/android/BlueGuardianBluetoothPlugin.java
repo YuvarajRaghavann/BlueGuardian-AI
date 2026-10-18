@@ -248,12 +248,35 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             }
         }
 
+        // Raw advertisement payloads let the app identify trackers and pairing-popup
+        // spam from their documented formats instead of guessing from names.
+        JSObject manufacturerData = new JSObject();
+        JSObject serviceData = new JSObject();
+        if (record != null) {
+            android.util.SparseArray<byte[]> mfg = record.getManufacturerSpecificData();
+            if (mfg != null) {
+                for (int i = 0; i < mfg.size() && i < 8; i++) {
+                    manufacturerData.put(String.format(java.util.Locale.ROOT, "%04x", mfg.keyAt(i) & 0xffff), hexOf(mfg.valueAt(i)));
+                }
+            }
+            java.util.Map<ParcelUuid, byte[]> svc = record.getServiceData();
+            if (svc != null) {
+                int count = 0;
+                for (java.util.Map.Entry<ParcelUuid, byte[]> entry : svc.entrySet()) {
+                    if (count++ >= 8) break;
+                    serviceData.put(entry.getKey().getUuid().toString().toLowerCase(java.util.Locale.ROOT), hexOf(entry.getValue()));
+                }
+            }
+        }
+
         JSObject observation = new JSObject();
         observation.put("id", address);
         observation.put("address", address);
         if (name != null) observation.put("name", name);
         observation.put("rssi", result.getRssi());
         observation.put("serviceUuids", serviceUuids);
+        observation.put("manufacturerData", manufacturerData);
+        observation.put("serviceData", serviceData);
         observation.put("observedAt", now);
         observation.put("transport", "BLE");
         observation.put("source", "REAL");
@@ -666,6 +689,14 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             default:
                 return "Android BLE scan failed with code " + errorCode + ".";
         }
+    }
+
+    private static String hexOf(byte[] data) {
+        if (data == null) return "";
+        int n = Math.min(data.length, 64);
+        StringBuilder out = new StringBuilder(n * 2);
+        for (int i = 0; i < n; i++) out.append(String.format(java.util.Locale.ROOT, "%02x", data[i] & 0xff));
+        return out.toString();
     }
 
     private String safeMessage(Throwable error) {

@@ -73,6 +73,13 @@ export interface BluetoothDevice {
   gattConnected?: boolean;
   connectionHealth?: ConnectionHealth;
   approvalRequired?: boolean;
+  /** Identified from the raw advertisement payload (e.g. 'apple_findmy', 'fast_pair'). */
+  family?: string;
+  /** Human label for the identified family, e.g. "Samsung SmartTag". */
+  familyLabel?: string;
+  tracker?: boolean;
+  /** True only when the owner tapped Block. Older builds auto-blocked devices; those are released. */
+  blockedByUser?: boolean;
 }
 
 export interface ScanResult {
@@ -109,6 +116,9 @@ export type ThreatCategory =
   | 'UNSTABLE_CONNECTION'
   | 'BLOCKED_DEVICE'
   | 'SPOOFING_SUSPECTED'
+  | 'TRACKER_FOLLOWING'
+  | 'POPUP_SPAM'
+  | 'LOOKALIKE_DEVICE'
   | 'OTHER';
 
 export type ThreatStatus = 'ACTIVE' | 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED';

@@ -41,9 +41,9 @@ export function applySecurityActionToDevice(
       });
     }
     case 'BLOCK':
-      return reconcileApprovalState({ ...device, blocked: true, approvalRequired: false });
+      return reconcileApprovalState({ ...device, blocked: true, blockedByUser: true, approvalRequired: false });
     case 'UNBLOCK': {
-      return reconcileApprovalState({ ...device, blocked: false });
+      return reconcileApprovalState({ ...device, blocked: false, blockedByUser: false });
     }
     case 'FORGET':
       return null;

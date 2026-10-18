@@ -389,7 +389,7 @@ export function Devices() {
             )}
           />
         ) : (
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
             {visibleDevices.map(device => (
               <DeviceCard key={device.id} device={device} onClick={() => setSelectedDevice(device)} />
             ))}
