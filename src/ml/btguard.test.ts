@@ -34,6 +34,34 @@ describe('BTGuard continuous trust binding', () => {
     expect(result.level).toBe('ISOLATED');
   });
 
+
+  it('requires positive crypto and proximity evidence before recommending full capabilities', () => {
+    const missingEvidence = assessBtGuard(base);
+    expect(missingEvidence.level).toBe('RESTRICTED');
+    const verified = assessBtGuard(base, {
+      secureConnections: true,
+      encrypted: true,
+      authenticated: true,
+      keySizeBytes: 16,
+      channelSoundingDistanceM: 2,
+      rssiDbm: -48,
+    });
+    expect(verified.level).toBe('FULL');
+    expect(verified.capabilities).toContain('file_transfer');
+  });
+
+  it('does not promote a blocked device even with otherwise valid telemetry', () => {
+    const result = assessBtGuard({ ...base, blocked: true }, {
+      secureConnections: true,
+      encrypted: true,
+      authenticated: true,
+      keySizeBytes: 16,
+      channelSoundingDistanceM: 2,
+      rssiDbm: -48,
+    });
+    expect(result.level).toBe('ISOLATED');
+  });
+
   it('does not decay trust on identical UI re-renders', () => {
     const registry = new ContinuousTrustRegistry();
     const first = registry.observe(base);
