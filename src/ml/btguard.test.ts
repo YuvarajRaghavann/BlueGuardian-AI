@@ -12,7 +12,7 @@ const base: BluetoothDevice = {
 describe('BTGuard continuous trust binding', () => {
   it('does not claim proximity assurance when Channel Sounding data is missing', () => {
     const result = assessBtGuard(base);
-    expect(result.reasons.join(' ')).toContain('Channel Sounding/RSSI cross-check unavailable');
+    expect(result.reasons.join(' ')).toContain('Channel Sounding/calibrated RSSI-distance cross-check unavailable');
     expect(result.telemetryCoverage).not.toContain('Channel Sounding distance and RSSI');
   });
 
