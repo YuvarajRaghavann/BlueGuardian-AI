@@ -2,7 +2,7 @@ import type { BluetoothDevice, TrustAssessment, ThreatReason, ThreatSeverity, ML
 import { calculateTrustScore } from './trustScore';
 import { analyzeDeviceThreat } from './threatDetection';
 import { classifyDevice } from '../ml/mlService';
-import { btGuardRegistry } from '../ml/btguard';
+import { btGuardRegistry, getBtGuardTelemetry } from '../ml/btguard';
 
 const RULE_WEIGHT = 0.6;
 const ML_WEIGHT = 0.4; // Development integration weighting
@@ -44,7 +44,7 @@ function combineReasons(ruleReasons: ThreatReason[], mlPrediction?: MLPrediction
 export function assessDeviceSecurity(device: BluetoothDevice): SecurityAssessment {
   // 1. Trust score and BTGuard continuous policy assessment
   const trust: TrustAssessment = calculateTrustScore(device);
-  const btGuard = btGuardRegistry.observe(device);
+  const btGuard = btGuardRegistry.observe(device, getBtGuardTelemetry(device.id));
 
   // 2. Rule-based threat analysis
   const rule = analyzeDeviceThreat(device);
