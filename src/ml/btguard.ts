@@ -175,14 +175,33 @@ export function assessBtGuard(
 export class ContinuousTrustRegistry {
   private snapshots = new Map<string, BtGuardSnapshot>();
   private signatures = new Map<string, string>();
+  private rssiHistory = new Map<string, number[]>();
 
   observe(device: BluetoothDevice, telemetry: BtGuardTelemetry = {}): BtGuardSnapshot {
     const observedAt = telemetry.observedAt ?? device.lastSeen.getTime();
-    const signature = JSON.stringify({ device, telemetry: { ...telemetry, observedAt: undefined } });
+    const effectiveTelemetry: BtGuardTelemetry = {
+      ...telemetry,
+      // RSSI is available on native discovery observations; it is not proof of identity or distance.
+      rssiDbm: telemetry.rssiDbm ?? device.rssi,
+    };
+    const signature = JSON.stringify({ device, telemetry: { ...effectiveTelemetry, observedAt: undefined } });
     const previous = this.snapshots.get(device.id);
     if (previous && this.signatures.get(device.id) === signature) return previous;
 
-    const current = assessBtGuard(device, telemetry);
+    const rssiHistory = this.rssiHistory.get(device.id) ?? [];
+    if (typeof effectiveTelemetry.rssiDbm === 'number') {
+      rssiHistory.push(effectiveTelemetry.rssiDbm);
+      if (rssiHistory.length > 8) rssiHistory.shift();
+      this.rssiHistory.set(device.id, rssiHistory);
+    }
+    const current = assessBtGuard(device, effectiveTelemetry);
+    // A wide multi-observation signal spread is a weak anomaly hint, never a spoofing verdict.
+    const signalSpread = rssiHistory.length >= 4 ? Math.max(...rssiHistory) - Math.min(...rssiHistory) : 0;
+    if (signalSpread >= 45) {
+      current.trustScore = clamp(current.trustScore - 5);
+      current.reasons.push('RSSI varied by at least 45 dB across recent observations. Movement and interference can cause this; treat it as a review signal, not proof of spoofing.');
+      current.telemetryCoverage.push('multi-sample RSSI history');
+    }
     // Trust falls quickly on new adverse evidence and recovers slowly after it clears.
     const smoothed = previous
       ? Math.round(previous.trustScore + (current.trustScore < previous.trustScore
@@ -211,10 +230,12 @@ export class ContinuousTrustRegistry {
     if (deviceId) {
       this.snapshots.delete(deviceId);
       this.signatures.delete(deviceId);
+      this.rssiHistory.delete(deviceId);
       return;
     }
     this.snapshots.clear();
     this.signatures.clear();
+    this.rssiHistory.clear();
   }
 }
 
