@@ -1,5 +1,5 @@
 import type { BluetoothDevice } from '../types/index.js';
-import type { BtGuardTelemetry, BtGuardAssessment, BtGuardLevel } from './btguard.js';
+import { publishBtGuardTelemetry, type BtGuardTelemetry, type BtGuardAssessment, type BtGuardLevel } from './btguard.js';
 
 export const BTGUARD_MIN_KEY_SIZE_BYTES = 16;
 
@@ -184,4 +184,43 @@ export async function enforceBtGuardLevel(
   if (!enforcer) return { enforced: false, message: 'No native capability-enforcement adapter is registered; this assessment remains advisory.' };
   await enforcer.enforce(deviceId, assessment.level);
   return { enforced: true, message: `Native adapter applied ${assessment.level} policy.` };
+}
+
+
+export interface BtGuardEvidenceBundle {
+  pairing?: PairingSecurityProfile;
+  proximity?: ProximityEvidence;
+  rfBaseline?: RfFingerprintBaseline;
+  rfSample?: RfFingerprintSample;
+  behaviour?: Pick<BtGuardTelemetry, 'packetRate' | 'pairingAttempts' | 'errorRate' | 'interArrivalJitterMs'>;
+}
+
+/**
+ * Normalizes native/controller evidence into the live BTGuard telemetry store.
+ * Missing evidence stays missing; a failed supplied check is recorded as false.
+ */
+export function ingestBtGuardEvidence(deviceId: string, bundle: BtGuardEvidenceBundle): BtGuardTelemetry {
+  const telemetry: BtGuardTelemetry = {};
+  if (bundle.pairing) {
+    telemetry.secureConnections = bundle.pairing.secureConnections;
+    telemetry.encrypted = bundle.pairing.encrypted;
+    telemetry.authenticated = bundle.pairing.authenticated;
+    telemetry.keySizeBytes = bundle.pairing.keySizeBytes;
+  }
+  if (bundle.proximity) {
+    const result = verifyProximity(bundle.proximity);
+    telemetry.channelSoundingDistanceM = bundle.proximity.channelSoundingDistanceM;
+    telemetry.rssiDbm = bundle.proximity.rssiDbm;
+    telemetry.proximityVerified = result.allowed;
+  }
+  if (bundle.rfBaseline && bundle.rfSample) {
+    const result = compareRfFingerprint(bundle.rfBaseline, bundle.rfSample);
+    telemetry.rfFingerprintComparable = result.comparable;
+    if (result.comparable) telemetry.rfFingerprintAnomaly = result.anomaly;
+    telemetry.cfoKHz = bundle.rfSample.cfoKHz;
+  }
+  if (bundle.behaviour) Object.assign(telemetry, bundle.behaviour);
+  telemetry.observedAt = Date.now();
+  publishBtGuardTelemetry(deviceId, telemetry);
+  return telemetry;
 }
