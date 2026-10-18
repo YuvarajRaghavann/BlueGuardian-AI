@@ -246,29 +246,29 @@ const MAX_TELEMETRY_AGE_MS = 30_000;
 
 export function publishBtGuardTelemetry(deviceId: string, telemetry: BtGuardTelemetry): void {
   if (!deviceId.trim()) throw new Error('BTGuard telemetry requires a device ID.');
-  const clean: BtGuardTelemetry = {};
-  const boolKeys = ['secureConnections', 'encrypted', 'authenticated'] as const;
-  for (const key of boolKeys) {
-    if (typeof telemetry[key] === 'boolean') clean[key] = telemetry[key];
-  }
-  const numberKeys = [
-    'keySizeBytes', 'channelSoundingDistanceM', 'rssiDbm', 'cfoKHz',
-    'packetRate', 'pairingAttempts', 'errorRate', 'interArrivalJitterMs', 'observedAt',
-  ] as const;
-  for (const key of numberKeys) {
-    const value = telemetry[key];
-    if (typeof value === 'number' && Number.isFinite(value)) clean[key] = value;
-  }
+  const finite = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  const clean: BtGuardTelemetry = {
+    secureConnections: typeof telemetry.secureConnections === 'boolean' ? telemetry.secureConnections : undefined,
+    encrypted: typeof telemetry.encrypted === 'boolean' ? telemetry.encrypted : undefined,
+    authenticated: typeof telemetry.authenticated === 'boolean' ? telemetry.authenticated : undefined,
+    keySizeBytes: finite(telemetry.keySizeBytes),
+    channelSoundingDistanceM: finite(telemetry.channelSoundingDistanceM),
+    rssiDbm: finite(telemetry.rssiDbm),
+    cfoKHz: finite(telemetry.cfoKHz),
+    packetRate: finite(telemetry.packetRate),
+    pairingAttempts: finite(telemetry.pairingAttempts),
+    errorRate: finite(telemetry.errorRate),
+    interArrivalJitterMs: finite(telemetry.interArrivalJitterMs),
+    observedAt: finite(telemetry.observedAt) ?? Date.now(),
+  };
   if (clean.keySizeBytes !== undefined && (clean.keySizeBytes < 1 || clean.keySizeBytes > 16)) delete clean.keySizeBytes;
   if (clean.channelSoundingDistanceM !== undefined && clean.channelSoundingDistanceM < 0) delete clean.channelSoundingDistanceM;
   if (clean.packetRate !== undefined && clean.packetRate < 0) delete clean.packetRate;
   if (clean.pairingAttempts !== undefined && clean.pairingAttempts < 0) delete clean.pairingAttempts;
   if (clean.errorRate !== undefined && (clean.errorRate < 0 || clean.errorRate > 1)) delete clean.errorRate;
   if (clean.interArrivalJitterMs !== undefined && clean.interArrivalJitterMs < 0) delete clean.interArrivalJitterMs;
-  clean.observedAt ??= Date.now();
   telemetryByDevice.set(deviceId, clean);
 }
-
 export function getBtGuardTelemetry(deviceId: string, now = Date.now()): BtGuardTelemetry {
   const telemetry = telemetryByDevice.get(deviceId);
   if (!telemetry) return {};
