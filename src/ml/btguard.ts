@@ -269,6 +269,9 @@ export function publishBtGuardTelemetry(deviceId: string, telemetry: BtGuardTele
   const clean: BtGuardTelemetry = {
     secureConnections: typeof telemetry.secureConnections === 'boolean' ? telemetry.secureConnections : undefined,
     encrypted: typeof telemetry.encrypted === 'boolean' ? telemetry.encrypted : undefined,
+    proximityVerified: typeof telemetry.proximityVerified === 'boolean' ? telemetry.proximityVerified : undefined,
+    rfFingerprintAnomaly: typeof telemetry.rfFingerprintAnomaly === 'boolean' ? telemetry.rfFingerprintAnomaly : undefined,
+    rfFingerprintComparable: typeof telemetry.rfFingerprintComparable === 'boolean' ? telemetry.rfFingerprintComparable : undefined,
     authenticated: typeof telemetry.authenticated === 'boolean' ? telemetry.authenticated : undefined,
     keySizeBytes: finite(telemetry.keySizeBytes),
     channelSoundingDistanceM: finite(telemetry.channelSoundingDistanceM),
