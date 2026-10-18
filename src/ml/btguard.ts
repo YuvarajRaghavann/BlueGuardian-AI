@@ -13,6 +13,9 @@ export interface BtGuardTelemetry {
   authenticated?: boolean;
   keySizeBytes?: number;
   channelSoundingDistanceM?: number;
+  proximityVerified?: boolean;
+  rfFingerprintAnomaly?: boolean;
+  rfFingerprintComparable?: boolean;
   rssiDbm?: number;
   cfoKHz?: number;
   packetRate?: number;
@@ -115,6 +118,22 @@ export function assessBtGuard(
     }
   }
 
+  if (telemetry.proximityVerified === false) {
+    score -= 20;
+    reasons.push('Proximity verification failed; the peer is outside policy or the measurement was stale/inconsistent.');
+    coverage.push('Channel Sounding proximity policy');
+  } else if (telemetry.proximityVerified === true) {
+    coverage.push('Channel Sounding proximity policy');
+  }
+
+  if (telemetry.rfFingerprintAnomaly === true) {
+    score -= 20;
+    coverage.push('enrolled RF fingerprint comparison');
+    reasons.push('RF fingerprint differs from the enrolled baseline; treat as a possible identity anomaly, not proof of cloning.');
+  } else if (telemetry.rfFingerprintComparable === true) {
+    coverage.push('enrolled RF fingerprint comparison');
+  }
+
   if (typeof telemetry.channelSoundingDistanceM === 'number' && typeof telemetry.rssiDbm === 'number') {
     coverage.push('Channel Sounding distance and RSSI');
     // This is only a coarse inconsistency indicator. Environment calibration is required.
@@ -148,8 +167,10 @@ export function assessBtGuard(
     && telemetry.encrypted === true
     && telemetry.authenticated === true
     && typeof telemetry.keySizeBytes === 'number' && telemetry.keySizeBytes >= 16
+    && telemetry.proximityVerified === true
     && typeof telemetry.channelSoundingDistanceM === 'number'
-    && typeof telemetry.rssiDbm === 'number';
+    && typeof telemetry.rssiDbm === 'number'
+    && telemetry.rfFingerprintAnomaly !== true;
   const level = inferLevel(trustScore, Boolean(device.blocked), fullEvidence);
   const capabilities = level === 'FULL'
     ? [...FULL_CAPABILITIES]
