@@ -13,6 +13,7 @@ export interface BtGuardTelemetry {
   authenticated?: boolean;
   keySizeBytes?: number;
   channelSoundingDistanceM?: number;
+  calibratedRssiDistanceM?: number;
   proximityVerified?: boolean;
   rfFingerprintAnomaly?: boolean;
   rfFingerprintComparable?: boolean;
@@ -167,6 +168,7 @@ export function assessBtGuard(
     && typeof telemetry.keySizeBytes === 'number' && telemetry.keySizeBytes >= 16
     && telemetry.proximityVerified === true
     && typeof telemetry.channelSoundingDistanceM === 'number'
+    && typeof telemetry.calibratedRssiDistanceM === 'number'
     && typeof telemetry.rssiDbm === 'number'
     && telemetry.rfFingerprintAnomaly !== true;
   const level = inferLevel(trustScore, Boolean(device.blocked), fullEvidence);
@@ -199,6 +201,7 @@ export class ContinuousTrustRegistry {
   observe(device: BluetoothDevice, telemetry: BtGuardTelemetry = {}): BtGuardSnapshot {
     const observedAt = telemetry.observedAt ?? device.lastSeen.getTime();
     const effectiveTelemetry: BtGuardTelemetry = {
+      ...getBtGuardTelemetry(device.id),
       ...telemetry,
       // RSSI is available on native discovery observations; it is not proof of identity or distance.
       rssiDbm: telemetry.rssiDbm ?? device.rssi,
@@ -275,6 +278,7 @@ export function publishBtGuardTelemetry(deviceId: string, telemetry: BtGuardTele
     authenticated: typeof telemetry.authenticated === 'boolean' ? telemetry.authenticated : undefined,
     keySizeBytes: finite(telemetry.keySizeBytes),
     channelSoundingDistanceM: finite(telemetry.channelSoundingDistanceM),
+    calibratedRssiDistanceM: finite(telemetry.calibratedRssiDistanceM),
     rssiDbm: finite(telemetry.rssiDbm),
     cfoKHz: finite(telemetry.cfoKHz),
     packetRate: finite(telemetry.packetRate),
