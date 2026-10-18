@@ -49,6 +49,7 @@ describe('BTGuard continuous trust binding', () => {
       authenticated: true,
       keySizeBytes: 16,
       channelSoundingDistanceM: 2,
+      calibratedRssiDistanceM: 2.4,
       proximityVerified: true,
       rfFingerprintComparable: true,
       rssiDbm: -48,
