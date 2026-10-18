@@ -218,4 +218,49 @@ export class ContinuousTrustRegistry {
   }
 }
 
+
+/** Native/firmware adapters can publish only observed values through this store. */
+const telemetryByDevice = new Map<string, BtGuardTelemetry>();
+const MAX_TELEMETRY_AGE_MS = 30_000;
+
+export function publishBtGuardTelemetry(deviceId: string, telemetry: BtGuardTelemetry): void {
+  if (!deviceId.trim()) throw new Error('BTGuard telemetry requires a device ID.');
+  const clean: BtGuardTelemetry = {};
+  const boolKeys = ['secureConnections', 'encrypted', 'authenticated'] as const;
+  for (const key of boolKeys) {
+    if (typeof telemetry[key] === 'boolean') clean[key] = telemetry[key];
+  }
+  const numberKeys = [
+    'keySizeBytes', 'channelSoundingDistanceM', 'rssiDbm', 'cfoKHz',
+    'packetRate', 'pairingAttempts', 'errorRate', 'interArrivalJitterMs', 'observedAt',
+  ] as const;
+  for (const key of numberKeys) {
+    const value = telemetry[key];
+    if (typeof value === 'number' && Number.isFinite(value)) clean[key] = value;
+  }
+  if (clean.keySizeBytes !== undefined && (clean.keySizeBytes < 1 || clean.keySizeBytes > 16)) delete clean.keySizeBytes;
+  if (clean.channelSoundingDistanceM !== undefined && clean.channelSoundingDistanceM < 0) delete clean.channelSoundingDistanceM;
+  if (clean.packetRate !== undefined && clean.packetRate < 0) delete clean.packetRate;
+  if (clean.pairingAttempts !== undefined && clean.pairingAttempts < 0) delete clean.pairingAttempts;
+  if (clean.errorRate !== undefined && (clean.errorRate < 0 || clean.errorRate > 1)) delete clean.errorRate;
+  if (clean.interArrivalJitterMs !== undefined && clean.interArrivalJitterMs < 0) delete clean.interArrivalJitterMs;
+  clean.observedAt ??= Date.now();
+  telemetryByDevice.set(deviceId, clean);
+}
+
+export function getBtGuardTelemetry(deviceId: string, now = Date.now()): BtGuardTelemetry {
+  const telemetry = telemetryByDevice.get(deviceId);
+  if (!telemetry) return {};
+  const observedAt = telemetry.observedAt ?? 0;
+  if (now - observedAt > MAX_TELEMETRY_AGE_MS || observedAt > now + 5_000) {
+    return {};
+  }
+  return { ...telemetry };
+}
+
+export function clearBtGuardTelemetry(deviceId?: string): void {
+  if (deviceId) telemetryByDevice.delete(deviceId);
+  else telemetryByDevice.clear();
+}
+
 export const btGuardRegistry = new ContinuousTrustRegistry();
