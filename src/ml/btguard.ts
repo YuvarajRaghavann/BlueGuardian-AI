@@ -134,17 +134,15 @@ export function assessBtGuard(
     coverage.push('enrolled RF fingerprint comparison');
   }
 
-  if (typeof telemetry.channelSoundingDistanceM === 'number' && typeof telemetry.rssiDbm === 'number') {
-    coverage.push('Channel Sounding distance and RSSI');
-    // This is only a coarse inconsistency indicator. Environment calibration is required.
-    const estimatedDistance = Math.pow(10, (-45 - telemetry.rssiDbm) / 20);
-    const difference = Math.abs(telemetry.channelSoundingDistanceM - estimatedDistance);
-    if (difference > Math.max(8, telemetry.channelSoundingDistanceM * 1.5)) {
+  if (typeof telemetry.channelSoundingDistanceM === 'number' && typeof telemetry.calibratedRssiDistanceM === 'number') {
+    coverage.push('Channel Sounding and calibrated RSSI-distance cross-check');
+    const difference = Math.abs(telemetry.channelSoundingDistanceM - telemetry.calibratedRssiDistanceM);
+    if (difference > Math.max(3, telemetry.channelSoundingDistanceM * 0.5)) {
       score -= 15;
-      reasons.push('Channel Sounding distance and RSSI-derived distance are inconsistent; verify in a calibrated environment.');
+      reasons.push('Channel Sounding and calibrated RSSI-distance estimates are inconsistent; verify calibration and repeat the measurement before taking action.');
     }
   } else {
-    reasons.push('Channel Sounding/RSSI cross-check unavailable; no proximity assurance is claimed.');
+    reasons.push('Channel Sounding/calibrated RSSI-distance cross-check unavailable; raw RSSI alone does not establish distance.');
   }
 
   if (typeof telemetry.cfoKHz === 'number') {
