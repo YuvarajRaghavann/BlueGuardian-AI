@@ -154,6 +154,14 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
         familyLabel: incoming.familyLabel ?? existing.familyLabel,
         tracker: incoming.tracker ?? existing.tracker,
         txPower: incoming.txPower ?? existing.txPower,
+        manufacturerData: incoming.manufacturerData ?? existing.manufacturerData,
+        rawAdvert: incoming.rawAdvert ?? existing.rawAdvert,
+        addressType: incoming.addressType ?? existing.addressType,
+        deviceClass: incoming.deviceClass ?? existing.deviceClass,
+        majorClass: incoming.majorClass ?? existing.majorClass,
+        connectable: incoming.connectable ?? existing.connectable,
+        separated: incoming.separated ?? existing.separated,
+        popupAdvertiser: incoming.popupAdvertiser ?? existing.popupAdvertiser,
         rssi: typeof incoming.rssi === 'number' ? incoming.rssi : existing.rssi,
         lastSeen: incoming.lastSeen,
         ...(shouldRefreshConnection ? {
@@ -750,6 +758,15 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       discoveryTransports: Array.from(seenTransports),
       paired,
       ...('txPower' in observation && typeof observation.txPower === 'number' ? { txPower: observation.txPower } : {}),
+      ...(transport === 'BLE' && 'manufacturerData' in observation ? {
+        manufacturerData: observation.manufacturerData,
+        rawAdvert: observation.rawAdvert,
+        addressType: observation.addressType,
+        connectable: observation.connectable,
+      } : {}),
+      ...('majorClass' in observation && typeof observation.majorClass === 'number'
+        ? { majorClass: observation.majorClass, deviceClass: observation.deviceClass } : {}),
+      ...(advertInfo ? { separated: advertInfo.separated, popupAdvertiser: advertInfo.isPairingPopup } : {}),
       ...(advertInfo && advertInfo.family !== 'unknown'
         ? { family: advertInfo.family, familyLabel: advertInfo.label, tracker: advertInfo.isTracker }
         : {}),
@@ -795,6 +812,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       discoveryTransport: 'COMBINED',
       discoveryTransports: transports,
       paired: known.paired,
+      ...(typeof known.majorClass === 'number' ? { majorClass: known.majorClass, deviceClass: known.deviceClass } : {}),
       gattConnected: false,
       connectionHealth: 'UNAVAILABLE',
     };

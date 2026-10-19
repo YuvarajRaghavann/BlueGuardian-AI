@@ -8,22 +8,24 @@ import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 import { useIntel } from '../intel/store';
 import type { BluetoothDevice } from '../types';
 import { Radar } from '../ui/Radar';
-import { LEVEL } from '../ui/trust';
+import { VERDICT_STYLE } from '../intel/guardian';
+import { guardianFor, useGuardianVersion } from '../intel/guardianStore';
 import { cn } from '../utils/cn';
 
-type Filter = 'all' | 'trusted' | 'new' | 'watch';
+type Filter = 'all' | 'safe' | 'caution' | 'unsafe';
 const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'all', label: 'All' },
-  { id: 'trusted', label: 'Trusted' },
-  { id: 'new', label: 'New' },
-  { id: 'watch', label: 'Watch' },
+  { id: 'safe', label: 'Safe' },
+  { id: 'caution', label: 'Caution' },
+  { id: 'unsafe', label: 'Unsafe' },
 ];
 
 const seen = (d: BluetoothDevice) => new Date(d.lastSeen).getTime();
 
 export function AroundYou() {
   const { state, scanCombinedDevices, scanRealDevices } = useBluetoothDevices();
-  const engine = useIntel();
+  useIntel();
+  useGuardianVersion();
   const reduce = useReducedMotion();
   const [filter, setFilter] = useState<Filter>('all');
   const [selected, setSelected] = useState<BluetoothDevice | null>(null);
@@ -35,15 +37,13 @@ export function AroundYou() {
   const around = real.filter((d) => d.paired || (lastScan !== null && lastScan - seen(d) < 10 * 60_000));
 
   const tagged = around.map((d) => {
-    const o = engine.trustOf(d.address);
-    const alert = engine.findingsFor(d.address).length > 0;
-    const group: Filter = alert || o.level === 'untrusted' || o.level === 'uncertain' ? 'watch'
-      : o.level === 'trusted' || o.level === 'likely_safe' ? 'trusted' : 'new';
-    return { d, o, alert, group };
+    const g = guardianFor(d);
+    const group: Filter = g.verdict === 'unsafe' ? 'unsafe' : g.verdict === 'caution' ? 'caution' : 'safe';
+    return { d, g, alert: g.verdict === 'unsafe', group };
   });
   const shown = tagged
     .filter((t) => filter === 'all' || t.group === filter)
-    .sort((a, b) => Number(b.alert) - Number(a.alert) || (b.d.connectionStatus === 'connected' ? 1 : 0) - (a.d.connectionStatus === 'connected' ? 1 : 0) || (b.d.rssi ?? -200) - (a.d.rssi ?? -200));
+    .sort((a, b) => VERDICT_STYLE[b.g.verdict].rank - VERDICT_STYLE[a.g.verdict].rank || (b.d.connectionStatus === 'connected' ? 1 : 0) - (a.d.connectionStatus === 'connected' ? 1 : 0) || (b.d.rssi ?? -200) - (a.d.rssi ?? -200));
   const count = (f: Filter) => (f === 'all' ? tagged.length : tagged.filter((t) => t.group === f).length);
   const scan = () => (native ? void scanCombinedDevices() : void scanRealDevices());
 
@@ -53,7 +53,7 @@ export function AroundYou() {
         scanning={scanning}
         onScan={scan}
         onSelect={(id) => setSelected(real.find((d) => d.id === id) ?? null)}
-        dots={tagged.slice(0, 60).map(({ d, o, alert }) => ({ id: d.id, address: d.address, name: d.name, rssi: d.rssi, txPower: d.txPower, color: LEVEL[o.level].color, alert }))}
+        dots={tagged.slice(0, 60).map(({ d, g, alert }) => ({ id: d.id, address: d.address, name: d.name, rssi: d.rssi, txPower: d.txPower, color: VERDICT_STYLE[g.verdict].color, alert }))}
       />
 
       <div className="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4">

@@ -6,6 +6,8 @@ import type { BluetoothDevice, SecurityActionType } from '../types';
 import { useSecurity } from '../context/SecurityContext';
 import { useBluetoothDevices } from '../context/DeviceContext';
 import { NativeConnectPanel } from './NativeConnectPanel';
+import { GuardianPanel } from './GuardianPanel';
+import { guardianFor, useGuardianVersion } from '../intel/guardianStore';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 import { useIntel } from '../intel/store';
 import { TRUST, opinionFrom } from '../intel/engine';
@@ -61,6 +63,7 @@ export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
   const { executeAction, getAllowedActions } = useSecurity();
   const { state: deviceState } = useBluetoothDevices();
   const engine = useIntel();
+  useGuardianVersion();
   const [confirm, setConfirm] = useState<SecurityActionType | null>(null);
   const [showHow, setShowHow] = useState(false);
   const [showAll, setShowAll] = useState(false);
@@ -75,6 +78,7 @@ export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
   const isTracker = Boolean(current?.tracker || profile?.tracker);
   const owned = Boolean(current?.address && engine.snapshot.mine.includes(current.address.toUpperCase()));
   const distance = estimateDistanceM(current?.rssi, current?.txPower);
+  const guardian = current ? guardianFor(current) : null;
 
   const run = (type: SecurityActionType) => {
     if (!current) return;
@@ -93,19 +97,25 @@ export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
             </p>
           </div>
 
-          <div className="flex flex-col items-center">
-            <TrustDial opinion={opinion} />
-            <p className="mt-3 text-base font-semibold" style={{ color: LEVEL[opinion.level].color }}>{LEVEL[opinion.level].label}</p>
-            <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-              From {trust?.ledger.length ?? 0} piece{trust?.ledger.length === 1 ? '' : 's'} of evidence
-            </p>
-          </div>
+          {guardian && <GuardianPanel device={current} result={guardian} />}
 
           <div className="grid grid-cols-3 gap-2">
             <Fact label="Status" value={current.connectionStatus === 'connected' ? 'Connected' : current.paired ? 'Paired' : current.blocked ? 'Blocked' : 'Nearby'} />
             <Fact label="Distance" value={formatDistance(distance)} />
             <Fact label="Seen" value={profile ? `${profile.scans} time${profile.scans === 1 ? '' : 's'}` : 'Once'} />
           </div>
+
+          <section className="rounded-3xl bg-[var(--surface)]/50 p-4">
+            <h3 className="text-sm font-semibold">Behaviour over time</h3>
+            <p className="mt-0.5 text-xs text-[var(--text-muted)]">Refines the check above as BlueGuardian keeps seeing this device.</p>
+            <div className="mt-4 flex items-center gap-4">
+              <TrustDial opinion={opinion} size={112} />
+              <div>
+                <p className="text-base font-semibold" style={{ color: LEVEL[opinion.level].color }}>{LEVEL[opinion.level].label}</p>
+                <p className="mt-0.5 text-xs text-[var(--text-muted)]">From {trust?.ledger.length ?? 0} piece{trust?.ledger.length === 1 ? '' : 's'} of evidence</p>
+              </div>
+            </div>
+          </section>
 
           {findings.map((f) => (
             <div key={f.id} className={cn('rounded-2xl p-4', f.severity === 'high' ? 'bg-[var(--danger)]/12' : 'bg-[var(--warning)]/12')}>
@@ -150,7 +160,7 @@ export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
           )}
 
           {isNativeAndroidApp() && current.address && !current.blocked && (
-            <NativeConnectPanel address={current.address} paired={Boolean(current.paired)} connected={current.connectionStatus === 'connected'} />
+            <NativeConnectPanel address={current.address} paired={Boolean(current.paired)} connected={current.connectionStatus === 'connected'} guardian={guardian} />
           )}
 
           {actions.length > 0 && (

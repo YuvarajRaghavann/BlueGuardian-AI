@@ -82,6 +82,15 @@ export interface BluetoothDevice {
   blockedByUser?: boolean;
   /** Advertised transmit power, used for distance estimates. */
   txPower?: number;
+  /** Raw evidence for the pre-connection Guardian check. */
+  manufacturerData?: Record<string, string>;
+  rawAdvert?: string;
+  addressType?: 'public' | 'random';
+  deviceClass?: number;
+  majorClass?: number;
+  connectable?: boolean;
+  separated?: boolean | null;
+  popupAdvertiser?: boolean;
 }
 
 export interface ScanResult {

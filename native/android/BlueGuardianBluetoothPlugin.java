@@ -286,6 +286,10 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             observation.put("connectable", result.isConnectable());
         }
+        // Raw advertisement bytes and address type feed the pre-connection Guardian check.
+        if (record != null && record.getBytes() != null) observation.put("rawAdvert", hexOf(record.getBytes()));
+        Integer addressType = addressTypeOf(device);
+        if (addressType != null) observation.put("addressType", addressType == 0 ? "public" : "random");
         notifyListeners("deviceFound", observation);
     }
 
@@ -424,6 +428,16 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                     observation.put("source", "REAL");
                     observation.put("paired", device.getBondState() == BluetoothDevice.BOND_BONDED);
                     observation.put("observedAt", System.currentTimeMillis());
+                    // Class of Device: what the device says it is (audio, keyboard, phone...), used by the Guardian check.
+                    try {
+                        android.bluetooth.BluetoothClass cod = device.getBluetoothClass();
+                        if (cod != null) {
+                            observation.put("deviceClass", cod.getDeviceClass());
+                            observation.put("majorClass", cod.getMajorDeviceClass());
+                        }
+                    } catch (SecurityException ignored) {
+                        // class of device withheld; the check reports "not declared"
+                    }
                     notifyListeners("classicDeviceFound", observation);
                     return;
                 }
@@ -691,6 +705,17 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 return "Android is rate-limiting BLE scans. Wait briefly before retrying.";
             default:
                 return "Android BLE scan failed with code " + errorCode + ".";
+        }
+    }
+
+    /** BluetoothDevice.getAddressType() exists on newer Android; read it reflectively and fall back to null. */
+    private static Integer addressTypeOf(BluetoothDevice device) {
+        try {
+            java.lang.reflect.Method m = device.getClass().getMethod("getAddressType");
+            Object v = m.invoke(device);
+            return v instanceof Integer ? (Integer) v : null;
+        } catch (Throwable ignored) {
+            return null;
         }
     }
 

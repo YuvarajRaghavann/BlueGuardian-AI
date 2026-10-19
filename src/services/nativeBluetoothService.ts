@@ -12,6 +12,8 @@ export interface NativeBleObservation {
   serviceData?: Record<string, string>;
   /** Advertised transmit power (dBm at 0 m), when the device includes it. */
   txPower?: number;
+  rawAdvert?: string;
+  addressType?: 'public' | 'random';
   connectable?: boolean;
   observedAt: number;
 }
@@ -23,6 +25,8 @@ export interface NativeClassicObservation {
   rssi?: number;
   transport: 'CLASSIC' | 'PAIRED';
   paired?: boolean;
+  deviceClass?: number;
+  majorClass?: number;
   observedAt: number;
 }
 

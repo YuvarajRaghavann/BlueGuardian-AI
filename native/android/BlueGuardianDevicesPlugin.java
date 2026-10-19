@@ -343,7 +343,14 @@ public class BlueGuardianDevicesPlugin extends Plugin {
         }
         if (name != null) o.put("name", name.trim());
         try { o.put("type", typeName(d.getType())); } catch (SecurityException ignored) { o.put("type", "UNKNOWN"); }
-        try { o.put("category", category(d.getBluetoothClass())); } catch (SecurityException ignored) { o.put("category", "other"); }
+        try {
+            BluetoothClass cls = d.getBluetoothClass();
+            o.put("category", category(cls));
+            if (cls != null) {
+                o.put("deviceClass", cls.getDeviceClass());
+                o.put("majorClass", cls.getMajorDeviceClass());
+            }
+        } catch (SecurityException ignored) { o.put("category", "other"); }
         int bond = BluetoothDevice.BOND_NONE;
         try { bond = d.getBondState(); } catch (SecurityException ignored) { /* withheld */ }
         o.put("paired", bond == BluetoothDevice.BOND_BONDED);
@@ -521,6 +528,135 @@ public class BlueGuardianDevicesPlugin extends Plugin {
         try { key = device.getAddress().toUpperCase(Locale.ROOT); } catch (SecurityException e) { return false; }
         List<String> p = connected.get(key);
         return (p != null && !p.isEmpty()) || reflectIsConnected(device);
+    }
+
+    // ------------------------------------------------- Guardian deep inspection
+
+    private static final java.util.UUID DIS = java.util.UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb");
+    private static final String[][] DIS_FIELDS = {
+        { "00002a29-0000-1000-8000-00805f9b34fb", "manufacturer" },
+        { "00002a24-0000-1000-8000-00805f9b34fb", "model" },
+        { "00002a26-0000-1000-8000-00805f9b34fb", "firmware" },
+    };
+
+    /**
+     * Pre-pairing GATT inspection: connect without bonding, list services, read the
+     * Device Information strings, and test whether the device protects its data
+     * (a read that fails with "insufficient authentication/encryption" means it
+     * requires pairing before sharing data). Always disconnects; never pairs.
+     */
+    @SuppressLint("MissingPermission")
+    @PluginMethod
+    public void inspectGatt(PluginCall call) {
+        if (!ensureBluetooth(call, true)) return;
+        BluetoothAdapter adapter = usableAdapter(call);
+        if (adapter == null) return;
+        String address = call.getString("address");
+        if (address == null || !BluetoothAdapter.checkBluetoothAddress(address.toUpperCase(Locale.ROOT))) {
+            call.reject("This device has no usable Bluetooth address.");
+            return;
+        }
+        final BluetoothDevice device = adapter.getRemoteDevice(address.toUpperCase(Locale.ROOT));
+        final JSObject result = new JSObject();
+        final JSArray services = new JSArray();
+        final JSObject info = new JSObject();
+        final java.util.ArrayDeque<android.bluetooth.BluetoothGattCharacteristic> queue = new java.util.ArrayDeque<>();
+        final int[] protectedReads = { 0 };
+        final int[] openReads = { 0 };
+        final boolean[] finished = { false };
+        final android.bluetooth.BluetoothGatt[] gattRef = new android.bluetooth.BluetoothGatt[1];
+
+        final Runnable finish = () -> {
+            if (finished[0]) return;
+            finished[0] = true;
+            try { if (gattRef[0] != null) { gattRef[0].disconnect(); gattRef[0].close(); } } catch (Exception ignored) { /* ignore */ }
+            result.put("services", services);
+            result.put("info", info);
+            result.put("protectedReads", protectedReads[0]);
+            result.put("openReads", openReads[0]);
+            call.resolve(result);
+        };
+        mainHandler.postDelayed(() -> {
+            if (!finished[0]) {
+                result.put("timedOut", true);
+                finish.run();
+            }
+        }, 12000);
+
+        android.bluetooth.BluetoothGattCallback callback = new android.bluetooth.BluetoothGattCallback() {
+            private void readNext(android.bluetooth.BluetoothGatt gatt) {
+                while (!queue.isEmpty()) {
+                    android.bluetooth.BluetoothGattCharacteristic c = queue.poll();
+                    try {
+                        if (gatt.readCharacteristic(c)) return;
+                    } catch (SecurityException ignored) { /* skip */ }
+                }
+                mainHandler.post(finish);
+            }
+
+            @Override
+            public void onConnectionStateChange(android.bluetooth.BluetoothGatt gatt, int status, int newState) {
+                if (newState == BluetoothProfile.STATE_CONNECTED) {
+                    result.put("connected", true);
+                    try { gatt.discoverServices(); } catch (SecurityException e) { mainHandler.post(finish); }
+                } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                    if (!result.has("connected")) result.put("connected", false);
+                    mainHandler.post(finish);
+                }
+            }
+
+            @Override
+            public void onServicesDiscovered(android.bluetooth.BluetoothGatt gatt, int status) {
+                List<android.bluetooth.BluetoothGattService> list = gatt.getServices();
+                int probes = 0;
+                for (android.bluetooth.BluetoothGattService svc : list) {
+                    String uuid = svc.getUuid().toString().toLowerCase(Locale.ROOT);
+                    services.put(uuid);
+                    for (android.bluetooth.BluetoothGattCharacteristic c : svc.getCharacteristics()) {
+                        boolean readable = (c.getProperties() & android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ) != 0;
+                        if (!readable) continue;
+                        if (svc.getUuid().equals(DIS)) queue.addFirst(c);
+                        else if (probes < 4 && !uuid.startsWith("00001800") && !uuid.startsWith("00001801")) { queue.addLast(c); probes++; }
+                    }
+                }
+                readNext(gatt);
+            }
+
+            @Override
+            public void onCharacteristicRead(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic c, int status) {
+                handleRead(gatt, c, c.getValue(), status);
+            }
+
+            @Override
+            public void onCharacteristicRead(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic c, byte[] value, int status) {
+                handleRead(gatt, c, value, status);
+            }
+
+            private void handleRead(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic c, byte[] value, int status) {
+                String id = c.getUuid().toString().toLowerCase(Locale.ROOT);
+                if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+                    boolean dis = false;
+                    for (String[] f : DIS_FIELDS) {
+                        if (f[0].equals(id) && value != null) {
+                            info.put(f[1], new String(value, java.nio.charset.StandardCharsets.UTF_8).replaceAll("[\\p{Cntrl}]", "").trim());
+                            dis = true;
+                        }
+                    }
+                    if (!dis) openReads[0]++;
+                } else if (status == 5 || status == 15 || status == 8) {
+                    // 5 = insufficient authentication, 15 = insufficient encryption, 8 = insufficient authorization
+                    protectedReads[0]++;
+                }
+                readNext(gatt);
+            }
+        };
+        try {
+            gattRef[0] = device.connectGatt(getContext(), false, callback, BluetoothDevice.TRANSPORT_LE);
+            if (gattRef[0] == null) finish.run();
+        } catch (SecurityException error) {
+            finished[0] = true;
+            call.reject("Allow Nearby Devices for BlueGuardian and try again.");
+        }
     }
 
     @PluginMethod

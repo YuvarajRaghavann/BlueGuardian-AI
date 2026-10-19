@@ -31,6 +31,8 @@ export interface KnownDevice {
   paired: boolean;
   connected: boolean;
   profiles: string[];
+  deviceClass?: number;
+  majorClass?: number;
   lastSeen?: LastSeenRecord;
 }
 
@@ -55,6 +57,7 @@ interface DevicesPlugin {
   startProximity(options: { address: string; name?: string; durationMs?: number }): Promise<{ started: boolean; connected: boolean }>;
   stopProximity(): Promise<void>;
   requestBluetooth(): Promise<{ granted: boolean }>;
+  inspectGatt(options: { address: string }): Promise<{ connected: boolean; timedOut?: boolean; services: string[]; info: { manufacturer?: string; model?: string; firmware?: string }; protectedReads: number; openReads: number }>;
   bluetoothStatus(): Promise<{ granted: boolean }>;
   locationStatus(): Promise<{ location: boolean; background: boolean }>;
   requestLocation(): Promise<{ location: boolean; background: boolean }>;
