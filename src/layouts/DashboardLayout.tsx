@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate, useOutlet } from 'react-router-dom';
 import { AnimatePresence, MotionConfig, motion, useReducedMotion } from 'framer-motion';
-import { Activity, BarChart2, Bell, LayoutDashboard, LockKeyhole, MapPin, Menu, Radar as RadarIcon, Settings } from 'lucide-react';
+import { Activity, BarChart2, Bell, LayoutDashboard, LockKeyhole, LogOut, MapPin, Menu, Radar as RadarIcon, Settings, User } from 'lucide-react';
+import { LogoMark } from '../ui/Logo';
+import { signOut, useAccount } from '../services/accountSession';
 import { useThreats } from '../context/ThreatContext';
 import { BottomSheet } from '../ui/BottomSheet';
 import { cn } from '../utils/cn';
@@ -25,16 +27,6 @@ const TITLES: Record<string, string> = {
   '/settings': 'Settings',
 };
 
-export function BrandMark({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 32 32" className={className} aria-hidden="true">
-      <path d="M16 3 27 7v8c0 7-4.6 11.8-11 14C9.6 26.8 5 22 5 15V7l11-4Z" fill="rgba(140,124,255,0.16)" stroke="var(--accent)" strokeWidth="1.8" strokeLinejoin="round" />
-      <path d="M11.5 15.5a6.4 6.4 0 0 1 9 0M13.6 18a3.4 3.4 0 0 1 4.8 0" fill="none" stroke="var(--success)" strokeWidth="1.8" strokeLinecap="round" />
-      <circle cx="16" cy="20.6" r="1.4" fill="var(--success)" />
-    </svg>
-  );
-}
-
 export function DashboardLayout() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -43,13 +35,16 @@ export function DashboardLayout() {
   const { state: threatState } = useThreats();
   const openAlerts = threatState.threats.filter((t) => t.status === 'ACTIVE' || t.status === 'INVESTIGATING').length;
   const title = TITLES[location.pathname] ?? 'BlueGuardian';
+  // useOutlet() freezes the element per route, so the exiting page keeps its own content during the transition.
+  const outlet = useOutlet();
+  const account = useAccount();
 
   return (
     <MotionConfig reducedMotion="user">
       <div className="min-h-screen text-[var(--text)]">
         <header className="sticky top-0 z-30 border-b border-transparent bg-[var(--bg)]/80 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
           <div className="mx-auto flex h-14 max-w-3xl items-center gap-3 px-4">
-            <BrandMark className="h-7 w-7 shrink-0" />
+            <LogoMark className="h-8 w-8 shrink-0" />
             <AnimatePresence mode="wait" initial={false}>
               <motion.h1
                 key={title}
@@ -72,12 +67,12 @@ export function DashboardLayout() {
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={location.pathname}
-              initial={reduce ? false : { opacity: 0, y: 14, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-              exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8, filter: 'blur(2px)' }}
-              transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+              initial={reduce ? false : { opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={reduce ? { opacity: 0 } : { opacity: 0, y: -8 }}
+              transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
             >
-              <Outlet />
+              {outlet}
             </motion.div>
           </AnimatePresence>
         </main>
@@ -111,6 +106,22 @@ export function DashboardLayout() {
 
         <BottomSheet open={moreOpen} onClose={() => setMoreOpen(false)} label="More">
           <div className="px-4 pb-6 pt-1">
+            <div className="mb-2 flex items-center gap-3 rounded-2xl bg-[var(--surface)] p-3">
+              <span className="grid h-11 w-11 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]"><User className="h-5 w-5" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-semibold">{account.email ?? 'Not signed in'}</span>
+                <span className="block text-xs text-[var(--text-muted)]">
+                  {account.status === 'signed-in' ? 'Signed in, secured by Keystore' : account.status === 'restoring' ? 'Signing in…' : account.status === 'offline' ? 'Offline, will reconnect' : 'Sign in for community recovery'}
+                </span>
+              </span>
+              {account.email ? (
+                <button type="button" onClick={() => { signOut(); setMoreOpen(false); }} aria-label="Sign out" className="tap grid h-10 w-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]">
+                  <LogOut className="h-5 w-5" />
+                </button>
+              ) : (
+                <button type="button" onClick={() => { setMoreOpen(false); navigate('/welcome?step=account'); }} className="tap rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-bold text-white">Sign in</button>
+              )}
+            </div>
             {[
               { to: '/events', label: 'Activity', sub: 'Everything that happened, in order', icon: Activity },
               { to: '/analytics', label: 'Insights', sub: 'Trends from your scans', icon: BarChart2 },

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
 import { setOwnerToken as setActiveOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
-import { createFirebaseAccount, getFreshFirebaseIdToken, sendFirebasePasswordResetEmail, signInWithEmailPassword, signOutFirebase } from '../services/firebaseAuth';
+import { currentFirebaseEmail, getFreshFirebaseIdToken, sendFirebasePasswordResetEmail } from '../services/firebaseAuth';
+import { signIn as accountSignIn, signOut as accountSignOut } from '../services/accountSession';
 import { isNativeAndroidApp, listNativeAndroidPairedDevices, scanNativeAndroidBle, scanNativeAndroidClassic } from '../services/nativeBluetoothService';
 
 function formatDate(value?: string | null) {
@@ -31,6 +32,27 @@ export function RecoveryCloud() {
   const [communityShareLocation, setCommunityShareLocation] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Already signed in from the welcome screen or a saved session: load cases straight away.
+  useEffect(() => {
+    const signedIn = currentFirebaseEmail();
+    if (!signedIn) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const token = await getFreshFirebaseIdToken();
+        if (!token || cancelled) return;
+        setOwnerToken(token);
+        setActiveOwnerToken(token);
+        setFirebaseSignedInEmail(signedIn);
+        const loaded = await api.recovery.listDevices(token);
+        if (!cancelled) { setDevices(loaded); setDevicesLoaded(true); }
+      } catch (caught) {
+        if (!cancelled) setError(caught instanceof Error ? caught.message : 'Could not load your recovery cases.');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const requireToken = () => {
     if (!ownerToken.trim()) {
@@ -83,9 +105,9 @@ export function RecoveryCloud() {
     setNotice(null);
     setActiveOwnerToken(null);
     try {
-      const session = mode === 'sign-in'
-        ? await signInWithEmailPassword(email, password)
-        : await createFirebaseAccount(email, password);
+      // Shared account session: also keeps you signed in (Keystore-protected) across launches.
+      const signedInEmail = await accountSignIn(mode, email, password);
+      const session = { email: signedInEmail, idToken: (await getFreshFirebaseIdToken()) ?? '' };
 
       setOwnerToken(session.idToken);
       setFirebaseSignedInEmail(session.email);
@@ -133,7 +155,7 @@ export function RecoveryCloud() {
   };
 
   const handleFirebaseSignOut = () => {
-    signOutFirebase();
+    accountSignOut();
     setActiveOwnerToken(null);
     setOwnerToken('');
     setFirebaseSignedInEmail(null);
@@ -531,6 +553,16 @@ export function RecoveryCloud() {
 
   return (
     <div className="space-y-6">
+      {firebaseSignedInEmail ? (
+        <section className="flex items-center gap-3 rounded-2xl bg-[var(--surface)] p-4">
+          <div className="grid h-10 w-10 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]"><LockKeyhole className="h-5 w-5" /></div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-semibold text-[var(--text)]">{firebaseSignedInEmail}</p>
+            <p className="text-xs text-[var(--text-muted)]">Signed in</p>
+          </div>
+          <button type="button" onClick={handleFirebaseSignOut} disabled={busy} className="rounded-xl bg-[var(--surface-raised)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] disabled:opacity-50">Sign out</button>
+        </section>
+      ) : (
       <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
         <div className="mb-4 flex items-center gap-3">
           <div className="grid h-11 w-11 place-items-center rounded-xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] text-[var(--accent)]"><LockKeyhole className="h-5 w-5" /></div>
@@ -614,6 +646,7 @@ export function RecoveryCloud() {
           {busy ? 'Working…' : 'Load my registered devices'}
         </button>
       </section>
+      )}
 
       <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
         <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">

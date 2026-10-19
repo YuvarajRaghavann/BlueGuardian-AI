@@ -174,8 +174,82 @@ function writeNetworkSecurityConfig() {
     : 'Network security config: cleartext off, system CAs only (set BACKEND_CERT_PINS to add certificate pinning).');
 }
 
+/**
+ * Branding: BlueGuardian launcher icons (legacy + adaptive), splash screen and
+ * colours, copied from native/android/res (rendered from branding/logo-mark.svg).
+ */
+function copyDir(from, to) {
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const src = path.join(from, entry.name);
+    const dst = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      fs.mkdirSync(dst, { recursive: true });
+      copyDir(src, dst);
+    } else {
+      fs.copyFileSync(src, dst);
+    }
+  }
+}
+
+function installBranding() {
+  const brandRes = path.join(nativeSourceDir, 'res');
+  const appRes = path.join(root, 'android', 'app', 'src', 'main', 'res');
+  if (!fs.existsSync(brandRes) || !fs.existsSync(appRes)) return 'Branding: skipped (resources missing).';
+
+  // Default Capacitor splash bitmaps would win over our drawable, so remove every variant first.
+  const removed = [];
+  for (const dir of fs.readdirSync(appRes)) {
+    const candidate = path.join(appRes, dir, 'splash.png');
+    if (dir.startsWith('drawable') && fs.existsSync(candidate)) {
+      fs.rmSync(candidate);
+      removed.push(dir);
+    }
+  }
+  copyDir(brandRes, appRes);
+
+  const write = (rel, text) => {
+    const file = path.join(appRes, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  };
+  write('drawable/splash.xml', [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<layer-list xmlns:android="http://schemas.android.com/apk/res/android">',
+    '    <item android:drawable="@color/bg_splash" />',
+    '    <item><bitmap android:gravity="center" android:src="@drawable/splash_logo" /></item>',
+    '</layer-list>',
+    '',
+  ].join('\n'));
+  write('values/bg_brand_colors.xml', [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<resources>',
+    '    <color name="bg_splash">#0B1020</color>',
+    '</resources>',
+    '',
+  ].join('\n'));
+  write('values/ic_launcher_background.xml', [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<resources>',
+    '    <color name="ic_launcher_background">#121A30</color>',
+    '</resources>',
+    '',
+  ].join('\n'));
+  const adaptive = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">',
+    '    <background android:drawable="@color/ic_launcher_background" />',
+    '    <foreground android:drawable="@mipmap/ic_launcher_foreground" />',
+    '</adaptive-icon>',
+    '',
+  ].join('\n');
+  write('mipmap-anydpi-v26/ic_launcher.xml', adaptive);
+  write('mipmap-anydpi-v26/ic_launcher_round.xml', adaptive);
+  return `Branding: launcher icons, adaptive icon and splash installed (replaced splash in ${removed.length} folder(s)).`;
+}
+
 const hardeningNotes = ['Manifest hardening: allowBackup=false, usesCleartextTraffic=false, network security config attached.'];
 const nativePluginNote = installNativeBluetoothPlugin();
+const brandingNote = installBranding();
 
 let notes = [];
 if (fs.existsSync(variablesPath)) {
@@ -218,6 +292,7 @@ const manifest = [
   nativePluginNote,
   'Secure Link: BLE advertising + L2CAP CoC transport (Android 10+), Noise_XX_25519_ChaChaPoly_SHA256 channel with 6-digit comparison codes, BTGuard trust engine, encrypted file transfer into app-private quarantine, Android Keystore wrapping for identity and peer secrets.',
   ...hardeningNotes,
+  brandingNote,
   ...notes,
   '',
 ].join('\n');

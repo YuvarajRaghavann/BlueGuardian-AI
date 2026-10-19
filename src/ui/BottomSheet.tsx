@@ -1,4 +1,6 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { pushBackHandler } from './backStack';
 import { AnimatePresence, motion, useDragControls, useReducedMotion } from 'framer-motion';
 
 interface BottomSheetProps {
@@ -14,14 +16,29 @@ export function BottomSheet({ open, onClose, label, children }: BottomSheetProps
   // Drag starts only from the handle, so the sheet's content can still scroll normally.
   const controls = useDragControls();
 
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
   useEffect(() => {
     if (!open) return;
+    const onClose = () => closeRef.current();
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    // Android Back closes the sheet instead of leaving the screen.
+    const pop = pushBackHandler(() => { onClose(); return true; });
+    // Keep the page behind from scrolling while the sheet is open.
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      pop();
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
 
-  return (
+  if (typeof document === 'undefined') return null;
+  // Rendered into <body> so a transformed ancestor can never trap this fixed layer.
+  return createPortal(
     <AnimatePresence>
       {open && (
         <motion.div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center" role="dialog" aria-modal="true" aria-label={label}>
@@ -54,6 +71,7 @@ export function BottomSheet({ open, onClose, label, children }: BottomSheetProps
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body,
   );
 }

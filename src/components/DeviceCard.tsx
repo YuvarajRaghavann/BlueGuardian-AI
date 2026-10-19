@@ -33,7 +33,7 @@ export function DeviceCard({ device, onClick }: { device: BluetoothDevice; onCli
         </p>
       </div>
       <div className="text-right">
-        <p className="text-lg font-bold leading-none" style={{ color: LEVEL[opinion.level].color }}>{unverified ? '—' : score(opinion)}</p>
+        <p className="font-display text-lg font-semibold leading-none" style={{ color: LEVEL[opinion.level].color }}>{unverified ? '—' : score(opinion)}</p>
         <p className="mt-1 text-[10px] text-[var(--text-muted)]">{LEVEL[opinion.level].short}</p>
       </div>
     </button>

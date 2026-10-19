@@ -1,6 +1,7 @@
 /** App-wide evidence engine, persisted on this phone. */
 import { useEffect, useState } from 'react';
 import { IntelEngine, type IntelSnapshot } from './engine';
+import { compactSnapshot } from './persist';
 
 const KEY = 'blueguardian.intel.v1';
 
@@ -15,7 +16,7 @@ function load(): IntelSnapshot | null {
 
 function save(snapshot: IntelSnapshot): void {
   try {
-    globalThis.localStorage?.setItem(KEY, JSON.stringify(snapshot));
+    globalThis.localStorage?.setItem(KEY, compactSnapshot(snapshot));
   } catch {
     // quota: the engine keeps working in memory
   }

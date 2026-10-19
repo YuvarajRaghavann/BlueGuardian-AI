@@ -4,6 +4,7 @@ import type { Threat } from '../types';
 import { useThreats } from '../context/ThreatContext';
 import { intel } from '../intel/store';
 import { cn } from '../utils/cn';
+import { BottomSheet } from '../ui/BottomSheet';
 
 interface ThreatDetailModalProps {
   threat: Threat | null;
@@ -19,8 +20,8 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
   const open = threat.status === 'ACTIVE' || threat.status === 'INVESTIGATING';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={threat.title}>
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-3xl border border-[var(--border)] bg-[var(--bg-elevated)] p-5 sm:rounded-3xl">
+    <BottomSheet open onClose={onClose} label={threat.title}>
+      <div className="px-5 pb-7 pt-1">
         <div className="flex items-start gap-3">
           <div className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl', high ? 'bg-[var(--danger)]/15 text-[var(--danger)]' : 'bg-[var(--warning)]/15 text-[var(--warning)]')}>
             <ShieldAlert className="h-5 w-5" />
@@ -66,6 +67,6 @@ export function ThreatDetailModal({ threat, onClose }: ThreatDetailModalProps) {
           </div>
         )}
       </div>
-    </div>
+    </BottomSheet>
   );
 }

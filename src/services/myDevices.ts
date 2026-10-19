@@ -54,6 +54,8 @@ interface DevicesPlugin {
   openBluetoothSettings(): Promise<void>;
   startProximity(options: { address: string; name?: string; durationMs?: number }): Promise<{ started: boolean; connected: boolean }>;
   stopProximity(): Promise<void>;
+  requestBluetooth(): Promise<{ granted: boolean }>;
+  bluetoothStatus(): Promise<{ granted: boolean }>;
   locationStatus(): Promise<{ location: boolean; background: boolean }>;
   requestLocation(): Promise<{ location: boolean; background: boolean }>;
   requestBackgroundLocation(): Promise<{ location: boolean; background: boolean }>;

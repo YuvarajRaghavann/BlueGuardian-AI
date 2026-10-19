@@ -9,6 +9,8 @@ const config: CapacitorConfig = {
   appId: 'com.blueguardian.hybrid',
   appName: 'BlueGuardian',
   webDir: 'dist',
+  // Dark background while the web app loads, so there is no white flash after the splash.
+  backgroundColor: '#0e1424',
   android: {
     allowMixedContent: false,
   },

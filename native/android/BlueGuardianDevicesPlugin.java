@@ -151,8 +151,34 @@ public class BlueGuardianDevicesPlugin extends Plugin {
         return true;
     }
 
+    /** Onboarding: ask for Nearby Devices (scan + connect) up front. Resolves { granted }. */
+    @PluginMethod
+    public void requestBluetooth(PluginCall call) {
+        if (!ensureBluetooth(call, true)) return;
+        JSObject out = new JSObject();
+        out.put("granted", true);
+        call.resolve(out);
+    }
+
+    @PluginMethod
+    public void bluetoothStatus(PluginCall call) {
+        JSObject out = new JSObject();
+        out.put("granted", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            ? granted("bluetoothScan") && granted("bluetoothConnect")
+            : granted("location"));
+        call.resolve(out);
+    }
+
     @PermissionCallback
     private void onBluetoothPermission(PluginCall call) {
+        if ("requestBluetooth".equals(call.getMethodName())) {
+            JSObject out = new JSObject();
+            out.put("granted", Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                ? granted("bluetoothScan") && granted("bluetoothConnect")
+                : granted("location"));
+            call.resolve(out);
+            return;
+        }
         boolean ok = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? granted("bluetoothConnect") : true;
         if (!ok) {
             call.reject("BlueGuardian needs the Nearby Devices permission for this.");

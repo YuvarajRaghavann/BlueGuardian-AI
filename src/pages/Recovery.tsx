@@ -3,6 +3,7 @@ import {
   Bluetooth, ChevronRight, Clock, Headphones, LoaderCircle, MapPin, Radar, RefreshCw, Settings, ShieldAlert, Smartphone, Watch, X,
 } from 'lucide-react';
 import { RecoveryCloud } from './RecoveryCloud';
+import { BottomSheet } from '../ui/BottomSheet';
 import {
   buildShareText, deviceLabel, lastPlace, myDevices, myDevicesSupported, proximityBand, timeAgo,
   type KnownDevice,
@@ -106,8 +107,8 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
   const band = proximityBand(fresh ? rssi : null);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={`Find ${deviceLabel(device)}`}>
-      <div className="w-full max-w-md rounded-t-3xl border border-[var(--border)] bg-[var(--bg-elevated)] p-5 sm:rounded-3xl">
+    <BottomSheet open onClose={onClose} label={`Find ${deviceLabel(device)}`}>
+      <div className="px-5 pb-6 pt-1">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-[var(--text)]">Find {deviceLabel(device)}</h2>
           <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-[var(--text-muted)]"><X className="h-5 w-5" /></button>
@@ -153,7 +154,7 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
           <button type="button" onClick={onClose} className="mt-3 w-full rounded-xl border border-[var(--border)] py-3 text-sm font-semibold text-[var(--text)]">Done</button>
         )}
       </div>
-    </div>
+    </BottomSheet>
   );
 }
 

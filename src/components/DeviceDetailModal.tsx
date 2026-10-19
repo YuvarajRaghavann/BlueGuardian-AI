@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Ban, CheckCircle, ChevronRight, MapPin, RotateCcw, ShieldAlert, Trash2 } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -65,6 +65,7 @@ export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
   const [showHow, setShowHow] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const current = device ? deviceState.devices.find((d) => d.id === device.id) ?? device : null;
+  useEffect(() => { setConfirm(null); setShowHow(false); setShowAll(false); }, [device?.id]);
 
   const profile = current?.address ? engine.profile(current.address) : undefined;
   const trust = profile?.trust;

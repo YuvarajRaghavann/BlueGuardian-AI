@@ -118,7 +118,7 @@ export function Dashboard() {
                   className="tap w-[148px] shrink-0 snap-start rounded-3xl bg-[var(--surface)] p-4 text-left"
                   initial={reduce ? false : { opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 * i }}>
                   <TrustRing opinion={o} size={52}>
-                    <span className="text-sm font-bold" style={{ color: LEVEL[o.level].color }}>{o.level === 'unverified' ? '—' : score(o)}</span>
+                    <span className="font-display text-sm font-semibold" style={{ color: LEVEL[o.level].color }}>{o.level === 'unverified' ? '—' : score(o)}</span>
                   </TrustRing>
                   <p className="mt-3 truncate text-sm font-semibold">{d.name}</p>
                   <p className="text-xs" style={{ color: d.connectionStatus === 'connected' ? 'var(--success)' : 'var(--text-muted)' }}>

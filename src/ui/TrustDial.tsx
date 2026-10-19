@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { animate, motion, useReducedMotion } from 'framer-motion';
 import type { TrustOpinion } from '../intel/engine';
 import { LEVEL, score } from './trust';
@@ -8,6 +8,7 @@ export function TrustDial({ opinion, size = 148 }: { opinion: TrustOpinion; size
   const reduce = useReducedMotion();
   const value = score(opinion);
   const [shown, setShown] = useState(reduce ? value : 0);
+  const from = useRef(reduce ? value : 0);
   const color = LEVEL[opinion.level].color;
   const r = size / 2 - 14;
   const c = 2 * Math.PI * r;
@@ -16,7 +17,10 @@ export function TrustDial({ opinion, size = 148 }: { opinion: TrustOpinion; size
 
   useEffect(() => {
     if (reduce) { setShown(value); return; }
-    const controls = animate(0, value, { duration: 1.1, ease: [0.22, 1, 0.36, 1], onUpdate: (v) => setShown(Math.round(v)) });
+    const controls = animate(from.current, value, {
+      duration: 1.1, ease: [0.22, 1, 0.36, 1],
+      onUpdate: (v) => { from.current = v; setShown(Math.round(v)); },
+    });
     return () => controls.stop();
   }, [value, reduce]);
 
@@ -41,7 +45,7 @@ export function TrustDial({ opinion, size = 148 }: { opinion: TrustOpinion; size
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[40px] font-bold leading-none tracking-tight" style={{ color }}>{shown}</span>
+        <span className="font-display text-[42px] font-semibold leading-none" style={{ color }}>{shown}</span>
         <span className="mt-1 text-[11px] text-[var(--text-muted)]">{Math.round(opinion.confidence * 100)}% sure</span>
       </div>
     </div>

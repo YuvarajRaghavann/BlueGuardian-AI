@@ -1,7 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { AppSettings, IntelSettings } from '../components/SettingsExtras';
 import {
-  Settings,
-  Brain,
   Shield,
   Bell,
   Eye,
@@ -10,16 +9,12 @@ import {
   Lock,
 } from 'lucide-react';
 import { StatusBadge } from '../components/StatusBadge';
-import { getModelStatus, getCurrentModelMetadata, availableModels } from '../ml/mlService';
 import { useSecurity } from '../context/SecurityContext';
 import { api } from '../services/api';
 import { localDatabase } from '../services/localDatabase';
 import { getApiBaseConfig, setApiBaseUrl, type ApiBaseConfig } from '../services/apiBase';
 
 export function SettingsPage() {
-  const modelStatus = getModelStatus();
-  const modelMetadata = getCurrentModelMetadata();
-  const models = availableModels();
   const [backendHealth, setBackendHealth] = useState<{ status: string; database: string } | null>(null);
   const [backendError, setBackendError] = useState<string | null>(null);
   const [backendCheckVersion, setBackendCheckVersion] = useState(0);
@@ -182,25 +177,9 @@ export function SettingsPage() {
   ];
 
   return (
-    <div className="relative space-y-6 sm:space-y-7">
-      {/* Header */}
-      <header className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] sm:p-6">
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--accent)]">
-          <Settings className="h-3.5 w-3.5" />
-          System configuration
-        </div>
+    <div className="space-y-4">
 
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">
-          Settings
-        </h1>
-
-        <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-          Configure BlueGuardian protection policies and review the
-          current analysis environment.
-        </p>
-      </header>
-
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25">
+      <section className="rounded-3xl bg-[var(--surface)] p-5">
         <div className="mb-4">
           <h2 className="text-sm font-semibold text-[var(--text)]">Backend endpoint</h2>
           <p className="mt-1 max-w-3xl text-xs leading-5 text-[var(--text-muted)]">
@@ -250,7 +229,7 @@ export function SettingsPage() {
         </form>
       </section>
 
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25">
+      <section className="rounded-3xl bg-[var(--surface)] p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-[var(--text)]">Backend and database</h2>
@@ -267,7 +246,7 @@ export function SettingsPage() {
         {backendError && <p role="alert" className="mt-2 text-xs text-[var(--danger)]">{backendError}</p>}
       </section>
 
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25">
+      <section className="rounded-3xl bg-[var(--surface)] p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-sm font-semibold text-[var(--text)]">Browser-local records</h2>
@@ -283,114 +262,10 @@ export function SettingsPage() {
       </section>
 
       {/* Model configuration */}
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
-        <div className="flex flex-col gap-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="flex gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
-                <Brain className="h-5 w-5 text-[var(--accent)]" />
-              </div>
-
-              <div>
-                <h2 className="text-sm font-semibold text-[var(--text)]">
-                  AI / ML Configuration
-                </h2>
-
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  Current threat-analysis integration
-                </p>
-              </div>
-            </div>
-
-            <StatusBadge
-              label="DEVELOPMENT MODEL"
-              variant="warning"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-px overflow-hidden rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--border)] sm:grid-cols-2">
-            <div className="bg-[var(--surface)] p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Model
-              </p>
-              <p className="mt-1 text-sm font-medium text-[var(--text)]">
-                {modelMetadata.name}
-              </p>
-            </div>
-
-            <div className="bg-[var(--surface)] p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Version
-              </p>
-              <p className="mt-1 text-sm font-medium text-[var(--text)]">
-                {modelMetadata.version}
-              </p>
-            </div>
-
-            <div className="bg-[var(--surface)] p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Status
-              </p>
-              <div className="mt-1">
-                <StatusBadge
-                  label={modelStatus.status}
-                  variant={
-                    modelStatus.status === 'READY'
-                      ? 'success'
-                      : modelStatus.status === 'LOADING'
-                        ? 'warning'
-                        : modelStatus.status === 'ERROR'
-                          ? 'danger'
-                          : 'info'
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="bg-[var(--surface)] p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Feature count
-              </p>
-              <p className="mt-1 text-sm font-medium text-[var(--text)]">
-                11
-              </p>
-            </div>
-
-            <div className="bg-[var(--surface)] p-4 sm:col-span-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Classification classes
-              </p>
-              <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-                BENIGN · SUSPICIOUS · POTENTIAL_SPOOFING ·
-                POTENTIAL_UNAUTHORIZED_ACCESS · ANOMALOUS_BEHAVIOR ·
-                HIGH_RISK_DEVICE
-              </p>
-            </div>
-
-            <div className="bg-[var(--surface)] p-4 sm:col-span-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                Registered models
-              </p>
-              <p className="mt-1 text-sm font-medium text-[var(--text)]">
-                {models.join(', ')}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex gap-3 rounded-[var(--radius-md)] border border-[var(--warning)]/20 bg-[var(--warning)]/5 p-4">
-            <Cpu className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
-
-            <p className="text-xs leading-5 text-[var(--text-secondary)]">
-              This is a deterministic development model for
-              integration testing. It is not a production-trained
-              threat detection model.
-            </p>
-          </div>
-        </div>
-      </section>
+      <IntelSettings />
 
       {/* Security policy */}
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
+      <section className="rounded-3xl bg-[var(--surface)] p-5">
         <div className="mb-5 flex gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
             <Lock className="h-5 w-5 text-[var(--accent)]" />
@@ -450,25 +325,7 @@ export function SettingsPage() {
       </section>
 
       {/* General */}
-      <section className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface)] p-5 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 shadow-[0_8px_28px_rgba(0,0,0,0.12)] transition-all duration-200 hover:border-[var(--accent)]/25 sm:p-6">
-        <div className="flex gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
-            <Settings className="h-5 w-5 text-[var(--accent)]" />
-          </div>
-
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">
-              General
-            </h2>
-
-            <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
-              Additional configuration for monitoring, notifications
-              and account management can be added here as the platform
-              expands.
-            </p>
-          </div>
-        </div>
-      </section>
+      <AppSettings />
     </div>
   );
 }

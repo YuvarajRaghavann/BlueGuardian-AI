@@ -84,23 +84,7 @@ export function Events() {
   const systemEvents = visibleEvents(availableEvents, securityState.policy.showSimulatedEvents);
 
   return (
-    <div className="relative space-y-6 sm:space-y-7">
-      <header className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 shadow-[0_12px_32px_rgba(0,0,0,0.14)] sm:p-6">
-        <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-[var(--accent)]">
-          <Activity className="h-3.5 w-3.5" />
-          {usingBackendEvents ? 'Owner-scoped audit activity' : 'Browser activity'}
-        </div>
-
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] sm:text-3xl">
-          Activity &amp; actions
-        </h1>
-
-        <p className="mt-1 max-w-2xl text-sm text-[var(--text-secondary)]">
-          {usingBackendEvents
-            ? 'Review owner-scoped audit events returned by the configured backend. These are recorded application events, not system-wide Android security telemetry.'
-            : 'Review locally recorded browser activity. Demo entries are marked as simulated; this page is not a system-wide security audit log.'}
-        </p>
-      </header>
+    <div className="space-y-4">
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4">

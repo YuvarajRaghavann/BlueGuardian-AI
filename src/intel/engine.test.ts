@@ -198,3 +198,18 @@ describe('trust score (Beta reputation with decay)', () => {
     expect(Math.round(later * 100) / 100).toBe(Math.round((fresh / 2) * 100) / 100);
   });
 });
+
+describe('storage budget', () => {
+  it('keeps the saved snapshot under budget without losing your devices', async () => {
+    const { compactSnapshot } = await import('./persist');
+    const e = new IntelEngine();
+    const t0 = 1_000_000_000_000;
+    scanAt(e, t0, [{ address: 'B5:60:99:3A:6A:C1', name: 'Mine', transport: 'PAIRED', paired: true }]);
+    for (let s = 0; s < 40; s++) {
+      scanAt(e, t0 + s * MIN, Array.from({ length: 60 }, (_, i) => ({ address: `10:00:00:00:${String(s).padStart(2, '0')}:${String(i).padStart(2, '0')}`, transport: 'BLE' as const, rssi: -70, name: 'Device ' + i })));
+    }
+    const json = compactSnapshot(e.snapshot, 200_000);
+    expect(json.length).toBeLessThanOrEqual(200_000);
+    expect(json.includes('B5:60:99:3A:6A:C1')).toBe(true);
+  });
+});

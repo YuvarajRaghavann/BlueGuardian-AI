@@ -42,6 +42,42 @@ interface InMemoryFirebaseSession extends FirebaseClientSession {
 }
 
 let activeSession: InMemoryFirebaseSession | null = null;
+const sessionListeners = new Set<() => void>();
+
+function notifySession(): void {
+  for (const listener of sessionListeners) {
+    try { listener(); } catch { /* listener errors must not break auth */ }
+  }
+}
+
+/** Called after sign-in, token refresh (refresh tokens rotate) and sign-out. */
+export function onFirebaseSessionChange(listener: () => void): () => void {
+  sessionListeners.add(listener);
+  return () => { sessionListeners.delete(listener); };
+}
+
+export function currentFirebaseEmail(): string | null {
+  return activeSession?.email ?? null;
+}
+
+/** The long-lived refresh credential, only for wrapping with the Android Keystore. */
+export function exportRefreshCredential(): { email: string; refreshToken: string } | null {
+  return activeSession ? { email: activeSession.email, refreshToken: activeSession.refreshToken } : null;
+}
+
+/** Restore a session from a Keystore-protected refresh credential and fetch a fresh ID token. */
+export async function restoreFirebaseSession(email: string, refreshToken: string): Promise<FirebaseClientSession> {
+  activeSession = { email, localId: '', idToken: '', refreshToken, expiresAt: 0 };
+  let idToken: string | null;
+  try {
+    idToken = await getFreshFirebaseIdToken();
+  } catch (error) {
+    activeSession = null;
+    throw error;
+  }
+  if (!idToken || !activeSession) throw new Error('The Firebase session expired. Please sign in again.');
+  return { email: activeSession.email, localId: activeSession.localId, idToken };
+}
 
 function extractFirebaseErrorCode(message: string | undefined): string | undefined {
   if (!message) return undefined;
@@ -153,12 +189,17 @@ async function authenticateWithPassword(path: 'signUp' | 'signInWithPassword', e
   if (!password) throw new Error('Enter your password.');
   if (path === 'signUp' && password.length < 6) throw new Error('Choose a password with at least 6 characters.');
 
-  const response = await fetch(`${IDENTITY_TOOLKIT_URL}/accounts:${path}?key=${encodeURIComponent(FIREBASE_API_KEY)}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password, returnSecureToken: true }),
-    cache: 'no-store',
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${IDENTITY_TOOLKIT_URL}/accounts:${path}?key=${encodeURIComponent(FIREBASE_API_KEY)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password, returnSecureToken: true }),
+      cache: 'no-store',
+    });
+  } catch {
+    throw new Error('No internet connection. Check your network and try again.');
+  }
   const data = await readFirebaseResponse<FirebaseIdentityResponse>(response);
 
   if (!data.idToken || !data.refreshToken || !data.localId || !data.email) {
@@ -172,6 +213,7 @@ async function authenticateWithPassword(path: 'signUp' | 'signInWithPassword', e
     refreshToken: data.refreshToken,
     expiresAt: Date.now() + Math.max(1, Number(data.expiresIn) || 3600) * 1000,
   };
+  notifySession();
 
   return {
     email: activeSession.email,
@@ -242,11 +284,13 @@ export async function getFreshFirebaseIdToken(): Promise<string | null> {
     data = await readFirebaseResponse<FirebaseRefreshResponse>(response);
   } catch {
     activeSession = null;
+    notifySession();
     throw new Error('The Firebase session expired. Please sign in again.');
   }
 
   if (!data.id_token || !data.refresh_token || !data.expires_in || !data.user_id) {
     activeSession = null;
+    notifySession();
     throw new Error('Firebase could not refresh the session. Please sign in again.');
   }
 
@@ -257,11 +301,13 @@ export async function getFreshFirebaseIdToken(): Promise<string | null> {
     refreshToken: data.refresh_token,
     expiresAt: Date.now() + Math.max(1, Number(data.expires_in) || 3600) * 1000,
   };
+  notifySession();
   return activeSession.idToken;
 }
 
 export function signOutFirebase(): void {
   activeSession = null;
+  notifySession();
 }
 
 /** Test utility; never exposes a live credential. */

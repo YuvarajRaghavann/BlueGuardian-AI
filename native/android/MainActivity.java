@@ -24,21 +24,12 @@ public class MainActivity extends BridgeActivity {
                     return;
                 }
 
-                String currentUrl = webView.getUrl();
-                String path = "/";
-                if (currentUrl != null) {
-                    android.net.Uri uri = android.net.Uri.parse(currentUrl);
-                    path = uri.getPath() == null ? "/" : uri.getPath();
-                }
-
-                if ("/dashboard".equals(path) || "/".equals(path) || path.isEmpty()) {
-                    finish();
-                    return;
-                }
-
+                // The web app decides: close a sheet, go back a screen, or (at Home) let Android exit.
                 webView.evaluateJavascript(
-                    "window.dispatchEvent(new Event('blueguardian:android-back'))",
-                    null
+                    "(window.__bgHandleBack ? window.__bgHandleBack() : false)",
+                    value -> {
+                        if (!"true".equals(value)) finish();
+                    }
                 );
             }
         });

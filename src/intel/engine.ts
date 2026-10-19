@@ -90,8 +90,8 @@ export const CONFIG = {
   spamSigma: 4,
   spamMinBaselineScans: 5,
   findingTtlMs: 24 * 3600_000,
-  maxProfiles: 500,
-  maxSightings: 60,
+  maxProfiles: 300,
+  maxSightings: 40,
 };
 
 const emptyRunning = (): Running => ({ n: 0, mean: 0, m2: 0 });
@@ -207,6 +207,12 @@ export class IntelEngine {
 
   get snapshot(): IntelSnapshot {
     return this.snap;
+  }
+
+  /** Replace everything learned (used by "Reset learned data"). */
+  replace(snapshot: IntelSnapshot): void {
+    this.snap = snapshot;
+    this.commit();
   }
 
   subscribe(fn: () => void): () => void {
@@ -503,8 +509,8 @@ export const TRUST = {
   },
   signalAnomalyZ: 4,
   signalMinSamples: 8,
-  maxLedger: 40,
-  maxHistory: 120,
+  maxLedger: 30,
+  maxHistory: 90,
 };
 
 export type TrustLevel = 'unverified' | 'trusted' | 'likely_safe' | 'uncertain' | 'untrusted';
