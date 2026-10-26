@@ -8,7 +8,7 @@ const MANUFACTURERS: Record<DeviceType, string[]> = {
   smartwatch: ['Samsung', 'Apple', 'Garmin', 'Fitbit'],
   laptop: ['Dell', 'Apple', 'Lenovo', 'HP'],
   iot: ['Generic', 'Espressif', 'Nordic'],
-  unknown: ['Unknown'],
+  unknown: ['Generic'],
 };
 
 const DEVICE_NAMES: Record<DeviceType, string[]> = {
@@ -18,7 +18,7 @@ const DEVICE_NAMES: Record<DeviceType, string[]> = {
   smartwatch: ['Galaxy Watch 6', 'Apple Watch Series 9', 'Venu 3'],
   laptop: ['XPS 15', 'MacBook Pro 14', 'ThinkPad X1'],
   iot: ['ESP32 Sensor', 'Nordic Thingy', 'Generic IoT'],
-  unknown: ['Unknown Bluetooth Device'],
+  unknown: ['BLE Peripheral', 'Wireless Sensor', 'Bluetooth Accessory'],
 };
 
 function randItem<T>(arr: T[]): T {

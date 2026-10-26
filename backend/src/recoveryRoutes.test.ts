@@ -5,7 +5,22 @@ const store = vi.hoisted(() => ({
   devices: [] as Array<Record<string, any>>,
   encounters: [] as Array<Record<string, any>>,
   deviceFindError: undefined as unknown,
+  deviceFindOneFilters: [] as Array<Record<string, any>>,
 }));
+
+function matchesFilter(record: Record<string, any>, filter: Record<string, any>): boolean {
+  return Object.entries(filter).every(([key, expected]) => {
+    if (key === '$or') {
+      return Array.isArray(expected) && expected.some((part) => matchesFilter(record, part));
+    }
+    if (expected && typeof expected === 'object' && !Array.isArray(expected)) {
+      if ('$exists' in expected) return Boolean(expected.$exists) === (record[key] !== undefined);
+      if ('$in' in expected) return Array.isArray(expected.$in) && expected.$in.includes(record[key]);
+      if ('$ne' in expected) return record[key] !== expected.$ne;
+    }
+    return record[key] === expected;
+  });
+}
 
 vi.mock('./models/Device', () => {
   class FakeDevice {
@@ -27,17 +42,20 @@ vi.mock('./models/Device', () => {
     }
 
     static find(filter: Record<string, any>) {
-      const rows = store.devices.filter(device => Object.entries(filter).every(([key, value]) => device[key] === value));
-      return {
-        sort: async () => {
+      const rows = store.devices.filter(device => matchesFilter(device, filter));
+      const query = {
+        sort: () => query,
+        limit: async (count: number) => {
           if (store.deviceFindError) throw store.deviceFindError;
-          return rows;
+          return rows.slice(0, count);
         },
       };
+      return query;
     }
 
     static async findOne(filter: Record<string, any>) {
-      const found = store.devices.find(device => Object.entries(filter).every(([key, value]) => device[key] === value));
+      store.deviceFindOneFilters.push({ ...filter });
+      const found = store.devices.find(device => matchesFilter(device, filter));
       return found ? Object.assign(Object.create(FakeDevice.prototype), found) : null;
     }
   }
@@ -71,7 +89,7 @@ vi.mock('./models/RecoveryEncounter', () => {
     }
 
     static find(filter: Record<string, any>) {
-      const rows = store.encounters.filter(encounter => Object.entries(filter).every(([key, value]) => encounter[key] === value));
+      const rows = store.encounters.filter(encounter => matchesFilter(encounter, filter));
       const query = {
         sort: () => query,
         limit: async (count: number) => rows.slice(0, count),
@@ -80,7 +98,7 @@ vi.mock('./models/RecoveryEncounter', () => {
     }
 
     static async findOne(filter: Record<string, any>) {
-      const found = store.encounters.find(encounter => Object.entries(filter).every(([key, value]) => encounter[key] === value));
+      const found = store.encounters.find(encounter => matchesFilter(encounter, filter));
       return found ? Object.assign(Object.create(FakeEncounter.prototype), found) : null;
     }
   }
@@ -96,6 +114,7 @@ describe('recovery API integration', () => {
 
   beforeAll(async () => {
     process.env.NODE_ENV = 'test';
+    delete process.env.FIREBASE_PROJECT_ID; // These integration tests intentionally exercise the local development-token path.
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_PARTICIPANT_TOKEN = 'blueguardian-participant-token';
@@ -114,9 +133,113 @@ describe('recovery API integration', () => {
     store.devices.length = 0;
     store.encounters.length = 0;
     store.deviceFindError = undefined;
+    store.deviceFindOneFilters.length = 0;
   });
 
   const ownerHeaders = { Authorization: 'Bearer blueguardian-owner-token' };
+
+  it('accepts a community BLE candidate without exposing matching owner or device identity', async () => {
+    const { createHash } = await import('node:crypto');
+    const fingerprintHash = createHash('sha256')
+      .update(JSON.stringify({ name: 'owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }))
+      .digest('hex');
+    store.devices.push({
+      deviceId: 'owner-lost-device',
+      deviceIdentifier: 'private-address',
+      ownerId: 'test-owner',
+      name: 'Owner earbuds',
+      discoverySource: 'REAL',
+      recoveryEnabled: true,
+      recoveryState: 'lost',
+      recoveryFingerprintHash: fingerprintHash,
+    });
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ observations: [{ name: 'Owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }], shareLocation: false }),
+    });
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(body).toMatchObject({ accepted: true, observationsReceived: 1 });
+    expect(JSON.stringify(body)).not.toContain('owner-lost-device');
+    expect(body).not.toHaveProperty('reportsRecorded');
+    expect(store.encounters[0]).toMatchObject({
+      deviceId: 'owner-lost-device',
+      ownerId: 'test-owner',
+      source: 'REAL',
+      simulated: false,
+      confidence: 0.45,
+    });
+    expect(store.encounters[0].location).toBeUndefined();
+    expect(store.devices[0].recoveryState).toBe('lost');
+  });
+
+
+  it('matches a community sighting by advertised name when its service UUIDs differ from the registration', async () => {
+    const registered = await fetch(`${origin}/api/recovery/devices`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'AA:BB:CC:DD:EE:01',
+        deviceIdentifier: 'AA:BB:CC:DD:EE:01',
+        deviceName: 'My buds',
+        recoveryState: 'lost',
+        recoveryFingerprint: { name: 'Nord Buds 2', serviceUuids: ['0000fe2c-0000-1000-8000-00805f9b34fb'] },
+      }),
+    });
+    expect(registered.status).toBe(201);
+    // A helper's classic-discovery sighting carries the name but no service UUIDs.
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ observations: [{ name: '  nord   BUDS 2 ', serviceUuids: [] }], shareLocation: false }),
+    });
+    expect(response.status).toBe(202);
+    expect(store.encounters).toHaveLength(1);
+    expect(store.encounters[0]).toMatchObject({ deviceId: 'AA:BB:CC:DD:EE:01', confidence: 0.2 });
+  });
+
+  it('stores coordinates only when a community participant explicitly opts in', async () => {
+    const { createHash } = await import('node:crypto');
+    const fingerprintHash = createHash('sha256')
+      .update(JSON.stringify({ name: 'owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }))
+      .digest('hex');
+    store.devices.push({
+      deviceId: 'owner-location-test',
+      deviceIdentifier: 'private-address',
+      ownerId: 'test-owner',
+      name: 'Owner earbuds',
+      discoverySource: 'REAL',
+      recoveryEnabled: true,
+      recoveryState: 'searching',
+      recoveryFingerprintHash: fingerprintHash,
+    });
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        observations: [{ name: 'Owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }],
+        shareLocation: true,
+        location: { lat: 12.9716, lng: 77.5946 },
+      }),
+    });
+    expect(response.status).toBe(202);
+    expect(store.encounters[0].location).toEqual({ lat: 12.9716, lng: 77.5946 });
+  });
+
+  it('rejects community reports that try to attach a location without opt-in', async () => {
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        observations: [{ name: 'Owner earbuds', serviceUuids: ['0000feed-0000-1000-8000-00805f9b34fb'] }],
+        shareLocation: false,
+        location: { lat: 12.9, lng: 80.2 },
+      }),
+    });
+    expect(response.status).toBe(400);
+  });
+
   it('persists registrations, ignores client owner IDs, and returns owner-authorized records', async () => {
     const registration = await fetch(`${origin}/api/recovery/devices`, {
       method: 'POST',
@@ -144,6 +267,31 @@ describe('recovery API integration', () => {
     expect(unauthorizedRead.status).toBe(404);
     const unauthorizedEncounter = await fetch(`${origin}/api/recovery/devices/another-owner-device/encounters`, { headers: ownerHeaders });
     expect(unauthorizedEncounter.status).toBe(404);
+  });
+
+  it('queries by owner and device together when submitting an observation', async () => {
+    store.devices.push({
+      deviceId: 'another-owner-device',
+      deviceIdentifier: 'another-owner-device',
+      ownerId: 'different-owner',
+      name: 'Private device',
+      discoverySource: 'REAL',
+      recoveryState: 'lost',
+    });
+
+    const response = await fetch(`${origin}/api/recovery/devices/another-owner-device/encounters`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'REAL', simulated: false, isTestFixture: false }),
+    });
+
+    expect(response.status).toBe(404);
+    expect(store.deviceFindOneFilters).toContainEqual({
+      ownerId: 'test-owner',
+      deviceId: 'another-owner-device',
+      $or: [{ recoveryEnabled: true }, { recoveryEnabled: { $exists: false } }],
+    });
+    expect(store.encounters).toHaveLength(0);
   });
 
   it('rejects unauthenticated registration and invalid encounter payloads', async () => {
@@ -224,7 +372,7 @@ describe('recovery API integration', () => {
 
       expect(response.status).toBe(503);
       expect(await response.json()).toEqual({
-        error: 'Recovery storage is unavailable. Retry after the database connection is restored.',
+        error: 'Database storage is unavailable. Retry after the connection is restored.',
       });
       expect(error).toHaveBeenCalledWith(expect.stringMatching(
         /^\[api\] request failed category=database_unavailable method=GET route=\/devices dbState=\d errorName=MongoServerSelectionError$/,

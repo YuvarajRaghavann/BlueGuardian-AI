@@ -64,9 +64,33 @@ export interface BluetoothDevice {
   manufacturer?: string;
   services: GattServiceInfo[];
   discoverySource: DiscoverySource;
+  /** Physical discovery transport; discovery never implies connection. */
+  discoveryTransport?: 'BLE' | 'CLASSIC' | 'PAIRED' | 'COMBINED';
+  /** Observed transports during a Phase 5 combined scan, deduplicated by Android-reported identity. */
+  discoveryTransports?: Array<'BLE' | 'CLASSIC'>;
+  /** True only when Android reports the device is bonded/paired. */
+  paired?: boolean;
   gattConnected?: boolean;
   connectionHealth?: ConnectionHealth;
   approvalRequired?: boolean;
+  /** Identified from the raw advertisement payload (e.g. 'apple_findmy', 'fast_pair'). */
+  family?: string;
+  /** Human label for the identified family, e.g. "Samsung SmartTag". */
+  familyLabel?: string;
+  tracker?: boolean;
+  /** True only when the owner tapped Block. Older builds auto-blocked devices; those are released. */
+  blockedByUser?: boolean;
+  /** Advertised transmit power, used for distance estimates. */
+  txPower?: number;
+  /** Raw evidence for the pre-connection Guardian check. */
+  manufacturerData?: Record<string, string>;
+  rawAdvert?: string;
+  addressType?: 'public' | 'random';
+  deviceClass?: number;
+  majorClass?: number;
+  connectable?: boolean;
+  separated?: boolean | null;
+  popupAdvertiser?: boolean;
 }
 
 export interface ScanResult {
@@ -79,6 +103,14 @@ export interface BluetoothScanState {
   state: ScanState;
   elapsedMs: number;
   devicesFound: number;
+  /** Distinguishes genuine browser observations from generated demo records in UI status. */
+  source?: DiscoverySource;
+  /** Identifies the scanner implementation used for this scan. */
+  transport?: 'WEB_BLE_SELECTION' | 'ANDROID_BLE_SCAN' | 'ANDROID_CLASSIC_SCAN' | 'ANDROID_PAIRED_DEVICES' | 'ANDROID_COMBINED_SCAN';
+  /** Current half of the sequential combined Android discovery pass. */
+  scanStage?: 'BLE' | 'CLASSIC';
+  /** When the most recent scan began (ms). Devices seen since then are "around you now". */
+  startedAt?: number;
   error?: string;
 }
 
@@ -94,8 +126,12 @@ export type ThreatCategory =
   | 'RAPID_DEVICE_APPEARANCE'
   | 'UNUSUAL_SIGNAL'
   | 'REPEATED_CONNECTION'
+  | 'UNSTABLE_CONNECTION'
   | 'BLOCKED_DEVICE'
   | 'SPOOFING_SUSPECTED'
+  | 'TRACKER_FOLLOWING'
+  | 'POPUP_SPAM'
+  | 'LOOKALIKE_DEVICE'
   | 'OTHER';
 
 export type ThreatStatus = 'ACTIVE' | 'INVESTIGATING' | 'RESOLVED' | 'DISMISSED';
@@ -163,6 +199,7 @@ export interface RecoveryInfo {
 // ===== PHASE 4: AI/ML Types =====
 
 export type MLThreatClass =
+  | 'INSUFFICIENT_EVIDENCE'
   | 'BENIGN'
   | 'SUSPICIOUS'
   | 'POTENTIAL_SPOOFING'

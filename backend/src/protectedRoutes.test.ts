@@ -15,6 +15,7 @@ const authEnvironmentKeys = [
   'BLUEGUARDIAN_AUTH_MODE',
   'BLUEGUARDIAN_OWNER_TOKEN',
   'BLUEGUARDIAN_OWNER_ID',
+  'BLUEGUARDIAN_CORS_ORIGINS',
 ] as const;
 
 const originalAuthEnvironment = Object.fromEntries(
@@ -57,6 +58,27 @@ describe('protected API routes', () => {
     process.env.BLUEGUARDIAN_AUTH_MODE = 'required';
     process.env.BLUEGUARDIAN_OWNER_TOKEN = 'blueguardian-owner-token';
     process.env.BLUEGUARDIAN_OWNER_ID = 'test-owner';
+    delete process.env.BLUEGUARDIAN_CORS_ORIGINS;
+  });
+
+  it('allows only explicitly configured browser origins', async () => {
+    process.env.BLUEGUARDIAN_CORS_ORIGINS = 'https://blueguardian.example, https://admin.blueguardian.example';
+
+    const allowed = await fetch(`${origin}/api/health`, {
+      headers: { Origin: 'https://blueguardian.example' },
+    });
+    const rejected = await fetch(`${origin}/api/health`, {
+      headers: { Origin: 'https://untrusted.example' },
+    });
+
+    expect(allowed.headers.get('access-control-allow-origin')).toBe('https://blueguardian.example');
+    expect(rejected.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('returns a JSON 404 for unknown API paths without exposing internals', async () => {
+    const response = await fetch(`${origin}/api/definitely-not-a-route`);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'API route not found.' });
   });
 
   it('rejects unauthenticated requests to all data APIs', async () => {

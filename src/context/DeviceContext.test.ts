@@ -28,6 +28,98 @@ function stateWithDevice(currentDevice: BluetoothDevice): DeviceState {
   };
 }
 
+describe('device discovery source handling', () => {
+  it('does not load persisted simulated records into the real-device state', () => {
+    const simulated: BluetoothDevice = {
+      ...device,
+      id: 'simulated-device-1',
+      discoverySource: 'SIMULATED',
+    };
+    const emptyState: DeviceState = {
+      devices: [],
+      scan: { state: 'idle', elapsedMs: 0, devicesFound: 0 },
+      simulationMode: false,
+      filter: 'all',
+      sort: 'trust',
+      search: '',
+    };
+
+    const loaded = deviceReducer(emptyState, { type: 'SET_DEVICES', payload: [simulated] });
+    expect(loaded.devices).toEqual([]);
+
+    // Explicit demo generation is still allowed within the current UI session.
+    const generated = deviceReducer(loaded, { type: 'ADD_DEVICE', payload: simulated });
+    expect(generated.devices).toHaveLength(1);
+    expect(generated.devices[0].discoverySource).toBe('SIMULATED');
+  });
+
+  it('does not convert an unverified high-risk-derived observation into an explicit block', () => {
+    const emptyState: DeviceState = {
+      devices: [],
+      scan: { state: 'idle', elapsedMs: 0, devicesFound: 0 },
+      simulationMode: false,
+      filter: 'all',
+      sort: 'trust',
+      search: '',
+    };
+    const unknown: BluetoothDevice = {
+      ...device,
+      id: 'unverified-observation',
+      name: 'Tile',
+      type: 'unknown',
+      address: 'C0:AD:19:44:DF:7F',
+      trusted: false,
+      trustScore: 0,
+      riskLevel: 'high',
+      connectionStatus: 'unknown',
+      connectionHealth: 'UNAVAILABLE',
+      blocked: false,
+      isKnown: false,
+      services: [{ uuid: '0000feed-0000-1000-8000-00805f9b34fb', characteristics: [] }],
+    };
+    const next = deviceReducer(emptyState, { type: 'ADD_DEVICE', payload: unknown });
+    expect(next.devices[0].blocked).toBe(false);
+    expect(next.devices[0].approvalRequired).toBe(true);
+    expect(next.devices[0].trustScore).toBeGreaterThanOrEqual(60);
+    expect(next.devices[0].riskLevel).not.toBe('high');
+  });
+
+  it('merges BLE and classic reports with the same combined identity into one device', () => {
+    const emptyState: DeviceState = {
+      devices: [],
+      scan: { state: 'idle', elapsedMs: 0, devicesFound: 0 },
+      simulationMode: false,
+      filter: 'all',
+      sort: 'trust',
+      search: '',
+    };
+    const bleObservation: BluetoothDevice = {
+      ...device,
+      id: 'android-combined:aa:bb:cc',
+      address: 'AA:BB:CC',
+      name: 'Test BLE peripheral',
+      connectionStatus: 'unknown',
+      discoveryTransport: 'COMBINED',
+      discoveryTransports: ['BLE'],
+    };
+    const classicObservation: BluetoothDevice = {
+      ...bleObservation,
+      name: 'Test classic peripheral',
+      rssi: -61,
+      lastSeen: new Date(1000),
+      discoveryTransports: ['CLASSIC'],
+    };
+
+    const afterBle = deviceReducer(emptyState, { type: 'ADD_DEVICE', payload: bleObservation });
+    const afterClassic = deviceReducer(afterBle, { type: 'ADD_DEVICE', payload: classicObservation });
+
+    expect(afterClassic.devices).toHaveLength(1);
+    expect(afterClassic.devices[0].discoveryTransport).toBe('COMBINED');
+    expect(afterClassic.devices[0].discoveryTransports).toEqual(['BLE', 'CLASSIC']);
+    expect(afterClassic.devices[0].connectionStatus).toBe('unknown');
+  });
+});
+
 describe('security action device transitions', () => {
   it('blocks a device without changing trust or risk values', () => {
     const next = deviceReducer(stateWithDevice(device), {
@@ -56,7 +148,7 @@ describe('security action device transitions', () => {
     expect(next.riskLevel).toBe(blockedDevice.riskLevel);
   });
 
-  it('reapplies the review policy when a device is updated', () => {
+  it('recomputes neutral review risk when a device is updated', () => {
     const updated = {
       ...device,
       trusted: false,
@@ -74,7 +166,7 @@ describe('security action device transitions', () => {
     expect(next.trusted).toBe(false);
     expect(next.isKnown).toBe(false);
     expect(next.approvalRequired).toBe(true);
-    expect(next.riskLevel).toBe('medium');
+    expect(next.riskLevel).toBe('low');
   });
 
   it('marks the current-session GATT connection disconnected after the browser reports it', () => {

@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: blueguardian-backend-phase6
+    runtime: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm ci --include=dev --no-audit --no-fund && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: NODE_ENV
+        value: production
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
+      - key: BLUEGUARDIAN_AUTH_MODE
+        value: required
+      - key: FIREBASE_PROJECT_ID
+        value: blueguardian-ai-auth
+      - key: BLUEGUARDIAN_CORS_ORIGINS
+        value: https://localhost
+      - key: MONGODB_URI
+        sync: false

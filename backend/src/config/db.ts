@@ -10,8 +10,12 @@ export async function connectDB() {
   }
 
   try {
-    await mongoose.connect(uri);
+    await mongoose.connect(uri, {
+      serverSelectionTimeoutMS: 10_000,
+      connectTimeoutMS: 10_000,
+    });
   } catch {
+    // Never print the connection string: it may contain database credentials.
     throw new Error('MongoDB connection failed. Check the URI, credentials, network access, and Atlas IP allowlist.');
   }
   console.log('MongoDB connected');

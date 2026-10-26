@@ -1,647 +1,157 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  Activity,
-  AlertTriangle,
-  Brain,
-  Bluetooth,
-  Cpu,
-  ScanLine,
-  ShieldCheck,
-  Target,
-} from 'lucide-react';
-
-import { StatusBadge } from '../components/StatusBadge';
-import { StatCard } from '../components/StatCard';
-import { DeviceCard } from '../components/DeviceCard';
+import { useMemo, useState, type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { motion, useReducedMotion } from 'framer-motion';
+import { ChevronRight } from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import { ThreatCard } from '../components/ThreatCard';
-import { SecurityTimeline } from '../components/SecurityTimeline';
-import { StaggerGroup, StaggerItem } from '../components/motion/MotionPrimitives';
-
+import { DeviceDetailModal } from '../components/DeviceDetailModal';
 import { useBluetoothDevices } from '../context/DeviceContext';
 import { useThreats } from '../context/ThreatContext';
-import { useSecurity } from '../context/SecurityContext';
+import { isNativeAndroidApp } from '../services/nativeBluetoothService';
+import { useIntel } from '../intel/store';
 import type { BluetoothDevice } from '../types';
-import { needsManualApproval } from '../utils/connectionPolicy';
-import { visibleEvents } from '../utils/visibleEvents';
+import { Radar } from '../ui/Radar';
+import { TrustRing } from '../ui/TrustDial';
+import { LEVEL, score } from '../ui/trust';
+import { VERDICT_STYLE, type Verdict } from '../intel/guardian';
+import { guardianFor, useGuardianVersion } from '../intel/guardianStore';
+import { BottomSheet } from '../ui/BottomSheet';
+import { devicesAroundNow, lastScanTime } from '../utils/aroundNow';
 
-export function Dashboard() {
-  const { state, scanDevices } = useBluetoothDevices();
-  const { state: threatState } = useThreats();
-  const { state: securityState, executeAction } = useSecurity();
-  const [pendingApproval, setPendingApproval] = useState<BluetoothDevice | null>(null);
-  const [pendingAction, setPendingAction] = useState<'TRUST' | 'BLOCK' | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+const ORDER: Verdict[] = ['safe', 'clear', 'caution', 'unsafe'];
 
-  const totalDevices = state.devices.length;
-  const trustedCount = state.devices.filter((d) => d.trusted).length;
-  const unknownCount = state.devices.filter((d) => !d.trusted).length;
-  const highRiskCount = state.devices.filter((d) => d.riskLevel === 'high').length;
-  const connectedCount = state.devices.filter(
-    (d) => d.connectionStatus === 'connected',
-  ).length;
-
-  const activeThreats = threatState.threats.filter(
-    (t) => t.status === 'ACTIVE' || t.status === 'INVESTIGATING',
-  ).length;
-
-  const avgTrustScore =
-    state.devices.length > 0
-      ? Math.round(
-          state.devices.reduce((sum, d) => sum + d.trustScore, 0) /
-            state.devices.length,
-        )
-      : 0;
-
-  const devicesNeedingReview = state.devices.filter((d) =>
-    needsManualApproval(d),
-  ).length;
-
-  const mlThreats = threatState.threats.filter((t) => t.mlPrediction);
-  const mlClassified = mlThreats.length;
-
-  const highRiskML = mlThreats.filter(
-    (t) =>
-      (t.confidence ?? 0) >= 0.6 &&
-      (t.finalClassification === 'HIGH_RISK_DEVICE' ||
-        t.finalClassification === 'POTENTIAL_SPOOFING' ||
-        t.finalClassification === 'POTENTIAL_UNAUTHORIZED_ACCESS'),
-  ).length;
-
-  const avgMLConfidence =
-    mlClassified > 0
-      ? Math.round(
-          (mlThreats.reduce((s, t) => s + (t.confidence ?? 0), 0) /
-            mlClassified) *
-            100,
-        )
-      : 0;
-
-  const recentDevices = [...state.devices]
-    .sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime())
-    .slice(0, 4);
-
-  const recentThreats = [...threatState.threats]
-    .sort((a, b) => b.detectedAt.getTime() - a.detectedAt.getTime())
-    .slice(0, 5);
-
-  const threatEvents = recentThreats.map((t) => ({
-    id: t.id,
-    type: 'alert' as const,
-    message: `${t.title} on ${t.deviceName}`,
-    severity:
-      t.severity === 'critical' || t.severity === 'high'
-        ? ('error' as const)
-        : t.severity === 'medium'
-          ? ('warning' as const)
-          : ('info' as const),
-    timestamp: t.detectedAt,
-    simulated: t.discoverySource === 'SIMULATED',
-  }));
-  const timelineEvents = visibleEvents(threatEvents, securityState.policy.showSimulatedEvents);
-
-  const scanActive = state.scan.state === 'scanning';
-
-  const approvalTargets = state.devices
-    .filter((device) => !device.blocked && needsManualApproval(device))
-    .slice(0, 3);
-
-  const describeReviewReason = (device: BluetoothDevice) => {
-    const reasons: string[] = [];
-
-    if (!device.isKnown) reasons.push('identity is not confirmed');
-    if (device.riskLevel === 'high') reasons.push('risk classification is high');
-    if (device.riskLevel === 'medium') reasons.push('risk level requires a manual check');
-    if (device.type === 'earbuds' || device.type === 'headphones' || device.type === 'smartwatch') {
-      reasons.push('wearable behavior requires explicit trust review');
-    }
-    if (device.trustScore < 60) reasons.push('trust score is below the secure threshold');
-
-    if (reasons.length === 0) {
-      return 'BlueGuardian is requiring user review before allowing the connection.';
-    }
-
-    return `BlueGuardian recommends review because ${reasons.join(', ')}.`;
-  };
-
-  const confirmApproval = () => {
-    if (!pendingApproval || !pendingAction) return;
-
-    const completed = executeAction(
-      pendingAction,
-      pendingApproval,
-      pendingAction === 'TRUST'
-        ? 'User approved a newly discovered device after a security review.'
-        : 'User blocked a newly discovered device due to elevated risk.',
-    );
-
-    if (!completed) {
-      setActionError('This action was rejected by the current security policy.');
-      return;
-    }
-
-    setActionError(null);
-    setPendingApproval(null);
-    setPendingAction(null);
-  };
-
-  const requestApprovalAction = (device: BluetoothDevice, type: 'TRUST' | 'BLOCK') => {
-    const requiresConfirmation = type === 'TRUST'
-      ? securityState.policy.confirmTrust
-      : securityState.policy.confirmBlock;
-
-    if (requiresConfirmation) {
-      setPendingApproval(device);
-      setPendingAction(type);
-      setActionError(null);
-      return;
-    }
-
-    const completed = executeAction(
-      type,
-      device,
-      type === 'TRUST'
-        ? 'User approved a newly discovered device after a security review.'
-        : 'User blocked a newly discovered device due to elevated risk.',
-    );
-    setActionError(completed ? null : 'This action was rejected by the current security policy.');
-  };
-
+function SectionTitle({ children, to }: { children: ReactNode; to?: string }) {
   return (
-    <div className="space-y-6">
-      {/* Page heading */}
-      <section className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            <Activity className="h-3.5 w-3.5 text-[var(--accent)]" />
-            Bluetooth observations
-          </div>
-
-          <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-            Bluetooth security overview
-          </h1>
-
-          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-            Review browser-selected device observations, inspect development risk assessments,
-            and manage owner recovery cases.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={scanDevices}
-          disabled={scanActive}
-          className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-lg border border-[var(--accent)] bg-[var(--accent)] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(59,156,255,0.16)] transition-all hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <ScanLine className={`h-4 w-4 ${scanActive ? 'animate-pulse' : ''}`} />
-          {scanActive ? 'Scanning...' : 'Run Bluetooth scan'}
-        </button>
-      </section>
-
-      {approvalTargets.length > 0 && (
-        <section className="rounded-2xl border border-[var(--warning)]/25 bg-[var(--warning)]/10 p-4 sm:p-5">
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl border border-[var(--warning)]/25 bg-[var(--warning)]/15 text-[var(--warning)]">
-                <AlertTriangle className="h-4 w-4" />
-              </div>
-
-              <div>
-                <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--warning)]">
-                  Review recommended
-                </p>
-                <h2 className="mt-1 text-base font-semibold text-white">
-                  {approvalTargets.length === 1
-                    ? 'One device needs review before it is marked trusted.'
-                    : `${approvalTargets.length} devices need review before they are marked trusted.`}
-                </h2>
-                {approvalTargets[0] && (
-                  <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-                    {describeReviewReason(approvalTargets[0])}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 grid gap-3 lg:grid-cols-3">
-            {approvalTargets.map((device) => (
-              <div
-                key={device.id}
-                className="rounded-xl border border-[var(--border)] bg-[var(--surface)]/80 p-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-medium text-white">{device.name}</p>
-                    <p className="mt-1 text-xs text-[var(--text-muted)]">
-                      {device.type} · {device.riskLevel} risk
-                    </p>
-                  </div>
-                  <StatusBadge
-                    label={device.trustScore.toString()}
-                    variant={
-                      device.riskLevel === 'high'
-                        ? 'danger'
-                        : device.riskLevel === 'medium'
-                          ? 'warning'
-                          : 'info'
-                    }
-                  />
-                </div>
-
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => requestApprovalAction(device, 'TRUST')}
-                    className="flex-1 rounded-lg border border-[var(--success)]/25 bg-[var(--success)]/10 px-3 py-2 text-xs font-semibold text-[var(--success)] transition hover:bg-[var(--success)]/15"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => requestApprovalAction(device, 'BLOCK')}
-                    className="flex-1 rounded-lg border border-[var(--danger)]/25 bg-[var(--danger)]/10 px-3 py-2 text-xs font-semibold text-[var(--danger)] transition hover:bg-[var(--danger)]/15"
-                  >
-                    Block
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-          {actionError && <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{actionError}</p>}
-        </section>
-      )}
-
-      {/* Primary posture */}
-      <section className="grid gap-4 lg:grid-cols-[1.4fr_1fr_1fr]">
-        <div className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
-          <div className="absolute right-0 top-0 h-40 w-40 translate-x-1/3 -translate-y-1/3 rounded-full bg-[rgba(59,156,255,0.08)] blur-3xl" />
-
-          <div className="relative">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                  Local review summary
-                </p>
-                <h2 className="mt-2 text-xl font-semibold text-white">
-                  {activeThreats > 0
-                    ? 'Review app indicators'
-                    : totalDevices === 0
-                      ? 'No scan data yet'
-                      : threatState.threats.length === 0
-                        ? 'Assessment unavailable'
-                        : 'No open app indicators'}
-                </h2>
-              </div>
-
-              <div className={`flex h-11 w-11 items-center justify-center rounded-xl border ${activeThreats > 0 ? 'border-[var(--warning)]/25 bg-[var(--warning)]/10' : 'border-[var(--border)] bg-[var(--surface)]'}`}>
-                <ShieldCheck className={`h-5 w-5 ${activeThreats > 0 ? 'text-[var(--warning)]' : 'text-[var(--text-muted)]'}`} />
-              </div>
-            </div>
-
-            <div className="mt-6 flex items-end gap-3">
-              <span className="text-4xl font-semibold tracking-tight text-white">
-                {totalDevices > 0 ? avgTrustScore : '—'}
-              </span>
-              <span className="mb-1 text-sm text-[var(--text-muted)]">
-                average app trust score
-              </span>
-            </div>
-
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--border)]">
-              <div
-                className="h-full rounded-full bg-[var(--success)] transition-all"
-                style={{ width: `${Math.min(100, avgTrustScore)}%` }}
-              />
-            </div>
-
-            <div className="mt-3 flex items-center justify-between text-xs">
-              <span className="text-[var(--text-muted)]">
-                {trustedCount} trusted in app
-              </span>
-              <span
-                className={
-                  devicesNeedingReview > 0
-                    ? 'text-[var(--warning)]'
-                    : 'text-[var(--success)]'
-                }
-              >
-                {devicesNeedingReview} need review
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-soft)]">
-              <Bluetooth className="h-5 w-5 text-[var(--accent)]" />
-            </div>
-
-            <span className={`flex items-center gap-1.5 text-[11px] font-medium ${scanActive ? 'text-[var(--success)]' : 'text-[var(--text-muted)]'}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${scanActive ? 'bg-[var(--success)]' : 'bg-[var(--text-muted)]'}`} />
-              {scanActive
-                ? 'Scanning'
-                : state.scan.state === 'complete'
-                  ? 'Scan complete'
-                  : state.devices.length > 0
-                    ? 'Observations loaded'
-                    : 'Awaiting scan'}
-            </span>
-          </div>
-
-          <p className="mt-5 text-3xl font-semibold text-white">
-            {totalDevices}
-          </p>
-
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Browser records
-          </p>
-
-          <div className="mt-5 flex gap-4 border-t border-[var(--border)] pt-4 text-xs">
-            <span className="text-[var(--text-muted)]">
-              <strong className="text-white">{connectedCount}</strong> connected
-            </span>
-            <span className="text-[var(--text-muted)]">
-              <strong className="text-white">{unknownCount}</strong> unknown
-            </span>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 sm:p-6">
-          <div className="flex items-center justify-between">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(239,98,98,0.08)]">
-              <AlertTriangle className="h-5 w-5 text-[var(--danger)]" />
-            </div>
-
-            <span className="text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-              Current session
-            </span>
-          </div>
-
-          <p className="mt-5 text-3xl font-semibold text-white">
-            {activeThreats}
-          </p>
-
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Open risk assessments
-          </p>
-
-          <div className="mt-5 flex items-center gap-2 border-t border-[var(--border)] pt-4 text-xs">
-            <span className="text-[var(--danger)]">{highRiskCount}</span>
-            <span className="text-[var(--text-muted)]">devices labelled high risk</span>
-          </div>
-        </div>
-      </section>
-
-      {/* Secondary metrics */}
-      <StaggerGroup
-        label="Security metrics"
-        className="grid grid-cols-2 gap-3 lg:grid-cols-4"
-      >
-        <StaggerItem>
-          <StatCard title="Trusted Devices" value={trustedCount} icon={ShieldCheck} />
-        </StaggerItem>
-        <StaggerItem>
-          <StatCard title="Connected" value={connectedCount} icon={Bluetooth} />
-        </StaggerItem>
-        <StaggerItem>
-          <StatCard title="High Risk" value={highRiskCount} icon={AlertTriangle} />
-        </StaggerItem>
-        <StaggerItem>
-          <StatCard title="Need Review" value={devicesNeedingReview} icon={Target} />
-        </StaggerItem>
-      </StaggerGroup>
-
-      {pendingApproval && pendingAction && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-5 shadow-2xl">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-[var(--warning)]/25 bg-[var(--warning)]/10 text-[var(--warning)]">
-                <AlertTriangle className="h-4 w-4" />
-              </div>
-              <div>
-                <h3 className="text-base font-semibold text-white">
-                  Confirm {pendingAction === 'TRUST' ? 'approval' : 'block'}
-                </h3>
-                <p className="text-sm text-[var(--text-muted)]">
-                  {pendingApproval.name}
-                </p>
-              </div>
-            </div>
-
-            <p className="mt-4 text-sm leading-6 text-[var(--text-secondary)]">
-              {pendingAction === 'TRUST'
-                ? `Approve ${pendingApproval.name} and allow it to be treated as a trusted connection candidate after review.`
-                : `Mark ${pendingApproval.name} as blocked in BlueGuardian. This web app cannot prevent operating-system Bluetooth connections.`}
-            </p>
-
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setPendingApproval(null);
-                  setPendingAction(null);
-                }}
-                className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3.5 py-2 text-sm font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmApproval}
-                className={
-                  pendingAction === 'TRUST'
-                    ? 'rounded-lg border border-[var(--success)]/25 bg-[var(--success)]/10 px-3.5 py-2 text-sm font-medium text-[var(--success)] transition hover:bg-[var(--success)]/15'
-                    : 'rounded-lg border border-[var(--danger)]/25 bg-[var(--danger)]/10 px-3.5 py-2 text-sm font-medium text-[var(--danger)] transition hover:bg-[var(--danger)]/15'
-                }
-              >
-                {pendingAction === 'TRUST' ? 'Approve device' : 'Block device'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Main monitoring grid */}
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,0.75fr)]">
-        <div className="space-y-6">
-          {/* Device monitoring */}
-          <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-            <div className="flex flex-col gap-3 border-b border-[var(--border)] p-5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <Bluetooth className="h-4 w-4 text-[var(--accent)]" />
-                  <h2 className="text-sm font-semibold text-white">
-                    Local device observations
-                  </h2>
-                </div>
-
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  Observations selected or simulated in this browser
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
-                {state.scan.state === 'complete'
-                  ? `Scan completed in ${(state.scan.elapsedMs / 1000).toFixed(1)}s`
-                  : state.scan.state === 'error'
-                    ? 'Last scan failed'
-                    : state.devices.length > 0
-                      ? 'Saved browser observations'
-                      : 'No scan in this session'}
-              </div>
-            </div>
-
-            <div className="divide-y divide-[var(--border)]">
-              {recentDevices.length > 0 ? (
-                recentDevices.map((device) => (
-                  <DeviceCard key={device.id} device={device} />
-                ))
-              ) : (
-                <div className="px-5 py-12 text-center">
-                  <Bluetooth className="mx-auto h-8 w-8 text-[var(--text-muted)]" />
-                  <p className="mt-3 text-sm text-[var(--text-secondary)]">
-                    No Bluetooth devices detected yet.
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    Run a scan to begin monitoring.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Threats */}
-          <div className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-            <div className="flex items-center justify-between border-b border-[var(--border)] p-5">
-              <div>
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="h-4 w-4 text-[var(--warning)]" />
-                  <h2 className="text-sm font-semibold text-white">
-                    Threat detection
-                  </h2>
-                </div>
-                <p className="mt-1 text-xs text-[var(--text-muted)]">
-                  Current security findings
-                </p>
-              </div>
-
-              <span className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                {activeThreats} active
-              </span>
-            </div>
-
-            <div className="divide-y divide-[var(--border)]">
-              {threatState.threats
-                .filter(
-                  (t) =>
-                    t.status === 'ACTIVE' || t.status === 'INVESTIGATING',
-                )
-                .slice(0, 3)
-                .map((threat) => (
-                  <ThreatCard key={threat.id} threat={threat} />
-                ))}
-
-              {activeThreats === 0 && (
-                <div className="px-5 py-10 text-center">
-                  <ShieldCheck className="mx-auto h-8 w-8 text-[var(--success)]" />
-                  <p className="mt-3 text-sm font-medium text-white">
-                    {totalDevices === 0 ? 'No device analysis available' : 'No active threats in this session'}
-                  </p>
-                  <p className="mt-1 text-xs text-[var(--text-muted)]">
-                    {totalDevices === 0
-                      ? 'Run a Bluetooth scan to create a development assessment.'
-                      : 'BlueGuardian has no current findings requiring attention.'}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Right rail */}
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">Device recovery</p>
-            <p className="mt-2 text-sm text-[var(--text-secondary)]">
-              Recovery records and owner-authorized sightings are shown in the Recovery workspace. No sample sighting is presented here as live data.
-            </p>
-            <Link to="/recovery" className="mt-4 inline-flex min-h-10 items-center rounded-lg border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text)] hover:border-[var(--accent)]">
-              Open recovery
-            </Link>
-          </div>
-
-          {/* ML analysis */}
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-            <div className="border-b border-[var(--border)] p-5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Brain className="h-4 w-4 text-[var(--accent)]" />
-                  <h2 className="text-sm font-semibold text-white">
-                    AI security analysis
-                  </h2>
-                </div>
-
-                <StatusBadge label="DEMO" variant="warning" />
-              </div>
-
-              <p className="mt-2 text-xs leading-5 text-[var(--text-muted)]">
-                Deterministic development classifier used for integration
-                testing. This is not a production-trained threat model.
-              </p>
-            </div>
-
-            <div className="space-y-4 p-5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[var(--text-muted)]">Model</span>
-                <span className="max-w-[180px] text-right text-xs font-medium text-white">
-                  BlueGuardian Development Classifier
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-[var(--text-muted)]">Version</span>
-                <span className="text-xs font-medium text-white">0.1.0-demo</span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 border-t border-[var(--border)] pt-4">
-                <Metric value={mlClassified} label="Classified" />
-                <Metric value={highRiskML} label="High risk" />
-                <Metric value={mlClassified > 0 ? `${avgMLConfidence}%` : '—'} label="Confidence" />
-              </div>
-
-              <div className="flex items-center gap-2 rounded-lg bg-[var(--bg-elevated)] px-3 py-2.5">
-                <Cpu className="h-3.5 w-3.5 text-[var(--text-muted)]" />
-                <span className="text-[10px] leading-4 text-[var(--text-muted)]">
-                  Model output is currently an integration-stage signal.
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <SecurityTimeline
-            events={timelineEvents}
-            title="Recent security events"
-          />
-        </div>
-      </section>
+    <div className="mb-2.5 flex items-center justify-between px-1">
+      <h2 className="text-[15px] font-bold">{children}</h2>
+      {to && <Link to={to} className="flex items-center text-xs font-semibold text-[var(--accent)]">See all<ChevronRight className="h-3.5 w-3.5" /></Link>}
     </div>
   );
 }
 
-function Metric({
-  value,
-  label,
-}: {
-  value: string | number;
-  label: string;
-}) {
+export function Dashboard() {
+  const { state, scanRealDevices, scanCombinedDevices } = useBluetoothDevices();
+  const { state: threatState } = useThreats();
+  const engine = useIntel();
+  useGuardianVersion();
+  const navigate = useNavigate();
+  const reduce = useReducedMotion();
+  const [selected, setSelected] = useState<BluetoothDevice | null>(null);
+  const [howOpen, setHowOpen] = useState(false);
+  const scanning = state.scan.state === 'scanning';
+
+  const real = useMemo(() => state.devices.filter((d) => d.discoverySource === 'REAL'), [state.devices]);
+  const lastScan = lastScanTime(real, state.scan.startedAt);
+  const around = devicesAroundNow(real, state.scan.startedAt);
+  const yours = real.filter((d) => d.paired || d.trusted)
+    .sort((a, b) => (b.connectionStatus === 'connected' ? 1 : 0) - (a.connectionStatus === 'connected' ? 1 : 0));
+  const alerts = threatState.threats.filter((t) => t.status === 'ACTIVE' || t.status === 'INVESTIGATING');
+
+  // Every device gets an instant Guardian verdict from what it broadcasts; history only refines it.
+  const verdicts = new Map(around.map((d) => [d.id, guardianFor(d).verdict]));
+  const counts = ORDER.map((v) => ({ verdict: v, n: [...verdicts.values()].filter((x) => x === v).length }));
+  const unsafe = counts.find((c) => c.verdict === 'unsafe')?.n ?? 0;
+  const safe = (counts.find((c) => c.verdict === 'safe')?.n ?? 0) + (counts.find((c) => c.verdict === 'clear')?.n ?? 0);
+
+  const scan = () => (isNativeAndroidApp() ? void scanCombinedDevices() : void scanRealDevices());
+  const dots = around.slice(0, 60).map((d) => {
+    const v = verdicts.get(d.id) ?? 'clear';
+    return {
+      id: d.id, address: d.address, name: d.name, rssi: d.rssi, txPower: d.txPower,
+      color: VERDICT_STYLE[v].color, alert: v === 'unsafe',
+    };
+  });
+
   return (
-    <div className="rounded-lg bg-[var(--bg-elevated)] p-3">
-      <p className="text-lg font-semibold text-white">{value}</p>
-      <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{label}</p>
+    <div className="space-y-7">
+      <section className="pt-2">
+        <Radar dots={dots} scanning={scanning} onScan={scan} onSelect={(id) => setSelected(real.find((d) => d.id === id) ?? null)} />
+        <motion.div className="mt-4 text-center" initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+          <h2 className="text-[26px] font-extrabold leading-tight">
+            {scanning ? 'Checking…' : unsafe ? `${unsafe} unsafe device${unsafe === 1 ? '' : 's'} near you` : alerts.length ? `${alerts.length} alert${alerts.length === 1 ? '' : 's'} near you` : around.length ? 'All clear around you' : 'Tap to scan'}
+          </h2>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            {lastScan
+              ? `${around.length} devices checked, ${safe} safe. Scanned ${formatDistanceToNow(lastScan, { addSuffix: true })}.`
+              : 'Check every Bluetooth device near you before you connect.'}
+          </p>
+        </motion.div>
+      </section>
+
+      {around.length > 0 && (
+        <section>
+          <SectionTitle to="/devices">Safety around you</SectionTitle>
+          <button type="button" onClick={() => navigate('/devices')} className="tap block w-full rounded-3xl bg-[var(--surface)] p-4 text-left">
+            <div className="flex h-3 w-full overflow-hidden rounded-full bg-[var(--surface-hover)]">
+              {counts.filter((c) => c.n > 0).map((c, i) => (
+                <motion.span key={c.verdict} className="h-full" style={{ background: VERDICT_STYLE[c.verdict].color }}
+                  initial={reduce ? false : { width: 0 }} animate={{ width: `${(c.n / around.length) * 100}%` }}
+                  transition={{ duration: 0.8, delay: 0.1 + i * 0.08, ease: [0.22, 1, 0.36, 1] }} />
+              ))}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
+              {counts.filter((c) => c.n > 0).map((c) => (
+                <span key={c.verdict} className="flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
+                  <span className="h-2 w-2 rounded-full" style={{ background: VERDICT_STYLE[c.verdict].color }} />
+                  {c.n} {VERDICT_STYLE[c.verdict].label.toLowerCase()}
+                </span>
+              ))}
+            </div>
+          </button>
+          <button type="button" onClick={() => setHowOpen(true)} className="mt-2 px-1 text-xs font-semibold text-[var(--accent)]">How devices are checked</button>
+        </section>
+      )}
+
+      {alerts.length > 0 && (
+        <section>
+          <SectionTitle to="/threats">Alerts</SectionTitle>
+          <div className="divide-y divide-[var(--border)] overflow-hidden rounded-3xl bg-[var(--surface)]">
+            {alerts.slice(0, 3).map((t) => <ThreatCard key={t.id} threat={t} onClick={() => navigate('/threats')} />)}
+          </div>
+        </section>
+      )}
+
+      {yours.length > 0 && (
+        <section>
+          <SectionTitle to="/recovery">Your devices</SectionTitle>
+          <div className="no-scrollbar -mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-1">
+            {yours.map((d, i) => {
+              const o = engine.trustOf(d.address);
+              return (
+                <motion.button key={d.id} type="button" onClick={() => setSelected(d)}
+                  className="tap w-[148px] shrink-0 snap-start rounded-3xl bg-[var(--surface)] p-4 text-left"
+                  initial={reduce ? false : { opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.05 * i }}>
+                  <TrustRing opinion={o} size={52}>
+                    <span className="font-display text-sm font-semibold" style={{ color: LEVEL[o.level].color }}>{o.level === 'unverified' ? '—' : score(o)}</span>
+                  </TrustRing>
+                  <p className="mt-3 truncate text-sm font-semibold">{d.name}</p>
+                  <p className="text-xs" style={{ color: d.connectionStatus === 'connected' ? 'var(--success)' : 'var(--text-muted)' }}>
+                    {d.connectionStatus === 'connected' ? 'Connected' : 'Paired'}
+                  </p>
+                </motion.button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <DeviceDetailModal device={selected} onClose={() => setSelected(null)} />
+
+      <BottomSheet open={howOpen} onClose={() => setHowOpen(false)} label="How devices are checked">
+        <div className="space-y-3 px-5 pb-8 pt-2 text-sm leading-6 text-[var(--text-secondary)]">
+          <h2 className="text-lg font-bold text-[var(--text)]">How devices are checked</h2>
+          <p>Every device is checked the moment it's seen, before you connect, from what it broadcasts:</p>
+          <ul className="space-y-1.5">
+            <li>• <b className="text-[var(--text)]">Identity:</b> its maker ID, registered with the Bluetooth SIG, must match the brand in its name. A fake "AirPods" without Apple's ID is caught.</li>
+            <li>• <b className="text-[var(--text)]">Disguise:</b> hidden characters or look-alike letters in the name.</li>
+            <li>• <b className="text-[var(--text)]">Keyboard control:</b> keyboards and input devices, especially ones pretending to be earbuds.</li>
+            <li>• <b className="text-[var(--text)]">Known attacks:</b> pairing-popup spam, trackers following you, copies of your devices.</li>
+            <li>• <b className="text-[var(--text)]">Deep check</b> (optional): reads its Device Information without pairing and tests if it protects its data.</li>
+          </ul>
+          <p>Any failed check makes it <b className="text-[var(--danger)]">Unsafe</b>, a warning makes it <b className="text-[var(--warning)]">Caution</b>. <b className="text-[var(--success)]">Safe</b> means its maker was verified or you paired it; <b className="text-[var(--text)]">Looks safe</b> means nothing risky was found but the maker couldn't be confirmed.</p>
+          <p>The trust score adds behaviour over time on top: how consistently the device has behaved across your scans.</p>
+        </div>
+      </BottomSheet>
     </div>
   );
 }

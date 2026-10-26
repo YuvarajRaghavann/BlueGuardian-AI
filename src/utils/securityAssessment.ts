@@ -9,6 +9,7 @@ const ML_WEIGHT = 0.4; // Development integration weighting
 function mlClassToRiskScore(label: MLThreatClass, confidence: number): number {
   // Map ML class to a 0-100 risk contribution
   const base: Record<MLThreatClass, number> = {
+    INSUFFICIENT_EVIDENCE: 0,
     BENIGN: 0,
     SUSPICIOUS: 30,
     POTENTIAL_SPOOFING: 60,
@@ -60,10 +61,8 @@ export function assessDeviceSecurity(device: BluetoothDevice): SecurityAssessmen
   // Final classification label
   const finalClassification = mlPrediction.confidence > 0 ? mlPrediction.label : rule.category;
 
-  // Confidence overall: weighted average of rule certainty (heuristic) and ML confidence
-  // Rule certainty approximated by (rule.threatScore / 100)
-  const ruleCertainty = rule.threatScore / 100;
-  const overallConfidence = Math.min(1, RULE_WEIGHT * ruleCertainty + ML_WEIGHT * mlPrediction.confidence);
+  // Heuristic confidence is evidence strength, not a calibrated attack probability.
+  const overallConfidence = mlPrediction.confidence;
 
   // Reasons
   const reasons = combineReasons(rule.reasons, mlPrediction);

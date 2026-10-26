@@ -1,0 +1,42 @@
+{
+  "schema": "btguard-app-model/1",
+  "kind": "logistic-regression",
+  "features": [
+    "log_pkt_rate",
+    "pair_attempts",
+    "error_rate",
+    "rtt_jitter_ms"
+  ],
+  "mu": [
+    2.182772,
+    0.03125,
+    9.2e-05,
+    12.789235
+  ],
+  "sd": [
+    1.425082,
+    1.0,
+    0.01,
+    9.139914
+  ],
+  "w": [
+    -0.767134,
+    2.216836,
+    1.706583,
+    1.421036
+  ],
+  "b": -4.522944,
+  "trainedOn": "BTGuard app-session simulator (design assumptions, not field captures)",
+  "simulatorEvaluation": {
+    "normal_false_positive_rate": 0.0023,
+    "frame_flood_window_recall": 1.0,
+    "injection_replay_window_recall": 1.0,
+    "handshake_bruteforce_window_recall": 1.0,
+    "relay_window_recall": 1.0,
+    "overall_precision": 0.998,
+    "overall_recall": 0.9995,
+    "overall_f1": 0.9988,
+    "overall_fpr": 0.002
+  },
+  "exportedAt": "2026-10-18T18:19:16Z"
+}

@@ -1,4 +1,4 @@
-import { cn } from '../utils/cn';
+import { Pill } from '../ui/kit';
 
 interface StatusBadgeProps {
   label: string;
@@ -6,14 +6,15 @@ interface StatusBadgeProps {
   className?: string;
 }
 
+const COLORS = {
+  default: 'var(--text-secondary)',
+  success: 'var(--success)',
+  warning: 'var(--warning)',
+  danger: 'var(--danger)',
+  info: 'var(--accent)',
+} as const;
+
+/** Status label in the app's palette (kept for older components). */
 export function StatusBadge({ label, variant = 'default', className }: StatusBadgeProps) {
-  const base = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium';
-  const variants = {
-    default: 'bg-gray-700 text-gray-300',
-    success: 'bg-green-900/30 text-green-400',
-    warning: 'bg-yellow-900/30 text-yellow-400',
-    danger: 'bg-red-900/30 text-red-400',
-    info: 'bg-blue-900/30 text-blue-400',
-  };
-  return <span className={cn(base, variants[variant], className)}>{label}</span>;
+  return <Pill color={COLORS[variant]} className={className}>{label}</Pill>;
 }

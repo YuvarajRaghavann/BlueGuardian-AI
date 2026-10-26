@@ -19,7 +19,7 @@ function reconcileApprovalState(device: BluetoothDevice): BluetoothDevice {
     return next;
   }
 
-  next.approvalRequired = needsManualApproval(next);
+  next.approvalRequired = needsManualApproval({ ...next, approvalRequired: false });
   return next;
 }
 
@@ -41,9 +41,9 @@ export function applySecurityActionToDevice(
       });
     }
     case 'BLOCK':
-      return reconcileApprovalState({ ...device, blocked: true, approvalRequired: false });
+      return reconcileApprovalState({ ...device, blocked: true, blockedByUser: true, approvalRequired: false });
     case 'UNBLOCK': {
-      return reconcileApprovalState({ ...device, blocked: false });
+      return reconcileApprovalState({ ...device, blocked: false, blockedByUser: false });
     }
     case 'FORGET':
       return null;
@@ -62,7 +62,7 @@ export function validateAction(
 
   switch (action) {
     case 'TRUST':
-      if (device.trusted) return { valid: false, reason: 'Device already trusted' };
+      if (device.trusted && !device.approvalRequired && device.isKnown) return { valid: false, reason: 'Device already trusted' };
       if (protection === 'BLOCKED') return { valid: false, reason: 'Cannot trust a blocked device without unblocking first' };
       return { valid: true };
     case 'MARK_UNKNOWN':

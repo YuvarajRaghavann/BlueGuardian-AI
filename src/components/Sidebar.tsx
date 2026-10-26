@@ -6,6 +6,7 @@ import {
   Bluetooth,
   LayoutDashboard,
   LifeBuoy,
+  LockKeyhole,
   Settings,
   Shield,
   X,
@@ -14,9 +15,10 @@ import { cn } from '../utils/cn';
 
 const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/devices', label: 'Bluetooth Devices', icon: Bluetooth },
-  { path: '/threats', label: 'Threat Detection', icon: AlertTriangle },
-  { path: '/recovery', label: 'Device Recovery', icon: LifeBuoy },
+  { path: '/devices', label: 'Nearby Devices', icon: Bluetooth },
+  { path: '/threats', label: 'Alerts', icon: AlertTriangle },
+  { path: '/recovery', label: 'Find my devices', icon: LifeBuoy },
+  { path: '/secure-share', label: 'Secure Share', icon: LockKeyhole },
   { path: '/events', label: 'Security Events', icon: Activity },
   { path: '/analytics', label: 'Analytics', icon: BarChart2 },
   { path: '/settings', label: 'Settings', icon: Settings },
@@ -60,7 +62,7 @@ export function Sidebar({
                 BlueGuardian
               </p>
               <p className="mt-0.5 text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
-                Security Console
+                Bluetooth Protection
               </p>
             </div>
           </div>
@@ -81,7 +83,7 @@ export function Sidebar({
           </p>
 
           <nav className="space-y-1">
-            {navItems.slice(0, 4).map((item) => (
+            {navItems.slice(0, 5).map((item) => (
               <NavigationItem key={item.path} item={item} onClick={onMobileClose} />
             ))}
           </nav>
@@ -91,7 +93,7 @@ export function Sidebar({
           </p>
 
           <nav className="space-y-1">
-            {navItems.slice(4).map((item) => (
+            {navItems.slice(5).map((item) => (
               <NavigationItem key={item.path} item={item} onClick={onMobileClose} />
             ))}
           </nav>
@@ -105,7 +107,7 @@ export function Sidebar({
               </span>
 
               <span className="text-xs font-medium text-[var(--text-secondary)]">
-                Browser-local mode
+                Protection status
               </span>
             </div>
 
