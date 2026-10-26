@@ -60,4 +60,4 @@ The engine is ported to TypeScript in `src/secure/trustEngine.ts` and scores eve
     python -m btguard export-app-model --out ../src/secure/trustModel.json   # retrain + export weights
     python -m btguard replay-app capture.jsonl                              # score exported session telemetry
 
-See `btguard/app_profile.py` for the feature definitions and assumptions, and `docs/SECURE_LINK.md` for the full design.
+See `btguard/app_profile.py` for the feature definitions and assumptions, and [`docs/architecture/SECURE_LINK.md`](../docs/architecture/SECURE_LINK.md) for the full design.

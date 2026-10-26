@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/YuvarajRaghavann/BlueGuardian-AI/security/advisories/new
+    about: Please report security problems privately.
+  - name: Documentation
+    url: https://github.com/YuvarajRaghavann/BlueGuardian-AI/blob/main/docs/README.md
+    about: Technical Guide, Feature Map and Getting Started.

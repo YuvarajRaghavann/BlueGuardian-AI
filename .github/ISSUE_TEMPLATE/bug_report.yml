@@ -1,0 +1,42 @@
+name: Bug report
+description: Something in BlueGuardian doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for reporting! For security problems, please use a private advisory instead (see SECURITY.md).
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Nearby devices / scanning, Guardian check / trust / alerts, Pair and connect, Secure Share, Find my devices, Community recovery, Account / server, Settings / other]
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Open Around\n2. Tap Scan again\n3. …"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Phone model and Android version
+      placeholder: e.g. Pixel 8, Android 15
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: App build (commit or CI run)
+  - type: textarea
+    id: extra
+    attributes:
+      label: Screenshots or other details
