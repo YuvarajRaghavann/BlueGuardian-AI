@@ -1,0 +1,29 @@
+name: Presentation web build (temporary)
+on:
+  push:
+    branches: ['ci/presentation-dist']
+permissions:
+  contents: write
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+      - run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - name: Build the web app
+        env:
+          VITE_API_BASE: https://blueguardian-backend-phase6.onrender.com/api
+        run: npm run build
+      - name: Commit the built app to this branch
+        run: |
+          rm -rf web-dist && cp -r dist web-dist
+          git config user.name "github-actions[bot]"
+          git config user.email "41898099+github-actions[bot]@users.noreply.github.com"
+          git add -f web-dist
+          git commit -m "Built web app for presentation screenshots"
+          git push
