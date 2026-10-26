@@ -48,7 +48,7 @@ interface SecureLinkPlugin {
   getCapabilities(): Promise<SecureLinkCapabilities>;
   startHosting(options: { code: string }): Promise<{ psm: number; code: string }>;
   stopHosting(): Promise<void>;
-  discoverHosts(options: { durationMs: number }): Promise<{ durationMs: number }>;
+  discoverHosts(options: { durationMs: number }): Promise<{ durationMs: number; warning?: string }>;
   stopDiscovery(): Promise<void>;
   connect(options: { address: string; psm: number }): Promise<{ connected: boolean }>;
   send(options: { data: string }): Promise<void>;

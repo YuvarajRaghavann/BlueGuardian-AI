@@ -56,7 +56,9 @@ type Action =
   | { type: 'BLOCK_DEVICE'; payload: string }
   | { type: 'UNBLOCK_DEVICE'; payload: string }
   | { type: 'FORGET_DEVICE'; payload: string }
-  | { type: 'CLEAR_SIMULATED_DEVICES' };
+  | { type: 'CLEAR_SIMULATED_DEVICES' }
+  /** Live link change reported by Android (connect/disconnect/pairing) for every record with this address. */
+  | { type: 'SET_LINK_STATE'; payload: { address: string; connected?: boolean; paired?: boolean } };
 
 function applySecurityPolicy(device: BluetoothDevice): BluetoothDevice {
   const normalizedDevice: BluetoothDevice = {
@@ -225,6 +227,24 @@ export function deviceReducer(state: DeviceState, action: Action): DeviceState {
       return { ...state, devices: state.devices.filter((d) => d.id !== action.payload) };
     case 'CLEAR_SIMULATED_DEVICES':
       return { ...state, devices: state.devices.filter(device => device.discoverySource !== 'SIMULATED') };
+    case 'SET_LINK_STATE': {
+      const target = action.payload.address.trim().toLowerCase();
+      if (!target) return state;
+      let changed = false;
+      const devices = state.devices.map((device) => {
+        if ((device.address ?? '').trim().toLowerCase() !== target) return device;
+        changed = true;
+        return {
+          ...device,
+          ...(typeof action.payload.connected === 'boolean'
+            ? { connectionStatus: action.payload.connected ? 'connected' as const : 'disconnected' as const }
+            : {}),
+          ...(typeof action.payload.paired === 'boolean' ? { paired: action.payload.paired } : {}),
+          lastSeen: new Date(),
+        };
+      });
+      return changed ? { ...state, devices } : state;
+    }
     default:
       return state;
   }
@@ -266,6 +286,8 @@ const DeviceContext = createContext<{
   scanCombinedDevices: () => Promise<void>;
   /** Loads system-bonded devices separately; this is not a live scan or connection. */
   loadPairedDevices: () => Promise<number>;
+  /** Re-reads Android's paired + currently connected devices (like the system Bluetooth screen). */
+  refreshKnownDevices: () => Promise<void>;
   addMockDevices: () => void;
   /** Remove only in-memory simulated/demo records; physical observations are untouched. */
   clearSimulatedDevices: () => void;
@@ -355,7 +377,9 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           payload: devices
             .filter(device => device.discoverySource !== 'SIMULATED')
             // Earlier builds blocked devices automatically from guessed risk. Only owner blocks stay.
-            .map(device => (device.blocked && !device.blockedByUser ? { ...device, blocked: false, riskLevel: 'low' as const } : device)),
+            .map(device => (device.blocked && !device.blockedByUser ? { ...device, blocked: false, riskLevel: 'low' as const } : device))
+            // A "connected" flag saved in an earlier session is stale; Android's live list refreshes it.
+            .map(device => (device.connectionStatus === 'connected' ? { ...device, connectionStatus: 'unknown' as const, gattConnected: false } : device)),
         });
       } catch (error: unknown) {
         console.warn('Could not load local devices; continuing for this session.', error);
@@ -824,6 +848,35 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     void localDatabase.saveDevice(guardedDevice).catch(() => undefined);
   };
 
+  const refreshKnownDevices = async (): Promise<void> => {
+    if (!isNativeAndroidApp()) return;
+    try {
+      const { devices: known } = await myDevices.listKnownDevices();
+      known.forEach(registerKnownDevice);
+    } catch {
+      // Permission not granted yet or Bluetooth off; the next scan reports the reason.
+    }
+  };
+
+  // Keep connection/pairing state live, the way Android's own Bluetooth screen does.
+  useEffect(() => {
+    if (!isNativeAndroidApp()) return;
+    const handles: Array<Promise<{ remove: () => Promise<void> }>> = [];
+    try {
+      handles.push(myDevices.addListener('presence', (event) => {
+        if (event?.address) dispatch({ type: 'SET_LINK_STATE', payload: { address: event.address, connected: Boolean(event.connected) } });
+      }));
+      handles.push(myDevices.addListener('bond', (event) => {
+        if (event?.address) dispatch({ type: 'SET_LINK_STATE', payload: { address: event.address, paired: Boolean(event.paired) } });
+      }));
+    } catch {
+      // Native plugin unavailable (web build).
+    }
+    return () => {
+      handles.forEach((handle) => { void handle.then((h) => h.remove()).catch(() => undefined); });
+    };
+  }, []);
+
   const scanClassicDevices = async (): Promise<void> => {
     if (!isNativeAndroidApp()) {
       dispatch({
@@ -969,8 +1022,9 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
         if (bleResult.ok === false) {
           bleError = bleResult.error;
-        } else if (bleResult.devicesFound === 0 && bleResult.message) {
-          messages.push('BLE: ' + bleResult.message);
+        } else {
+          if (bleResult.warning) messages.push(bleResult.warning);
+          if (bleResult.devicesFound === 0 && bleResult.message) messages.push('BLE: ' + bleResult.message);
         }
       } catch (error: unknown) {
         bleError = error instanceof Error ? error.message : 'Unknown BLE discovery error.';
@@ -993,8 +1047,9 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
 
         if (classicResult.ok === false) {
           classicError = classicResult.error;
-        } else if (classicResult.devicesFound === 0 && classicResult.message) {
-          messages.push('Classic: ' + classicResult.message);
+        } else {
+          if (classicResult.warning && !messages.includes(classicResult.warning)) messages.push(classicResult.warning);
+          if (classicResult.devicesFound === 0 && classicResult.message) messages.push('Classic: ' + classicResult.message);
         }
       } catch (error: unknown) {
         classicError = error instanceof Error ? error.message : 'Unknown classic discovery error.';
@@ -1231,7 +1286,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, scanClassicDevices, scanCombinedDevices, loadPairedDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, canConnectSelectedDevice, connectSelectedDevice, backendReady }}>
+    <DeviceContext.Provider value={{ state, dispatch, scanDevices, scanSimulatedDevices, scanRealDevices, scanClassicDevices, scanCombinedDevices, loadPairedDevices, refreshKnownDevices, addMockDevices, clearSimulatedDevices, startWatchingPermittedBleDevices, stopWatchingPermittedBleDevices, canConnectSelectedDevice, connectSelectedDevice, backendReady }}>
       {children}
     </DeviceContext.Provider>
   );

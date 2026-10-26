@@ -26,6 +26,8 @@ export interface IDevice extends Document {
   recoveryState?: 'lost' | 'searching' | 'found' | 'recovered';
   /** SHA-256 of canonical advertised name + service UUIDs; never stores raw MAC as a community lookup key. */
   recoveryFingerprintHash?: string;
+  /** SHA-256 of the canonical advertised name only (same formula, empty UUID list). */
+  recoveryNameHash?: string;
   registeredAt?: Date;
   firstSeen: Date;
   lastSeen: Date;
@@ -59,6 +61,7 @@ const DeviceSchema = new Schema<IDevice>({
   recoveryEnabled: { type: Boolean },
   recoveryState: { type: String, enum: ['lost', 'searching', 'found', 'recovered'], default: 'lost' },
   recoveryFingerprintHash: { type: String, index: true, select: false },
+  recoveryNameHash: { type: String, index: true, select: false },
   registeredAt: { type: Date, default: Date.now },
   firstSeen: { type: Date, default: Date.now },
   lastSeen: { type: Date, default: Date.now },

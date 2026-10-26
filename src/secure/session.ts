@@ -171,6 +171,9 @@ export class SecureSession {
   private protocolErrors = 0;
   private pairAttempts = 0;
   private rtts: number[] = [];
+  /** Recent round-trip times across windows, for a jitter estimate one slow reply can't skew. */
+  private rttHistory: number[] = [];
+  private rssiSamples: number[] = [];
   private rssi: number | null = null;
   private closed = false;
 
@@ -215,8 +218,45 @@ export class SecureSession {
   }
 
   setPeerRssi(rssi: number | null): void {
-    this.rssi = rssi;
+    // A single scan sample swings by 10-20 dB when a hand or body blocks the signal.
+    // Use the median of the last few samples so one dip isn't read as a relay attack.
+    if (rssi === null) {
+      this.rssiSamples = [];
+      this.rssi = null;
+      return;
+    }
+    this.rssiSamples = [...this.rssiSamples, rssi].slice(-5);
+    const sorted = [...this.rssiSamples].sort((a, b) => a - b);
+    this.rssi = sorted[Math.floor(sorted.length / 2)];
   }
+
+  /** True while file chunks are queued on this link; replies then wait behind them. */
+  private transferInFlight(): boolean {
+    if (this.outgoing.size > 0) return true;
+    for (const t of this.incoming.values()) if (t.approved && !t.done) return true;
+    return false;
+  }
+
+  /**
+   * Round-trip jitter for the behaviour model. Real phones add BLE connection-interval
+   * and WebView scheduling noise, and file chunks queue ahead of ping replies; that is
+   * load, not an attack. Samples taken during a transfer are ignored, the spread is a
+   * robust median deviation over recent windows, and a small allowance for normal BLE
+   * noise is removed before scoring.
+   */
+  private jitterEstimate(): number {
+    if (!this.transferInFlight()) this.rttHistory = [...this.rttHistory, ...this.rtts].slice(-8);
+    const h = this.rttHistory;
+    if (h.length < 3) return 0;
+    const sorted = [...h].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const deviations = h.map((v) => Math.abs(v - median)).sort((a, b) => a - b);
+    const mad = deviations[Math.floor(deviations.length / 2)] * 1.4826;
+    return Math.max(0, mad - SecureSession.JITTER_ALLOWANCE_MS);
+  }
+
+  /** Normal BLE + bridge round-trip variation on phones (connection interval 7.5-50 ms). */
+  static readonly JITTER_ALLOWANCE_MS = 25;
 
   private async handleFrame(data: Uint8Array): Promise<void> {
     if (this.closed || data.length === 0) return;
@@ -741,10 +781,7 @@ export class SecureSession {
     const maxFps = this.o.maxFramesPerSecond ?? 600;
     if (this.framesIn > maxFps) this.protocolErrors += Math.ceil(this.framesIn / maxFps);
     const totalIn = this.framesIn + this.authFailures + this.protocolErrors;
-    const mean = this.rtts.length ? this.rtts.reduce((a, b) => a + b, 0) / this.rtts.length : 0;
-    const jitter = this.rtts.length > 1
-      ? Math.sqrt(this.rtts.reduce((a, b) => a + (b - mean) ** 2, 0) / this.rtts.length)
-      : this.rtts.length === 1 ? Math.abs(this.rtts[0] - mean) : 0;
+    const jitter = this.jitterEstimate();
     const observation: LinkObservation = {
       t: this.now(),
       encrypted: !!this.send,
@@ -763,7 +800,7 @@ export class SecureSession {
     this.authFailures = 0;
     this.protocolErrors = 0;
     this.pairAttempts = 0;
-    this.rtts = this.rtts.slice(-1);
+    this.rtts = [];
 
     const decision = this.o.engine.process(peer, observation);
     this.lastDecision = decision;

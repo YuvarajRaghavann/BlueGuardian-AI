@@ -91,7 +91,7 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
       myDevices.addListener('proximityState', () => { if (!cancelled) setRunning(false); }),
     ];
     myDevices.startProximity({ address: device.address, name: device.name, durationMs: 120000 })
-      .then((r) => { if (!cancelled) setConnected(r.connected); })
+      .then((r) => { if (!cancelled) { setConnected(r.connected); if (r.warning) setError(r.warning); } })
       .catch((e: unknown) => { if (!cancelled) { setError(e instanceof Error ? e.message : 'Could not start searching.'); setRunning(false); } });
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {

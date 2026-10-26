@@ -61,7 +61,7 @@ function HowCalculated({ r, s }: { r: number; s: number }) {
 
 export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
   const { executeAction, getAllowedActions } = useSecurity();
-  const { state: deviceState } = useBluetoothDevices();
+  const { state: deviceState, refreshKnownDevices } = useBluetoothDevices();
   const engine = useIntel();
   useGuardianVersion();
   const [confirm, setConfirm] = useState<SecurityActionType | null>(null);
@@ -160,7 +160,7 @@ export function DeviceDetailModal({ device, onClose }: DeviceDetailModalProps) {
           )}
 
           {isNativeAndroidApp() && current.address && !current.blocked && (
-            <NativeConnectPanel address={current.address} paired={Boolean(current.paired)} connected={current.connectionStatus === 'connected'} guardian={guardian} />
+            <NativeConnectPanel key={current.address} address={current.address} paired={Boolean(current.paired)} connected={current.connectionStatus === 'connected'} guardian={guardian} onDone={() => void refreshKnownDevices()} />
           )}
 
           {actions.length > 0 && (

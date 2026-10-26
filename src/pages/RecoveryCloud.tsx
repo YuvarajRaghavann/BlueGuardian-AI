@@ -6,6 +6,32 @@ import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bl
 import { currentFirebaseEmail, getFreshFirebaseIdToken, sendFirebasePasswordResetEmail } from '../services/firebaseAuth';
 import { signIn as accountSignIn, signOut as accountSignOut } from '../services/accountSession';
 import { isNativeAndroidApp, listNativeAndroidPairedDevices, scanNativeAndroidBle, scanNativeAndroidClassic } from '../services/nativeBluetoothService';
+import { myDevices } from '../services/myDevices';
+
+/**
+ * One location fix for an explicitly opted-in report. In the Android app the native
+ * fused/network provider is used (WebView geolocation often times out indoors).
+ */
+async function currentPosition(): Promise<{ lat: number; lng: number }> {
+  if (isNativeAndroidApp()) {
+    try {
+      const status = await myDevices.requestLocation();
+      if (status.location) {
+        const fix = await myDevices.getLocation();
+        return { lat: fix.lat, lng: fix.lng };
+      }
+    } catch {
+      // fall back to the WebView below
+    }
+  }
+  if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    throw new Error('Location services are not available on this device.');
+  }
+  const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
+  });
+  return { lat: position.coords.latitude, lng: position.coords.longitude };
+}
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not recorded';
@@ -422,26 +448,14 @@ export function RecoveryCloud() {
 
       let location: { lat: number; lng: number } | undefined;
       if (shareLocation) {
-        if (typeof navigator === 'undefined' || !navigator.geolocation) {
-          setError('This device does not expose location services. No encounter was submitted; turn off location sharing to record a Bluetooth-only sighting.');
-          return;
-        }
         try {
-          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true,
-              timeout: 12000,
-              maximumAge: 0,
-            });
-          });
-          location = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
+          location = await currentPosition();
         } catch (locationError: unknown) {
           const reason = locationError instanceof Error
             ? locationError.message
-            : 'Location permission was denied or unavailable.';
+            : typeof (locationError as { message?: unknown })?.message === 'string'
+              ? String((locationError as { message: string }).message)
+              : 'Location permission was denied or unavailable.';
           setError(`Bluetooth presence was verified, but location could not be obtained (${reason}). No encounter was submitted. Allow location access or turn off optional location sharing and retry.`);
           return;
         }
@@ -516,17 +530,8 @@ export function RecoveryCloud() {
 
       let location: { lat: number; lng: number } | undefined;
       if (communityShareLocation) {
-        if (typeof navigator === 'undefined' || !navigator.geolocation) {
-          setError('Location is unavailable on this device. Turn off optional location sharing to submit Bluetooth-only candidates.');
-          return;
-        }
         try {
-          const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-            navigator.geolocation.getCurrentPosition(resolve, reject, {
-              enableHighAccuracy: true, timeout: 12000, maximumAge: 0,
-            });
-          });
-          location = { lat: position.coords.latitude, lng: position.coords.longitude };
+          location = await currentPosition();
         } catch (caught) {
           setError(`Location was not obtained (${errorMessage(caught)}). No report was sent. Allow location access or disable optional location sharing.`);
           return;
@@ -540,7 +545,7 @@ export function RecoveryCloud() {
       });
       setOwnerToken(token);
       setActiveOwnerToken(token);
-      setNotice(`Community scan submitted ${result.observationsReceived} eligible BLE fingerprint candidate(s). Matching reports, if any, are private to device owners. These are candidate leads, not proof that a lost device was found.`);
+      setNotice(`Community scan shared ${result.observationsReceived} nearby device name(s). If one matches someone's lost device, only its owner is told. These are leads, not proof that a lost device was found.`);
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {

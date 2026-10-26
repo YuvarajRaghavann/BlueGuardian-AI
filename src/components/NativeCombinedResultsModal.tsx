@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import { AlertTriangle, Bluetooth, ChevronRight, LoaderCircle, Radio, X } from 'lucide-react';
 import type { BluetoothDevice, BluetoothScanState } from '../types';
+import { normalizeBluetoothName } from '../services/bluetoothService';
 
 interface NativeCombinedResultsModalProps {
   open: boolean;
@@ -20,7 +22,16 @@ export function NativeCombinedResultsModal({
   onClose,
   onSelect,
 }: NativeCombinedResultsModalProps) {
+  const [showUnnamed, setShowUnnamed] = useState(false);
   if (!open) return null;
+
+  // Android's own Bluetooth screen hides nameless advertisers (rotating BLE addresses from
+  // phones, beacons, TVs). Show named, paired and connected devices first; keep the rest one tap away.
+  const isNamed = (device: BluetoothDevice) =>
+    Boolean(normalizeBluetoothName(device.name)) || Boolean(device.paired) || device.connectionStatus === 'connected' || Boolean(device.familyLabel);
+  const named = devices.filter(isNamed);
+  const unnamed = devices.filter((device) => !isNamed(device));
+  const listed = showUnnamed ? [...named, ...unnamed] : named;
 
   const scanning = scan.state === 'scanning' && scan.transport === 'ANDROID_COMBINED_SCAN';
   const failed = scan.state === 'error'
@@ -28,13 +39,11 @@ export function NativeCombinedResultsModal({
     || scan.state === 'unsupported';
 
   const summary = scanning
-    ? scan.scanStage === 'CLASSIC'
-      ? 'Searching nearby devices… ' + devices.length + ' found so far'
-      : 'Searching nearby devices… ' + devices.length + ' found so far'
+    ? 'Searching nearby devices… ' + named.length + ' found so far'
     : failed
       ? scan.error || 'Device search failed.'
       : devices.length > 0
-        ? 'Found ' + devices.length + ' device(s). Select one to view details.'
+        ? 'Found ' + named.length + ' device(s)' + (unnamed.length ? ' and ' + unnamed.length + ' without a name' : '') + '. Select one to view details.'
         : scan.error || 'No devices found. Keep Bluetooth on and try again.';
 
   const transportLabel = (device: BluetoothDevice) => {
@@ -107,7 +116,7 @@ export function NativeCombinedResultsModal({
         <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
           {devices.length > 0 ? (
             <ul className="space-y-2">
-              {devices.map((device) => {
+              {listed.map((device) => {
                 const label = transportLabel(device);
                 const dualObserved = label === 'Dual signal';
                 return (
@@ -137,6 +146,17 @@ export function NativeCombinedResultsModal({
                   </li>
                 );
               })}
+              {unnamed.length > 0 && (
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => setShowUnnamed((v) => !v)}
+                    className="w-full rounded-xl border border-dashed border-[var(--border)] p-3 text-center text-xs font-semibold text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)]"
+                  >
+                    {showUnnamed ? 'Hide devices without a name' : 'Show ' + unnamed.length + ' device(s) without a name'}
+                  </button>
+                </li>
+              )}
             </ul>
           ) : (
             <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">

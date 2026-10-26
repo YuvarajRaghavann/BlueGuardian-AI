@@ -71,6 +71,7 @@ router.post('/devices', requireAuth('owner'), asyncHandler(async (req, res) => {
     existing.discoverySource = registration.discoverySource ?? existing.discoverySource;
     existing.recoveryEnabled = true;
     if (registration.recoveryFingerprintHash) existing.recoveryFingerprintHash = registration.recoveryFingerprintHash;
+    if (registration.recoveryNameHash) existing.recoveryNameHash = registration.recoveryNameHash;
     existing.recoveryState = normalizeRecoveryState(registration.recoveryState ?? existing.recoveryState ?? 'lost');
     existing.lastSeen = new Date();
     await existing.save();
@@ -87,6 +88,7 @@ router.post('/devices', requireAuth('owner'), asyncHandler(async (req, res) => {
     discoverySource: registration.discoverySource ?? 'REAL',
     recoveryState: normalizeRecoveryState(registration.recoveryState),
     recoveryFingerprintHash: registration.recoveryFingerprintHash,
+    recoveryNameHash: registration.recoveryNameHash,
     registeredAt: new Date(),
     firstSeen: new Date(),
     lastSeen: new Date(),
@@ -227,7 +229,12 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
     location,
   }).location;
 
-  const fingerprintHashes = new Map<string, { hasServiceUuids: boolean }>();
+  // Each sighting is matched two ways: the exact name + service-UUID fingerprint (stronger
+  // lead) and the advertised name alone. Earbuds advertise different UUID sets in different
+  // packets, and classic-discovery sightings carry none, so exact-only matching almost never
+  // connected a helper's scan to the owner's registration.
+  const exactHashes = new Set<string>();
+  const nameHashes = new Set<string>();
   for (const observation of observations) {
     const registration = validateRegistrationInput({
       deviceName: typeof observation?.name === 'string' ? observation.name : '',
@@ -238,22 +245,35 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
       },
       discoverySource: 'REAL',
     });
-    if (registration.recoveryFingerprintHash) fingerprintHashes.set(registration.recoveryFingerprintHash, {
-      hasServiceUuids: Array.isArray(observation?.serviceUuids) && observation.serviceUuids.length > 0,
-    });
+    const hasServiceUuids = Array.isArray(observation?.serviceUuids) && observation.serviceUuids.length > 0;
+    if (registration.recoveryFingerprintHash && hasServiceUuids) exactHashes.add(registration.recoveryFingerprintHash);
+    if (registration.recoveryNameHash) nameHashes.add(registration.recoveryNameHash);
   }
 
   const timeBucket = Math.floor(Date.now() / 60_000);
-  for (const [fingerprintHash, fingerprint] of fingerprintHashes) {
+  const reported = new Set<string>();
+  const candidates: Array<{ hash: string; strong: boolean; filter: Record<string, any> }> = [
+    ...[...exactHashes].map((hash) => ({ hash, strong: true, filter: { recoveryFingerprintHash: hash } })),
+    ...[...nameHashes].map((hash) => ({
+      hash,
+      strong: false,
+      filter: { $or: [{ recoveryNameHash: hash }, { recoveryFingerprintHash: hash }] },
+    })),
+  ];
+  for (const candidate of candidates) {
     const matches = await Device.find({
       recoveryEnabled: true,
       recoveryState: { $in: ['lost', 'searching'] },
-      recoveryFingerprintHash: fingerprintHash,
+      ...candidate.filter,
     }).limit(5);
     for (const device of matches) {
       if (!device.ownerId || !device.deviceId) continue;
+      const deviceKey = `${device.ownerId}\u0000${device.deviceId}`;
+      // One report per device per submission; the strong (exact) match is processed first.
+      if (reported.has(deviceKey)) continue;
+      reported.add(deviceKey);
       const deduplicationKey = createHash('sha256')
-        .update(JSON.stringify({ ownerId: device.ownerId, deviceId: device.deviceId, fingerprintHash, timeBucket }))
+        .update(JSON.stringify({ ownerId: device.ownerId, deviceId: device.deviceId, fingerprintHash: candidate.hash, timeBucket }))
         .digest('hex');
       const existing = await RecoveryEncounter.findOne({
         ownerId: device.ownerId, deviceId: device.deviceId, deduplicationKey,
@@ -264,9 +284,9 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
         ownerId: device.ownerId,
         deduplicationKey,
         source: 'REAL',
-        confidence: fingerprint.hasServiceUuids ? 0.45 : 0.2,
+        confidence: candidate.strong ? 0.45 : 0.2,
         location: locationPayload,
-        description: fingerprint.hasServiceUuids
+        description: candidate.strong
           ? 'Community BLE name + service UUID candidate. This is an unverified lead; confirm the device before marking it found.'
           : 'Low-confidence community BLE name-only candidate. Advertised names can collide; confirm the physical device before marking it found.',
         simulated: false,
@@ -284,7 +304,7 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
   }
 
   // Do not reveal whether any owner/device matched, or return device IDs.
-  return res.status(202).json({ accepted: true, observationsReceived: fingerprintHashes.size });
+  return res.status(202).json({ accepted: true, observationsReceived: nameHashes.size });
 }));
 
 export default router;

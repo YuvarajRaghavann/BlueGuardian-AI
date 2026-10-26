@@ -31,6 +31,7 @@ export function Devices() {
     scanClassicDevices,
     scanCombinedDevices,
     loadPairedDevices,
+    refreshKnownDevices,
     clearSimulatedDevices,
   } = useBluetoothDevices();
   const [selectedDevice, setSelectedDevice] =
@@ -116,8 +117,22 @@ export function Devices() {
     dispatch({ type: 'SET_SEARCH', payload: localSearch });
   }, [localSearch, dispatch]);
 
+  // Like Android's Bluetooth screen: paired and connected devices are listed as soon as the page opens.
+  useEffect(() => {
+    if (nativeAndroid) void refreshKnownDevices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nativeAndroid]);
+
   const visibleDevices = useMemo(() => {
+    // Older builds stored the same device under separate classic/paired/combined records.
+    // Show one row per address, preferring the combined (live) record.
+    const combinedAddresses = new Set(
+      state.devices
+        .filter(device => device.id.startsWith('android-combined:') && device.address)
+        .map(device => String(device.address).toLowerCase()),
+    );
     const sourceFiltered = state.devices.filter(device => {
+      if (device.id.startsWith('android-classic:') && device.address && combinedAddresses.has(device.address.toLowerCase())) return false;
       if (sourceView === 'real') return device.discoverySource === 'REAL';
       if (sourceView === 'simulated') return device.discoverySource === 'SIMULATED';
       return true;

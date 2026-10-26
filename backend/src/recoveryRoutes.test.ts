@@ -175,6 +175,30 @@ describe('recovery API integration', () => {
   });
 
 
+  it('matches a community sighting by advertised name when its service UUIDs differ from the registration', async () => {
+    const registered = await fetch(`${origin}/api/recovery/devices`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'AA:BB:CC:DD:EE:01',
+        deviceIdentifier: 'AA:BB:CC:DD:EE:01',
+        deviceName: 'My buds',
+        recoveryState: 'lost',
+        recoveryFingerprint: { name: 'Nord Buds 2', serviceUuids: ['0000fe2c-0000-1000-8000-00805f9b34fb'] },
+      }),
+    });
+    expect(registered.status).toBe(201);
+    // A helper's classic-discovery sighting carries the name but no service UUIDs.
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ observations: [{ name: '  nord   BUDS 2 ', serviceUuids: [] }], shareLocation: false }),
+    });
+    expect(response.status).toBe(202);
+    expect(store.encounters).toHaveLength(1);
+    expect(store.encounters[0]).toMatchObject({ deviceId: 'AA:BB:CC:DD:EE:01', confidence: 0.2 });
+  });
+
   it('stores coordinates only when a community participant explicitly opts in', async () => {
     const { createHash } = await import('node:crypto');
     const fingerprintHash = createHash('sha256')

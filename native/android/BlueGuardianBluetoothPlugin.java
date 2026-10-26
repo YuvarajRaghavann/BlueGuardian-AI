@@ -65,14 +65,23 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     private Runnable stopClassicRunnable;
     private final Set<String> classicSeenAddresses = new HashSet<>();
     private int activeClassicDurationMs = DEFAULT_SCAN_DURATION_MS;
+    private final Map<String, String> classicNames = new HashMap<>();
+    private boolean locationAsked;
+    /** True once Android confirms OUR inquiry started; earlier FINISHED events belong to a cancelled session. */
+    private volatile boolean classicStartedSeen;
 
     @PluginMethod
     public void startBleScan(PluginCall call) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            // BLUETOOTH_SCAN is not declared neverForLocation, so Android only delivers
+            // every advertisement (beacons, earbuds in privacy mode...) when location is
+            // also granted. Ask for it in the same prompt; scanning still runs without it.
             if (getPermissionState("bluetoothScan") != PermissionState.GRANTED
-                || getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+                || getPermissionState("bluetoothConnect") != PermissionState.GRANTED
+                || (!locationAsked && getPermissionState("location") != PermissionState.GRANTED)) {
+                locationAsked = true;
                 requestPermissionForAliases(
-                    new String[] { "bluetoothScan", "bluetoothConnect" },
+                    new String[] { "bluetoothScan", "bluetoothConnect", "location" },
                     call,
                     "onModernBluetoothPermissions"
                 );
@@ -178,10 +187,21 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         };
 
         try {
-            ScanSettings settings = new ScanSettings.Builder()
+            ScanSettings.Builder builder = new ScanSettings.Builder()
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .build();
-            activeScanner.startScan(null, settings, activeScanCallback);
+                .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                builder.setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
+                    .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT);
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Also receive Bluetooth 5 extended advertisements (newer earbuds, watches, phones),
+                // but only where the controller supports them; otherwise keep the legacy scan.
+                boolean extended = false;
+                try { extended = adapter.isLeExtendedAdvertisingSupported(); } catch (RuntimeException ignored) { /* keep legacy */ }
+                if (extended) builder.setLegacy(false).setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED);
+            }
+            activeScanner.startScan(null, builder.build(), activeScanCallback);
         } catch (SecurityException error) {
             stopBleScanInternal(false);
             call.reject("Android denied access to Bluetooth scanning. Check Nearby Devices permission.");
@@ -198,7 +218,28 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("started", true);
         result.put("durationMs", activeDurationMs);
+        String warning = visibilityWarning();
+        if (warning != null) result.put("warning", warning);
         call.resolve(result);
+    }
+
+    /**
+     * Android silently hides many scan results when location permission is missing
+     * or the phone's Location switch is off. Tell the user instead of showing a short list.
+     */
+    private String visibilityWarning() {
+        if (getPermissionState("location") != PermissionState.GRANTED) {
+            return "Location permission is off, so Android hides some nearby devices. Allow location for BlueGuardian to see everything (no GPS position is collected by scanning).";
+        }
+        try {
+            android.location.LocationManager lm = (android.location.LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+            if (lm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !lm.isLocationEnabled()) {
+                return "The phone's Location switch is off, so Android hides some nearby devices. Turn Location on in quick settings and search again.";
+            }
+        } catch (RuntimeException ignored) {
+            // best effort
+        }
+        return null;
     }
 
     @SuppressLint("MissingPermission")
@@ -364,22 +405,24 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         // another app's active discovery session behind the user's back.
         stopClassicDiscoveryInternal(false);
         try {
-            if (adapter.isDiscovering()) {
-                call.reject("Another classic Bluetooth discovery session is already active. Wait briefly and retry.");
-                return;
-            }
+            // A leftover inquiry (our own finder, the system, another app) blocks a fresh
+            // one. Android's own Bluetooth settings cancel and restart it, so do the same.
+            if (adapter.isDiscovering()) adapter.cancelDiscovery();
         } catch (SecurityException error) {
             call.reject("Android denied the classic discovery state check. Check Nearby Devices permission.");
             return;
         }
 
         classicSeenAddresses.clear();
+        classicNames.clear();
+        classicStartedSeen = false;
         Integer requestedDuration = call.getInt("durationMs");
         activeClassicDurationMs = requestedDuration == null
             ? DEFAULT_SCAN_DURATION_MS
             : Math.max(MIN_SCAN_DURATION_MS, Math.min(MAX_SCAN_DURATION_MS, requestedDuration));
         IntentFilter filter = new IntentFilter();
         filter.addAction(BluetoothDevice.ACTION_FOUND);
+        filter.addAction(BluetoothDevice.ACTION_NAME_CHANGED);
         filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_STARTED);
         filter.addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED);
 
@@ -390,7 +433,8 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 if (intent == null || intent.getAction() == null) return;
                 String action = intent.getAction();
 
-                if (BluetoothDevice.ACTION_FOUND.equals(action)) {
+                if (BluetoothDevice.ACTION_FOUND.equals(action) || BluetoothDevice.ACTION_NAME_CHANGED.equals(action)) {
+                    boolean nameUpdate = BluetoothDevice.ACTION_NAME_CHANGED.equals(action);
                     BluetoothDevice device;
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice.class);
@@ -399,13 +443,14 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                     }
                     if (device == null) return;
 
-                    short rssiValue = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, (short) 0);
+                    short rssiValue = intent.getShortExtra(BluetoothDevice.EXTRA_RSSI, Short.MIN_VALUE);
                     String address;
                     String name = null;
                     int deviceType;
                     try {
                         address = device.getAddress();
                         name = device.getName();
+                        if (name == null || name.trim().isEmpty()) name = intent.getStringExtra(BluetoothDevice.EXTRA_NAME);
                         deviceType = device.getType();
                     } catch (SecurityException error) {
                         emitClassicScanError("Android denied access to classic Bluetooth device details. Check Nearby Devices permission.");
@@ -415,15 +460,29 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                     // Do not present a known LE-only device as a classic discovery result.
                     // Dual-mode and unknown-type results from classic inquiry remain eligible.
                     if (deviceType == BluetoothDevice.DEVICE_TYPE_LE) return;
-                    if (!classicSeenAddresses.add(address)) return;
+                    // Classic inquiry often reports a device first without its name and resolves
+                    // the name a moment later. Re-send the device once its name is known so the
+                    // list shows "Galaxy Buds2" instead of "name unavailable".
+                    String cleanName = name == null ? null : name.replaceAll("[\\p{Cntrl}]", " ").trim();
+                    if (cleanName != null && cleanName.isEmpty()) cleanName = null;
+                    boolean firstSighting = classicSeenAddresses.add(address);
+                    String knownName = classicNames.get(address);
+                    boolean nameIsNew = cleanName != null && !cleanName.equals(knownName);
+                    if (!firstSighting && !nameIsNew) return;
+                    if (nameUpdate && firstSighting) {
+                        // A name update for a device inquiry has not found: not a nearby result.
+                        classicSeenAddresses.remove(address);
+                        return;
+                    }
+                    if (cleanName != null) classicNames.put(address, cleanName);
 
                     JSObject observation = new JSObject();
                     observation.put("id", address);
                     observation.put("address", address);
-                    if (name != null && !name.trim().isEmpty()) {
-                        observation.put("name", name.replaceAll("[\\p{Cntrl}]", " ").trim());
+                    if (cleanName != null) {
+                        observation.put("name", cleanName);
                     }
-                    observation.put("rssi", (int) rssiValue);
+                    if (rssiValue != Short.MIN_VALUE) observation.put("rssi", (int) rssiValue);
                     observation.put("transport", "CLASSIC");
                     observation.put("source", "REAL");
                     observation.put("paired", device.getBondState() == BluetoothDevice.BOND_BONDED);
@@ -443,6 +502,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 }
 
                 if (BluetoothAdapter.ACTION_DISCOVERY_STARTED.equals(action)) {
+                    classicStartedSeen = true;
                     JSObject state = new JSObject();
                     state.put("state", "scanning");
                     state.put("message", "Classic Bluetooth discovery started.");
@@ -451,6 +511,8 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 }
 
                 if (BluetoothAdapter.ACTION_DISCOVERY_FINISHED.equals(action)) {
+                    // Ignore the FINISHED of a session we cancelled just before starting ours.
+                    if (!classicStartedSeen) return;
                     // The system session has ended; cleanup must not cancel a new
                     // discovery session that another app might start immediately after it.
                     classicDiscoveryOwned = false;
@@ -475,12 +537,13 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         try {
             // Android shares one adapter-wide classic inquiry session. If another
             // app starts discovery after our first check, do not cancel its session.
-            if (adapter.isDiscovering()) {
-                stopClassicDiscoveryInternal(false);
-                call.reject("Another classic Bluetooth discovery session became active. Wait briefly and try again.");
-                return;
-            }
+            if (adapter.isDiscovering()) adapter.cancelDiscovery();
             boolean started = adapter.startDiscovery();
+            if (!started) {
+                // The adapter can need a moment after cancelDiscovery(); retry once.
+                try { Thread.sleep(400); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
+                started = adapter.startDiscovery();
+            }
             if (!started) {
                 int adapterState = adapter.getState();
                 boolean anotherDiscoveryActive = adapter.isDiscovering();
@@ -517,6 +580,8 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         JSObject result = new JSObject();
         result.put("started", true);
         result.put("durationMs", activeClassicDurationMs);
+        String warning = visibilityWarning();
+        if (warning != null) result.put("warning", warning);
         call.resolve(result);
     }
 

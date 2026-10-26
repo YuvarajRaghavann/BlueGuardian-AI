@@ -37,7 +37,7 @@ export interface KnownDevice {
 }
 
 export interface ConnectOutcome {
-  result: 'connected' | 'pairing' | 'requested' | 'settings';
+  result: 'connected' | 'paired' | 'pairing' | 'requested' | 'settings';
   message: string;
 }
 
@@ -54,7 +54,7 @@ interface DevicesPlugin {
   forgetLastSeen(options: { address: string }): Promise<void>;
   connect(options: { address: string }): Promise<ConnectOutcome>;
   openBluetoothSettings(): Promise<void>;
-  startProximity(options: { address: string; name?: string; durationMs?: number }): Promise<{ started: boolean; connected: boolean }>;
+  startProximity(options: { address: string; name?: string; durationMs?: number }): Promise<{ started: boolean; connected: boolean; warning?: string }>;
   stopProximity(): Promise<void>;
   requestBluetooth(): Promise<{ granted: boolean }>;
   inspectGatt(options: { address: string }): Promise<{ connected: boolean; timedOut?: boolean; services: string[]; info: { manufacturer?: string; model?: string; firmware?: string }; protectedReads: number; openReads: number }>;
@@ -68,6 +68,7 @@ interface DevicesPlugin {
   openMap(options: { lat: number; lng: number; label?: string }): Promise<void>;
   addListener(event: 'presence', fn: (e: { address: string; name?: string; connected: boolean; at: number }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'proximity', fn: (e: { rssi: number; via: 'BLE' | 'CLASSIC'; address: string; at: number }) => void): Promise<PluginListenerHandle>;
+  addListener(event: 'bond', fn: (e: { address: string; name?: string; paired: boolean; bonding?: boolean; at: number }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'proximityState', fn: (e: { stopped: boolean }) => void): Promise<PluginListenerHandle>;
 }
 

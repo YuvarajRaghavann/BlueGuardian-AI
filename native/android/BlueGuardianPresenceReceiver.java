@@ -18,7 +18,6 @@ import android.os.Looper;
 import org.json.JSONObject;
 
 import java.util.Iterator;
-import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -172,7 +171,14 @@ public class BlueGuardianPresenceReceiver extends BroadcastReceiver {
                 || context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         }
 
-        /** Fresh fix when possible, else the newest cached fix; callback always runs exactly once. */
+        /** A cached fix older than this is not "where it was left"; it is somewhere else entirely. */
+        private static final long MAX_CACHED_AGE_MS = 15 * 60 * 1000L;
+
+        /**
+         * Fresh fix when possible, else a recent cached fix (never an hours-old one);
+         * callback always runs exactly once. Prefers the fused/network providers, which
+         * answer in a second or two indoors where GPS often never gets a fix.
+         */
         @SuppressLint("MissingPermission")
         public static void captureLocation(Context context, long timeoutMs, LocationCallback callback) {
             final AtomicBoolean done = new AtomicBoolean(false);
@@ -186,15 +192,18 @@ public class BlueGuardianPresenceReceiver extends BroadcastReceiver {
                 callback.onLocation(null);
                 return;
             }
-            final Location cached = newestCached(manager);
+            final Location newest = newestCached(manager);
+            final Location cached = newest != null && System.currentTimeMillis() - newest.getTime() <= MAX_CACHED_AGE_MS ? newest : null;
             final Runnable fallback = () -> {
                 if (done.compareAndSet(false, true)) callback.onLocation(cached);
             };
             main.postDelayed(fallback, timeoutMs);
             String provider = null;
             try {
-                if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) provider = LocationManager.GPS_PROVIDER;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && manager.hasProvider(LocationManager.FUSED_PROVIDER)
+                    && manager.isProviderEnabled(LocationManager.FUSED_PROVIDER)) provider = LocationManager.FUSED_PROVIDER;
                 else if (manager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) provider = LocationManager.NETWORK_PROVIDER;
+                else if (manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) provider = LocationManager.GPS_PROVIDER;
             } catch (Exception ignored) {
                 // provider state unavailable
             }
@@ -205,7 +214,7 @@ public class BlueGuardianPresenceReceiver extends BroadcastReceiver {
             }
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    manager.getCurrentLocation(provider, new CancellationSignal(), Executors.newSingleThreadExecutor(), location -> {
+                    manager.getCurrentLocation(provider, new CancellationSignal(), context.getMainExecutor(), location -> {
                         if (done.compareAndSet(false, true)) {
                             main.removeCallbacks(fallback);
                             callback.onLocation(location != null ? location : cached);

@@ -38,7 +38,7 @@ interface NativeClassicScanState {
 }
 
 export type NativeClassicScanOutcome =
-  | { ok: true; devicesFound: number; durationMs: number; message?: string }
+  | { ok: true; devicesFound: number; durationMs: number; message?: string; warning?: string }
   | { ok: false; error: string };
 
 interface NativeBleScanState {
@@ -50,9 +50,9 @@ interface NativeBleScanState {
 }
 
 interface BlueGuardianBluetoothPlugin {
-  startBleScan(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number }>;
+  startBleScan(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number; warning?: string }>;
   stopBleScan(): Promise<{ stopped: boolean }>;
-  startClassicDiscovery(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number }>;
+  startClassicDiscovery(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number; warning?: string }>;
   stopClassicDiscovery(): Promise<{ stopped: boolean }>;
   listPairedDevices(): Promise<{ devices: NativeClassicObservation[]; count: number }>;
   addListener(eventName: 'deviceFound', listenerFunc: (event: NativeBleObservation) => void): Promise<PluginListenerHandle>;
@@ -72,7 +72,7 @@ export function isNativeAndroidApp(): boolean {
 }
 
 export type NativeBleScanOutcome =
-  | { ok: true; devicesFound: number; durationMs: number; message?: string }
+  | { ok: true; devicesFound: number; durationMs: number; message?: string; warning?: string }
   | { ok: false; error: string };
 
 export async function scanNativeAndroidBle(
@@ -147,6 +147,7 @@ export async function scanNativeAndroidBle(
       ok: true,
       devicesFound,
       durationMs: actualDurationMs,
+      warning: started.warning,
       message: devicesFound === 0
         ? 'No BLE advertisements were received during this scan window. Keep the target nearby, ensure it is advertising, and retry.'
         : finalState.message,
@@ -195,6 +196,7 @@ export async function scanNativeAndroidClassic(
 
   const durationMs = Math.min(30000, Math.max(3000, Math.round(requestedDurationMs)));
   const observedIds = new Set<string>();
+  const observedNames = new Map<string, string>();
   let deviceListener: PluginListenerHandle | undefined;
   let stateListener: PluginListenerHandle | undefined;
   let safetyTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -209,8 +211,11 @@ export async function scanNativeAndroidClassic(
       const address = String(observation.address || observation.id || '').trim();
       if (!address) return;
       const identity = address.toLowerCase();
-      if (observedIds.has(identity)) return;
+      const name = typeof observation.name === 'string' ? observation.name.trim() : '';
+      // Android re-sends a device once its name resolves; let that update through.
+      if (observedIds.has(identity) && (!name || observedNames.get(identity) === name)) return;
       observedIds.add(identity);
+      if (name) observedNames.set(identity, name);
       onObservation({
         ...observation,
         id: address,
@@ -260,6 +265,7 @@ export async function scanNativeAndroidClassic(
       ok: true,
       devicesFound,
       durationMs: actualDurationMs,
+      warning: started.warning,
       message: finalState.message || (devicesFound === 0
         ? 'No classic Bluetooth devices were discovered. The other device must be discoverable during the scan.'
         : undefined),

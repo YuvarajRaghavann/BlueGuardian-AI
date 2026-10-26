@@ -10,6 +10,8 @@ export interface RegistrationInput {
   recoveryState?: RecoveryStatus | string;
   status?: RecoveryStatus | string;
   recoveryFingerprintHash?: string;
+  /** Hash of the advertised name alone, so a sighting with different/no service UUIDs still matches. */
+  recoveryNameHash?: string;
 }
 
 export interface EncounterInput {
@@ -54,6 +56,7 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
 
   const recoveryFingerprint = payload.recoveryFingerprint as { name?: unknown; serviceUuids?: unknown } | undefined;
   let recoveryFingerprintHash: string | undefined;
+  let recoveryNameHash: string | undefined;
   if (recoveryFingerprint !== undefined) {
     if (!recoveryFingerprint || typeof recoveryFingerprint !== 'object' || Array.isArray(recoveryFingerprint)) {
       throw new RecoveryValidationError('Recovery fingerprint must contain an advertised name and service UUID list.');
@@ -68,9 +71,8 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
       throw new RecoveryValidationError('Community recovery needs an advertised device name and a valid BLE service UUID list.');
     }
     const serviceUuids = [...new Set((rawUuids as string[]).map(uuid => uuid.trim().toLowerCase()))].sort();
-    recoveryFingerprintHash = createHash('sha256')
-      .update(JSON.stringify({ name: fingerprintName, serviceUuids }))
-      .digest('hex');
+    recoveryFingerprintHash = fingerprintHashOf(fingerprintName, serviceUuids);
+    recoveryNameHash = fingerprintHashOf(fingerprintName, []);
   }
 
   const requestedState = payload.recoveryState ?? payload.status;
@@ -97,7 +99,18 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
     discoverySource,
     recoveryState,
     recoveryFingerprintHash,
+    recoveryNameHash,
   };
+}
+
+/**
+ * Canonical community fingerprint hash. The name-only hash is the same formula with an
+ * empty UUID list, so records registered without UUIDs keep matching unchanged.
+ */
+export function fingerprintHashOf(normalizedName: string, sortedServiceUuids: string[]): string {
+  return createHash('sha256')
+    .update(JSON.stringify({ name: normalizedName, serviceUuids: sortedServiceUuids }))
+    .digest('hex');
 }
 
 export function validateEncounterInput(payload: Record<string, any>): EncounterInput {

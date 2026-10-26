@@ -136,12 +136,41 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
         return true;
     }
 
+    private boolean locationAsked;
+
     /** Returns true when permissions are present; otherwise requests them and returns false. */
     private boolean ensurePermissions(PluginCall call, boolean advertise) {
         String[] aliases = requiredAliases(advertise);
-        if (hasAll(aliases)) return true;
+        // Android 12+ only delivers BLE scan results to this app when location is also granted
+        // (BLUETOOTH_SCAN is not declared neverForLocation). Without it the other phone's
+        // advertisement is never seen, so ask for it once together with Nearby Devices.
+        boolean wantLocation = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            && !locationAsked && getPermissionState("location") != PermissionState.GRANTED;
+        if (hasAll(aliases) && !wantLocation) return true;
+        if (wantLocation) {
+            locationAsked = true;
+            String[] withLocation = java.util.Arrays.copyOf(aliases, aliases.length + 1);
+            withLocation[aliases.length] = "location";
+            aliases = withLocation;
+        }
         requestPermissionForAliases(aliases, call, "onSecureLinkPermissions");
         return false;
+    }
+
+    /** Explains why the other phone may not appear (location permission or switch off). */
+    private String visibilityWarning() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && getPermissionState("location") != PermissionState.GRANTED) {
+            return "Location permission is off, so Android may hide the other phone. Allow location for BlueGuardian (no GPS position is used).";
+        }
+        try {
+            android.location.LocationManager lm = (android.location.LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
+            if (lm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !lm.isLocationEnabled()) {
+                return "Turn on Location in quick settings on this phone; Android hides nearby phones from Bluetooth search while it is off.";
+            }
+        } catch (RuntimeException ignored) {
+            // best effort
+        }
+        return null;
     }
 
     @PermissionCallback
@@ -372,6 +401,7 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
         };
         ScanSettings settings = new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build();
         try {
+            // Unfiltered on purpose: some phones drop service-data filters in hardware offload.
             scanner.startScan(null, settings, discoveryCallback);
         } catch (SecurityException error) {
             call.reject("Scanning permission was denied.");
@@ -381,6 +411,8 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
         mainHandler.postDelayed(discoveryTimeout, durationMs);
         JSObject out = new JSObject();
         out.put("durationMs", durationMs);
+        String warning = visibilityWarning();
+        if (warning != null) out.put("warning", warning);
         call.resolve(out);
     }
 

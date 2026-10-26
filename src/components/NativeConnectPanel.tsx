@@ -35,7 +35,8 @@ export function NativeConnectPanel({ address, paired, connected, onDone, guardia
   };
 
   const isConnected = connected || outcome?.result === 'connected';
-  const risky = !paired && guardian && (guardian.verdict === 'unsafe' || guardian.verdict === 'caution');
+  const isPaired = paired || outcome?.result === 'paired' || outcome?.result === 'requested' || isConnected;
+  const risky = !isPaired && guardian && (guardian.verdict === 'unsafe' || guardian.verdict === 'caution');
   const gate = risky && !override && !isConnected;
   const showSettings = outcome?.result === 'settings' || outcome?.result === 'requested' || Boolean(error);
 
@@ -43,7 +44,7 @@ export function NativeConnectPanel({ address, paired, connected, onDone, guardia
     <div className="mb-4 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent)]/5 p-3">
       <p className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
         <Bluetooth className="h-4 w-4 text-[var(--accent)]" />
-        {isConnected ? 'Connected to this phone' : paired ? 'Paired, not connected' : 'Not paired with this phone'}
+        {isConnected ? 'Connected to this phone' : isPaired ? 'Paired, not connected' : 'Not paired with this phone'}
       </p>
       {gate && guardian && (
         <div className="mt-3 rounded-lg p-3" style={{ background: `color-mix(in srgb, ${VERDICT_STYLE[guardian.verdict].color} 14%, transparent)` }}>
@@ -65,7 +66,7 @@ export function NativeConnectPanel({ address, paired, connected, onDone, guardia
           className="mt-3 inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
         >
           {busy && <LoaderCircle className="h-3.5 w-3.5 animate-spin" />}
-          {busy ? 'Working…' : paired ? 'Connect' : 'Pair & connect'}
+          {busy ? (isPaired ? 'Connecting…' : 'Waiting for pairing… accept the prompt') : isPaired ? 'Connect' : 'Pair & connect'}
         </button>
       )}
       {outcome && <p role="status" className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{outcome.message}</p>}

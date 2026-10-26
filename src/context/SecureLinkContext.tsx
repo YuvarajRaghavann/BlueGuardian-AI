@@ -347,7 +347,8 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
       requireNative();
       patch({ mode: 'discovering', hosts: [] });
       try {
-        await secureLinkPlugin.discoverHosts({ durationMs: 15000 });
+        const started = await secureLinkPlugin.discoverHosts({ durationMs: 20000 });
+        if (started.warning) notify(started.warning, 'warning');
       } catch (error) {
         patch({ mode: 'idle' });
         throw error;
@@ -416,7 +417,7 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
     exportLog() {
       return logRef.current?.exportJson() ?? '{}';
     },
-  }), [patch, refreshPeers, refreshQuarantine, requireNative]);
+  }), [notify, patch, refreshPeers, refreshQuarantine, requireNative]);
 
   const value = useMemo(() => ({ ...state, ...actions }), [state, actions]);
   return <SecureLinkContext.Provider value={value}>{children}</SecureLinkContext.Provider>;
