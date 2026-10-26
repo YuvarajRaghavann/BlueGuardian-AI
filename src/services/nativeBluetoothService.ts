@@ -78,6 +78,8 @@ export type NativeBleScanOutcome =
 export async function scanNativeAndroidBle(
   onObservation: (observation: NativeBleObservation) => void,
   requestedDurationMs = 12000,
+  /** Called once Android has accepted the scan (after any permission prompt). */
+  onStarted?: () => void,
 ): Promise<NativeBleScanOutcome> {
   if (!isNativeAndroidApp()) {
     return { ok: false, error: 'Native Android Bluetooth scanning is only available inside the BlueGuardian APK.' };
@@ -127,6 +129,7 @@ export async function scanNativeAndroidBle(
       clearTimeout(startupTimeout);
       startupTimeout = undefined;
     }
+    onStarted?.();
     const actualDurationMs = Math.min(30000, Math.max(3000, started.durationMs || durationMs));
     const timeout = new Promise<NativeBleScanState>((resolve) => {
       safetyTimeout = setTimeout(() => resolve({

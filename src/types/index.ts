@@ -109,6 +109,8 @@ export interface BluetoothScanState {
   transport?: 'WEB_BLE_SELECTION' | 'ANDROID_BLE_SCAN' | 'ANDROID_CLASSIC_SCAN' | 'ANDROID_PAIRED_DEVICES' | 'ANDROID_COMBINED_SCAN';
   /** Current half of the sequential combined Android discovery pass. */
   scanStage?: 'BLE' | 'CLASSIC';
+  /** When the most recent scan began (ms). Devices seen since then are "around you now". */
+  startedAt?: number;
   error?: string;
 }
 

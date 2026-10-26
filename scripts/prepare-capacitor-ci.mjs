@@ -176,7 +176,7 @@ function writeNetworkSecurityConfig() {
 
 /**
  * Branding: BlueGuardian launcher icons (legacy + adaptive), splash screen and
- * colours, copied from native/android/res (rendered from branding/logo-mark.svg).
+ * colours, copied from native/android/res (rendered by branding/render_icons.py from branding/logo-source.png).
  */
 function copyDir(from, to) {
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
@@ -223,21 +223,21 @@ function installBranding() {
   write('values/bg_brand_colors.xml', [
     '<?xml version="1.0" encoding="utf-8"?>',
     '<resources>',
-    '    <color name="bg_splash">#0B1020</color>',
+    '    <color name="bg_splash">#0E1424</color>',
     '</resources>',
     '',
   ].join('\n'));
   write('values/ic_launcher_background.xml', [
     '<?xml version="1.0" encoding="utf-8"?>',
     '<resources>',
-    '    <color name="ic_launcher_background">#121A30</color>',
+    '    <color name="ic_launcher_background">#0057E7</color>',
     '</resources>',
     '',
   ].join('\n'));
   const adaptive = [
     '<?xml version="1.0" encoding="utf-8"?>',
     '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">',
-    '    <background android:drawable="@color/ic_launcher_background" />',
+    '    <background android:drawable="@mipmap/ic_launcher_background" />',
     '    <foreground android:drawable="@mipmap/ic_launcher_foreground" />',
     '</adaptive-icon>',
     '',

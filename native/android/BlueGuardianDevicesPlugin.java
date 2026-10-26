@@ -625,8 +625,9 @@ public class BlueGuardianDevicesPlugin extends Plugin {
                 // Android 12+ reserves this for system apps.
             }
         }
-        if (!asked && (type == BluetoothDevice.DEVICE_TYPE_LE || type == BluetoothDevice.DEVICE_TYPE_DUAL)) {
-            // Bonded BLE gadgets (and dual-mode devices) come up through a GATT link.
+        if (!asked && type == BluetoothDevice.DEVICE_TYPE_LE) {
+            // Bonded BLE-only gadgets come up through a GATT link. Dual-mode audio devices are
+            // not given one: a data link would show "Connected" while no audio is connected.
             openGatt(device, null);
             asked = true;
         }

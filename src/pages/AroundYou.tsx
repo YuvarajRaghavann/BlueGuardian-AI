@@ -13,6 +13,7 @@ import { guardianFor, useGuardianVersion } from '../intel/guardianStore';
 import { cn } from '../utils/cn';
 import { normalizeBluetoothName } from '../services/bluetoothService';
 import { Notice } from '../ui/kit';
+import { devicesAroundNow } from '../utils/aroundNow';
 
 type Filter = 'all' | 'safe' | 'caution' | 'unsafe';
 const FILTERS: Array<{ id: Filter; label: string }> = [
@@ -22,7 +23,6 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
   { id: 'unsafe', label: 'Unsafe' },
 ];
 
-const seen = (d: BluetoothDevice) => new Date(d.lastSeen).getTime();
 
 export function AroundYou() {
   const { state, scanCombinedDevices, scanRealDevices, refreshKnownDevices } = useBluetoothDevices();
@@ -48,8 +48,8 @@ export function AroundYou() {
     return state.devices.filter((d) => d.discoverySource === 'REAL'
       && !(d.id.startsWith('android-classic:') && d.address && combined.has(d.address.toLowerCase())));
   }, [state.devices]);
-  const lastScan = real.length ? Math.max(...real.map(seen)) : null;
-  const recent = real.filter((d) => d.paired || (lastScan !== null && lastScan - seen(d) < 10 * 60_000));
+  const nowIds = new Set(devicesAroundNow(real, state.scan.startedAt).map((d) => d.id));
+  const recent = real.filter((d) => d.paired || nowIds.has(d.id));
   // Nameless advertisers (rotating phone/beacon addresses) are hidden like Android settings does,
   // unless they are risky, paired, connected or recognised.
   const isNamed = (d: BluetoothDevice) => Boolean(normalizeBluetoothName(d.name)) || Boolean(d.paired) || d.connectionStatus === 'connected' || Boolean(d.familyLabel);

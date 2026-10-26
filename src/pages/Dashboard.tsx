@@ -16,9 +16,9 @@ import { LEVEL, score } from '../ui/trust';
 import { VERDICT_STYLE, type Verdict } from '../intel/guardian';
 import { guardianFor, useGuardianVersion } from '../intel/guardianStore';
 import { BottomSheet } from '../ui/BottomSheet';
+import { devicesAroundNow, lastScanTime } from '../utils/aroundNow';
 
 const ORDER: Verdict[] = ['safe', 'clear', 'caution', 'unsafe'];
-const seen = (d: BluetoothDevice) => new Date(d.lastSeen).getTime();
 
 function SectionTitle({ children, to }: { children: ReactNode; to?: string }) {
   return (
@@ -41,8 +41,8 @@ export function Dashboard() {
   const scanning = state.scan.state === 'scanning';
 
   const real = useMemo(() => state.devices.filter((d) => d.discoverySource === 'REAL'), [state.devices]);
-  const lastScan = real.length ? Math.max(...real.map(seen)) : null;
-  const around = real.filter((d) => lastScan !== null && lastScan - seen(d) < 5 * 60_000);
+  const lastScan = lastScanTime(real, state.scan.startedAt);
+  const around = devicesAroundNow(real, state.scan.startedAt);
   const yours = real.filter((d) => d.paired || d.trusted)
     .sort((a, b) => (b.connectionStatus === 'connected' ? 1 : 0) - (a.connectionStatus === 'connected' ? 1 : 0));
   const alerts = threatState.threats.filter((t) => t.status === 'ACTIVE' || t.status === 'INVESTIGATING');

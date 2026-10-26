@@ -389,12 +389,16 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Persist at most about once a second; a scan changes the list many times per second.
   useEffect(() => {
     const physicalDevices = state.devices.filter(device => device.discoverySource !== 'SIMULATED');
     if (physicalDevices.length === 0) return;
-    void localDatabase.saveDevices(physicalDevices).catch((error: unknown) => {
-      console.warn('Physical device state could not be persisted locally; the in-memory session remains active.', error);
-    });
+    const timer = setTimeout(() => {
+      void localDatabase.saveDevices(physicalDevices).catch((error: unknown) => {
+        console.warn('Physical device state could not be persisted locally; the in-memory session remains active.', error);
+      });
+    }, 1200);
+    return () => clearTimeout(timer);
   }, [state.devices]);
 
   // Load the owner's MongoDB device registry when an owner token is configured.
@@ -803,9 +807,6 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     device.riskLevel = assessment.trustRiskLevel;
     const guardedDevice = applySecurityPolicy(device);
     dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
-    void localDatabase.saveDevice(guardedDevice).catch((error: unknown) => {
-      console.warn('Combined Bluetooth observation could not be saved locally.', error);
-    });
   };
 
   /**
@@ -815,7 +816,12 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const registerKnownDevice = (known: KnownDevice) => {
     const address = String(known.address || '').trim();
     if (!address) return;
-    const now = new Date();
+    // Paired-but-disconnected devices are not "nearby now": keep the time Android last saw them.
+    const nativeSeen = known.lastSeen?.lastSeenAt ?? known.lastSeen?.lastDisconnectedAt ?? known.lastSeen?.lastConnectedAt;
+    const previous = state.devices.find((d) => d.id === 'android-combined:' + address.toLowerCase());
+    const now = known.connected
+      ? new Date()
+      : new Date(nativeSeen ?? (previous ? new Date(previous.lastSeen).getTime() : Date.now() - 6 * 3_600_000));
     const deviceName = resolveBluetoothDisplayName(known.name);
     const transports: Array<'BLE' | 'CLASSIC'> = known.type === 'LE' ? ['BLE'] : known.type === 'DUAL' ? ['BLE', 'CLASSIC'] : ['CLASSIC'];
     const device: BluetoothDevice = {
@@ -845,7 +851,6 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     device.riskLevel = assessment.trustRiskLevel;
     const guardedDevice = applySecurityPolicy(device);
     dispatch({ type: 'ADD_DEVICE', payload: guardedDevice });
-    void localDatabase.saveDevice(guardedDevice).catch(() => undefined);
   };
 
   const refreshKnownDevices = async (): Promise<void> => {
@@ -976,6 +981,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         source: 'REAL',
         transport: 'ANDROID_COMBINED_SCAN',
         scanStage: 'BLE',
+        startedAt,
         error: undefined,
       },
     });
@@ -985,73 +991,72 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     }, 200);
 
     try {
-      // Step 0: what Android already knows — paired devices and live connections.
-      try {
-        const { devices: known } = await myDevices.listKnownDevices();
+      // 1) BLE starts first and settles every permission prompt (Nearby devices + location).
+      // 2) As soon as it is scanning, classic discovery runs alongside it, the way Android's
+      //    own Bluetooth screen does, and paired / connected devices are read from Android.
+      //    Both radios get a full 12 s window: classic inquiry needs ~10 s plus name lookups.
+      // Each device is processed at most every 2.5 s; the radio repeats adverts ~1/s, and
+      // re-rendering and re-saving on every one made long scans sluggish.
+      const lastHandled = new Map<string, number>();
+      const throttled = (identity: string) => {
+        const now = Date.now();
+        const last = lastHandled.get(identity) ?? 0;
+        if (now - last < 2500) return true;
+        lastHandled.set(identity, now);
+        return false;
+      };
+
+      let markBleStarted: () => void = () => undefined;
+      const bleStarted = new Promise<void>((resolve) => { markBleStarted = resolve; });
+      const blePromise = scanNativeAndroidBle((observation) => {
+        const identity = String(observation.address || observation.id || '').trim().toLowerCase();
+        if (!identity) return;
+        observedIdentities.add(identity);
+        scanObservations.push({
+          address: identity,
+          name: observation.name,
+          rssi: observation.rssi,
+          transport: 'BLE',
+          advert: {
+            serviceUuids: observation.serviceUuids,
+            manufacturerData: observation.manufacturerData,
+            serviceData: observation.serviceData,
+          },
+        });
+        if (!throttled('ble:' + identity)) registerCombinedObservation(observation, 'BLE', combinedTransportHistory);
+      }, 12000, markBleStarted).finally(markBleStarted);
+
+      await bleStarted;
+
+      const knownPromise = myDevices.listKnownDevices().then(({ devices: known }) => {
         for (const item of known) {
           observedIdentities.add(item.address.toLowerCase());
           registerKnownDevice(item);
           scanObservations.push({ address: item.address, name: item.name, transport: 'PAIRED', paired: item.paired, connected: item.connected });
         }
-      } catch (error: unknown) {
+      }).catch((error: unknown) => {
         messages.push(error instanceof Error ? error.message : 'Couldn’t read paired devices.');
-      }
-
-      // The transports are intentionally sequential, not simultaneous. This avoids
-      // competing Android runtime-permission prompts and adapter discovery sessions
-      // while still presenting a single combined action and deduplicated results.
-      try {
-        const bleResult = await scanNativeAndroidBle((observation) => {
-          const identity = String(observation.address || observation.id || '').trim().toLowerCase();
-          if (identity) observedIdentities.add(identity);
-          registerCombinedObservation(observation, 'BLE', combinedTransportHistory);
-          if (identity) {
-            scanObservations.push({
-              address: identity,
-              name: observation.name,
-              rssi: observation.rssi,
-              transport: 'BLE',
-              advert: {
-                serviceUuids: observation.serviceUuids,
-                manufacturerData: observation.manufacturerData,
-                serviceData: observation.serviceData,
-              },
-            });
-          }
-        }, 9000);
-
-        if (bleResult.ok === false) {
-          bleError = bleResult.error;
-        } else {
-          if (bleResult.warning) messages.push(bleResult.warning);
-        }
-      } catch (error: unknown) {
-        bleError = error instanceof Error ? error.message : 'Unknown BLE discovery error.';
-      }
-
-      dispatch({
-        type: 'SET_SCAN_STATE',
-        payload: { state: 'scanning', transport: 'ANDROID_COMBINED_SCAN', scanStage: 'CLASSIC' },
       });
 
-      try {
-        const classicResult = await scanNativeAndroidClassic((observation) => {
-          const identity = String(observation.address || observation.id || '').trim().toLowerCase();
-          if (identity) observedIdentities.add(identity);
-          registerCombinedObservation(observation, 'CLASSIC', combinedTransportHistory);
-          if (identity) {
-            scanObservations.push({ address: identity, name: observation.name, rssi: observation.rssi, transport: 'CLASSIC', paired: observation.paired });
-          }
-        }, 9000);
+      dispatch({ type: 'SET_SCAN_STATE', payload: { state: 'scanning', transport: 'ANDROID_COMBINED_SCAN', scanStage: 'CLASSIC' } });
+      const classicPromise = scanNativeAndroidClassic((observation) => {
+        const identity = String(observation.address || observation.id || '').trim().toLowerCase();
+        if (!identity) return;
+        observedIdentities.add(identity);
+        scanObservations.push({ address: identity, name: observation.name, rssi: observation.rssi, transport: 'CLASSIC', paired: observation.paired });
+        // Classic results arrive once per device (again only when its name resolves), so no throttle.
+        registerCombinedObservation(observation, 'CLASSIC', combinedTransportHistory);
+      }, 12000);
 
-        if (classicResult.ok === false) {
-          classicError = classicResult.error;
-        } else {
-          if (classicResult.warning && !messages.includes(classicResult.warning)) messages.push(classicResult.warning);
-        }
-      } catch (error: unknown) {
-        classicError = error instanceof Error ? error.message : 'Unknown classic discovery error.';
-      }
+      const [bleResult, classicResult] = await Promise.all([
+        blePromise.catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : 'Bluetooth scan failed.' })),
+        classicPromise.catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : 'Nearby search failed.' })),
+        knownPromise,
+      ]);
+      if (bleResult.ok === false) bleError = bleResult.error;
+      else if (bleResult.warning) messages.push(bleResult.warning);
+      if (classicResult.ok === false) classicError = classicResult.error;
+      else if (classicResult.warning && !messages.includes(classicResult.warning)) messages.push(classicResult.warning);
 
       void locationPromise.then((location) => {
         try {
