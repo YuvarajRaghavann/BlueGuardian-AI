@@ -71,7 +71,6 @@ function playFindingSound(seconds = 10): () => void {
 
 function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => void }) {
   const [rssi, setRssi] = useState<number | null>(null);
-  const [via, setVia] = useState<string | null>(null);
   const [lastAt, setLastAt] = useState<number | null>(null);
   const [connected, setConnected] = useState(device.connected);
   const [error, setError] = useState<string | null>(null);
@@ -86,7 +85,6 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
       myDevices.addListener('proximity', (e) => {
         if (cancelled) return;
         setRssi((prev) => (prev === null ? e.rssi : Math.round(prev * 0.5 + e.rssi * 0.5)));
-        setVia(e.via);
         setLastAt(e.at);
       }),
       myDevices.addListener('proximityState', () => { if (!cancelled) setRunning(false); }),
