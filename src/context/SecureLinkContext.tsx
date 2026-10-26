@@ -61,6 +61,7 @@ interface SecureLinkActions {
   startHosting(): Promise<void>;
   stopHosting(): Promise<void>;
   discover(): Promise<void>;
+  stopDiscovery(): Promise<void>;
   connectTo(host: DiscoveredHost): Promise<void>;
   confirmCode(match: boolean): Promise<void>;
   sendChat(text: string): Promise<void>;
@@ -233,7 +234,7 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
         onPhase: (phase, detail) => {
           patch((s) => ({ phase, mode: phase === 'closed' ? 'idle' : 'session', hostCode: phase === 'closed' ? null : s.hostCode }));
           if (phase === 'closed') {
-            if (detail && detail !== 'closed by user') notify(`Secure link closed: ${detail}.`, 'info');
+            if (detail && detail !== 'closed by user') notify(`Disconnected (${detail}).`, 'info');
             refreshPeers();
             void secureLinkPlugin.stopHosting().catch(() => undefined);
           }
@@ -268,7 +269,7 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
             const session = createSession(role);
             void session.start();
           } catch (error) {
-            notify(error instanceof Error ? error.message : 'Could not start the secure session.', 'danger');
+            notify(error instanceof Error ? error.message : 'Couldn’t start the connection.', 'danger');
             void secureLinkPlugin.disconnect();
           }
         } else if (event.state === 'closed') {
@@ -353,6 +354,10 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
         patch({ mode: 'idle' });
         throw error;
       }
+    },
+    async stopDiscovery() {
+      await secureLinkPlugin.stopDiscovery().catch(() => undefined);
+      patch({ mode: 'idle', hosts: [] });
     },
     async connectTo(host: DiscoveredHost) {
       requireNative();

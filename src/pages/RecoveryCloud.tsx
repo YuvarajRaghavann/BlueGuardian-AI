@@ -1,12 +1,30 @@
-import { useEffect, useState } from 'react';
-import { Bluetooth, LockKeyhole, MapPin, RefreshCw, ShieldCheck } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import {
+  Bell, Bluetooth, CheckCircle, ChevronRight, Clock, HandHeart, Headphones, LockKeyhole, LogOut, MapPin,
+  Plus, Radar, RefreshCw, Search, ShieldCheck, Smartphone, Users,
+} from 'lucide-react';
+import { formatDistanceToNow } from 'date-fns';
 import { api, type RecoveryDeviceRecord, type RecoveryEncounterRecord, type RecoveryInfoRecord } from '../services/api';
-import { setOwnerToken as setActiveOwnerToken } from '../services/ownerSession';
+import { setOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
-import { currentFirebaseEmail, getFreshFirebaseIdToken, sendFirebasePasswordResetEmail } from '../services/firebaseAuth';
-import { signIn as accountSignIn, signOut as accountSignOut } from '../services/accountSession';
+import { getFreshFirebaseIdToken, sendFirebasePasswordResetEmail } from '../services/firebaseAuth';
+import { signIn as accountSignIn, signOut as accountSignOut, useAccount } from '../services/accountSession';
 import { isNativeAndroidApp, listNativeAndroidPairedDevices, scanNativeAndroidBle, scanNativeAndroidClassic } from '../services/nativeBluetoothService';
 import { myDevices } from '../services/myDevices';
+import { BottomSheet } from '../ui/BottomSheet';
+import { Button, Card, Empty, Field, Notice, Pill, SectionTitle, StepTrack, Toggle, errorText, type NoticeTone } from '../ui/kit';
+import { cn } from '../utils/cn';
+
+type CaseState = RecoveryDeviceRecord['recoveryState'];
+const STEPS: CaseState[] = ['lost', 'searching', 'found', 'recovered'];
+const STEP_LABEL: Record<CaseState, string> = { lost: 'Lost', searching: 'Searching', found: 'Found', recovered: 'Recovered' };
+const STEP_COLOR: Record<CaseState, string> = { lost: 'var(--danger)', searching: 'var(--warning)', found: 'var(--accent)', recovered: 'var(--success)' };
+
+export interface CommunityPrefill {
+  address: string;
+  name?: string;
+}
 
 /**
  * One location fix for an explicitly opted-in report. In the Android app the native
@@ -24,875 +42,671 @@ async function currentPosition(): Promise<{ lat: number; lng: number }> {
       // fall back to the WebView below
     }
   }
-  if (typeof navigator === 'undefined' || !navigator.geolocation) {
-    throw new Error('Location services are not available on this device.');
-  }
+  if (typeof navigator === 'undefined' || !navigator.geolocation) throw new Error('Location isn’t available on this device.');
   const position = await new Promise<GeolocationPosition>((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 });
   });
   return { lat: position.coords.latitude, lng: position.coords.longitude };
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return 'Not recorded';
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? 'Not recorded' : date.toLocaleString();
+async function token(): Promise<string> {
+  const t = await getFreshFirebaseIdToken();
+  if (!t) throw new Error('Your session expired. Sign in again.');
+  setOwnerToken(t);
+  return t;
 }
 
-/** Optional cloud recovery: account, registered cases, community search. */
-export function RecoveryCloud() {
-  const [ownerToken, setOwnerToken] = useState(''); // Current Firebase ID token, never rendered in the UI.
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [firebaseSignedInEmail, setFirebaseSignedInEmail] = useState<string | null>(null);
-  const [deviceName, setDeviceName] = useState('');
-  const [selectedBluetoothDevice, setSelectedBluetoothDevice] = useState<BluetoothDeviceInfo | null>(null);
-  const [availableNativeDevices, setAvailableNativeDevices] = useState<BluetoothDeviceInfo[]>([]);
-  const [devices, setDevices] = useState<RecoveryDeviceRecord[]>([]);
-  const [devicesLoaded, setDevicesLoaded] = useState(false);
-  const [selectedDevice, setSelectedDevice] = useState<RecoveryDeviceRecord | null>(null);
-  const [recoveryInfo, setRecoveryInfo] = useState<RecoveryInfoRecord | null>(null);
-  const [encounters, setEncounters] = useState<RecoveryEncounterRecord[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [shareLocation, setShareLocation] = useState(false);
-  const [communityShareLocation, setCommunityShareLocation] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+const mapsUrl = (lat: number, lng: number) => `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+const when = (iso?: string | null) => (iso ? formatDistanceToNow(new Date(iso), { addSuffix: true }) : null);
 
-  // Already signed in from the welcome screen or a saved session: load cases straight away.
-  useEffect(() => {
-    const signedIn = currentFirebaseEmail();
-    if (!signedIn) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const token = await getFreshFirebaseIdToken();
-        if (!token || cancelled) return;
-        setOwnerToken(token);
-        setActiveOwnerToken(token);
-        setFirebaseSignedInEmail(signedIn);
-        const loaded = await api.recovery.listDevices(token);
-        if (!cancelled) { setDevices(loaded); setDevicesLoaded(true); }
-      } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : 'Could not load your recovery cases.');
-      }
-    })();
-    return () => { cancelled = true; };
+/** Community recovery: report a lost device, follow sightings, and help others. */
+export function RecoveryCloud({ prefill, onPrefillUsed }: { prefill?: CommunityPrefill | null; onPrefillUsed?: () => void }) {
+  const account = useAccount();
+  const signedIn = account.status === 'signed-in' && Boolean(account.email);
+  const [cases, setCases] = useState<RecoveryDeviceRecord[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ tone: NoticeTone; text: string } | null>(null);
+  const [openCase, setOpenCase] = useState<RecoveryDeviceRecord | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportPrefill, setReportPrefill] = useState<CommunityPrefill | null>(null);
+
+  const loadCases = useCallback(async () => {
+    setLoading(true);
+    try {
+      setCases(await api.recovery.listDevices(await token()));
+      setLoaded(true);
+    } catch (e) {
+      setMessage({ tone: 'danger', text: errorText(e, 'Couldn’t load your lost devices.') });
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const requireToken = () => {
-    if (!ownerToken.trim()) {
-      setError('Sign in to BlueGuardian with your Firebase email and password first.');
-      return false;
-    }
-    return true;
-  };
+  useEffect(() => {
+    if (signedIn) void loadCases();
+    else { setCases([]); setLoaded(false); }
+  }, [signedIn, loadCases]);
 
-  const loadDevices = async () => {
-    if (!requireToken()) return;
-    const token = ownerToken.trim();
-    setBusy(true);
-    setError(null);
-    setNotice(null);
+  // "Ask the community" from My devices opens the report sheet with that device chosen.
+  useEffect(() => {
+    if (!prefill || !signedIn) return;
+    setReportPrefill(prefill);
+    setReportOpen(true);
+    onPrefillUsed?.();
+  }, [prefill, signedIn, onPrefillUsed]);
+
+  const active = cases.filter((c) => c.recoveryState !== 'recovered');
+  const closed = cases.filter((c) => c.recoveryState === 'recovered');
+  const openReport = () => { setReportPrefill(null); setReportOpen(true); };
+
+  return (
+    <div className="space-y-5">
+      <HowItWorks />
+
+      {message && <Notice tone={message.tone} onDismiss={() => setMessage(null)}>{message.text}</Notice>}
+
+      {!signedIn ? (
+        <SignInCard restoring={account.status === 'restoring'} />
+      ) : (
+        <>
+          <section>
+            <SectionTitle action={
+              <button type="button" onClick={() => void loadCases()} aria-label="Refresh" className="tap rounded-full p-2 text-[var(--text-muted)]">
+                <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+              </button>
+            }>Your lost devices</SectionTitle>
+            {active.length === 0 ? (
+              <Empty icon={<ShieldCheck className="h-6 w-6" />} title={loaded ? 'Nothing reported' : 'Loading…'}
+                action={<Button icon={<Plus className="h-4 w-4" />} onClick={openReport}>Report a lost device</Button>}>
+                {loaded ? 'Lose something? Report it here and nearby BlueGuardian phones will look for it.' : undefined}
+              </Empty>
+            ) : (
+              <div className="space-y-3">
+                {active.map((c) => <CaseCard key={c.deviceId} record={c} onOpen={() => setOpenCase(c)} />)}
+                <Button tone="secondary" className="w-full" icon={<Plus className="h-4 w-4" />} onClick={openReport}>Report another device</Button>
+              </div>
+            )}
+            {closed.length > 0 && (
+              <div className="mt-3 divide-y divide-[var(--border)] overflow-hidden rounded-3xl bg-[var(--surface)]">
+                {closed.map((c) => (
+                  <button key={c.deviceId} type="button" onClick={() => setOpenCase(c)} className="tap flex w-full items-center gap-3 px-4 py-3 text-left">
+                    <CheckCircle className="h-5 w-5 text-[var(--success)]" />
+                    <span className="min-w-0 flex-1 truncate text-sm font-semibold">{c.name}</span>
+                    <span className="text-xs text-[var(--text-muted)]">Recovered</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <HelpOthersCard onResult={setMessage} />
+
+          <div className="flex items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
+            <span className="flex min-w-0 items-center gap-2 text-sm text-[var(--text-secondary)]">
+              <LockKeyhole className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+              <span className="truncate">{account.email}</span>
+            </span>
+            <button type="button" onClick={() => accountSignOut()} className="tap flex items-center gap-1.5 text-sm font-semibold text-[var(--text-muted)]">
+              <LogOut className="h-4 w-4" /> Sign out
+            </button>
+          </div>
+        </>
+      )}
+
+      <ReportSheet
+        open={reportOpen}
+        prefill={reportPrefill}
+        onClose={() => setReportOpen(false)}
+        onReported={(record) => {
+          setCases((current) => [record, ...current.filter((c) => c.deviceId !== record.deviceId)]);
+          setReportOpen(false);
+          setMessage({ tone: 'success', text: `${record.name} is reported lost. Sightings will appear here.` });
+        }}
+      />
+
+      <CaseSheet
+        record={openCase}
+        onClose={() => setOpenCase(null)}
+        onChanged={(record) => {
+          setCases((current) => current.map((c) => (c.deviceId === record.deviceId ? record : c)));
+          setOpenCase(record);
+        }}
+      />
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ pieces
+
+function HowItWorks() {
+  const reduce = useReducedMotion();
+  const steps = [
+    { icon: Bell, title: 'Report', text: 'Mark your device lost' },
+    { icon: Users, title: 'Search', text: 'Nearby phones look for it' },
+    { icon: MapPin, title: 'Get alerted', text: 'See when and where' },
+  ];
+  return (
+    <Card tone="accent">
+      <p className="text-[15px] font-bold">Community search</p>
+      <p className="mt-0.5 text-[13px] text-[var(--text-secondary)]">Other BlueGuardian users help find your device. Only you see the results.</p>
+      <div className="mt-4 grid grid-cols-3 gap-2">
+        {steps.map((s, i) => (
+          <motion.div key={s.title} className="relative flex flex-col items-center text-center"
+            initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 * i }}>
+            {i > 0 && <span className="absolute right-1/2 top-5 mr-5 h-0.5 w-[calc(100%-2.5rem)] bg-[var(--border-strong)]" />}
+            <span className="relative grid h-10 w-10 place-items-center rounded-2xl bg-[var(--bg-elevated)] text-[var(--accent)]"><s.icon className="h-5 w-5" /></span>
+            <span className="mt-2 text-[13px] font-bold">{s.title}</span>
+            <span className="text-[11px] leading-4 text-[var(--text-muted)]">{s.text}</span>
+          </motion.div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function SignInCard({ restoring }: { restoring: boolean }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState<null | 'sign-in' | 'sign-up' | 'reset'>(null);
+  const [message, setMessage] = useState<{ tone: NoticeTone; text: string } | null>(null);
+
+  const submit = async (mode: 'sign-in' | 'sign-up') => {
+    if (!email.trim() || !password) { setMessage({ tone: 'warning', text: 'Enter your email and password.' }); return; }
+    setBusy(mode);
+    setMessage(null);
     try {
-      const freshToken = await getFreshFirebaseIdToken() ?? token;
-      const loadedDevices = await api.recovery.listDevices(freshToken);
-      // Only publish the credential to the rest of the app after a protected
-      // owner request succeeds. The session helper holds it in memory only.
-      setOwnerToken(freshToken);
-      setActiveOwnerToken(freshToken);
-      setDevices(loadedDevices);
-      setDevicesLoaded(true);
-      if (selectedDevice) {
-        const refreshedSelection = loadedDevices.find(device => device.deviceId === selectedDevice.deviceId);
-        if (refreshedSelection) {
-          setSelectedDevice(refreshedSelection);
-        } else {
-          setSelectedDevice(null);
-          setRecoveryInfo(null);
-          setEncounters([]);
-        }
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to load the owner device list.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const authenticateWithFirebase = async (mode: 'sign-in' | 'sign-up') => {
-    if (!email.trim() || !password) {
-      setError('Enter your email address and password.');
-      return;
-    }
-
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    setActiveOwnerToken(null);
-    try {
-      // Shared account session: also keeps you signed in (Keystore-protected) across launches.
-      const signedInEmail = await accountSignIn(mode, email, password);
-      const session = { email: signedInEmail, idToken: (await getFreshFirebaseIdToken()) ?? '' };
-
-      setOwnerToken(session.idToken);
-      setFirebaseSignedInEmail(session.email);
+      await accountSignIn(mode, email, password);
       setPassword('');
-
-      try {
-        const freshToken = await getFreshFirebaseIdToken() ?? session.idToken;
-        const loadedDevices = await api.recovery.listDevices(freshToken);
-        setOwnerToken(freshToken);
-        setActiveOwnerToken(freshToken);
-        setDevices(loadedDevices);
-        setDevicesLoaded(true);
-        setSelectedDevice(null);
-        setRecoveryInfo(null);
-        setEncounters([]);
-        setNotice(`Signed in as ${session.email}. Your owner-authorized recovery records loaded successfully.`);
-      } catch (caught) {
-        setError(`Firebase sign-in succeeded, but the backend request failed: ${errorMessage(caught)}`);
-        setNotice('Firebase accepted your account sign-in. The Render backend must also be deployed with Firebase token verification enabled.');
-      }
-    } catch (caught) {
-      setError(errorMessage(caught));
+    } catch (e) {
+      setMessage({ tone: 'danger', text: errorText(e, 'Sign-in failed.') });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const handleFirebasePasswordReset = async () => {
-    if (!email.trim()) {
-      setError('Enter your email address first, then tap Forgot password.');
-      return;
-    }
-
-    setBusy(true);
-    setError(null);
-    setNotice(null);
+  const reset = async () => {
+    if (!email.trim()) { setMessage({ tone: 'warning', text: 'Enter your email first.' }); return; }
+    setBusy('reset');
     try {
-      const targetEmail = await sendFirebasePasswordResetEmail(email);
-      setNotice(`If a BlueGuardian Firebase account exists for ${targetEmail}, a password-reset email has been requested. Check Inbox and Spam, follow the link, then return here and sign in with the new password.`);
-    } catch (caught) {
-      setError(errorMessage(caught));
+      await sendFirebasePasswordResetEmail(email);
+      setMessage({ tone: 'success', text: 'If that email has an account, a reset link is on its way.' });
+    } catch (e) {
+      setMessage({ tone: 'danger', text: errorText(e, 'Couldn’t send the email.') });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const handleFirebaseSignOut = () => {
-    accountSignOut();
-    setActiveOwnerToken(null);
-    setOwnerToken('');
-    setFirebaseSignedInEmail(null);
-    setPassword('');
-    setDevices([]);
-    setDevicesLoaded(false);
-    setSelectedDevice(null);
-    setRecoveryInfo(null);
-    setEncounters([]);
-    setError(null);
-    setNotice('You have signed out of BlueGuardian.');
-  };
+  return (
+    <Card title="Sign in to continue" subtitle="Your account keeps your reports private." icon={<LockKeyhole className="h-5 w-5" />}>
+      {restoring ? (
+        <Notice>Signing you in…</Notice>
+      ) : (
+        <div className="space-y-3">
+          <Field label="Email" type="email" inputMode="email" autoComplete="email" value={email} onChange={setEmail} disabled={Boolean(busy)} />
+          <Field label="Password" type="password" autoComplete="current-password" value={password} onChange={setPassword} disabled={Boolean(busy)} onEnter={() => void submit('sign-in')} />
+          {message && <Notice tone={message.tone}>{message.text}</Notice>}
+          <div className="grid grid-cols-2 gap-2">
+            <Button busy={busy === 'sign-in'} disabled={Boolean(busy)} onClick={() => void submit('sign-in')}>Sign in</Button>
+            <Button tone="secondary" busy={busy === 'sign-up'} disabled={Boolean(busy)} onClick={() => void submit('sign-up')}>Create account</Button>
+          </div>
+          <button type="button" onClick={() => void reset()} disabled={Boolean(busy)} className="w-full text-center text-sm font-semibold text-[var(--accent)]">Forgot password?</button>
+        </div>
+      )}
+    </Card>
+  );
+}
 
-  const selectBluetoothDevice = async () => {
-    setError(null);
-    setNotice(null);
-    setSelectedBluetoothDevice(null);
-    setAvailableNativeDevices([]);
+function CaseCard({ record, onOpen }: { record: RecoveryDeviceRecord; onOpen: () => void }) {
+  const step = STEPS.indexOf(record.recoveryState);
+  const color = STEP_COLOR[record.recoveryState];
+  return (
+    <button type="button" onClick={onOpen} className="tap block w-full rounded-3xl bg-[var(--surface)] p-4 text-left">
+      <div className="flex items-center gap-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl" style={{ background: `color-mix(in srgb, ${color} 16%, transparent)`, color }}>
+          <Headphones className="h-5 w-5" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[15px] font-bold">{record.name}</span>
+          <span className="block text-xs text-[var(--text-muted)]">{record.registeredAt ? `Reported ${when(record.registeredAt)}` : 'Reported'}</span>
+        </span>
+        <Pill color={color}>{STEP_LABEL[record.recoveryState]}</Pill>
+        <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+      </div>
+      <div className="mt-4">
+        <StepTrack steps={STEPS.map((s) => STEP_LABEL[s])} current={step < 0 ? 0 : step} color={color} />
+      </div>
+    </button>
+  );
+}
 
-    if (isNativeAndroidApp()) {
-      setBusy(true);
-      try {
-        const records = new Map<string, BluetoothDeviceInfo>();
-        const addRecord = (record: BluetoothDeviceInfo) => {
-          const id = String(record.address || record.id || '').trim();
-          if (!id) return;
-          const key = id.toLowerCase();
-          const existing = records.get(key);
-          records.set(key, {
-            ...existing,
-            ...record,
-            id,
-            address: id,
-            name: record.name?.trim() || existing?.name,
-            rssi: typeof record.rssi === 'number' ? record.rssi : existing?.rssi,
-            uuids: record.uuids ?? existing?.uuids ?? [],
-            source: 'native',
-            paired: Boolean(record.paired || existing?.paired),
-            transport: record.transport ?? existing?.transport ?? 'BLE',
-          });
-        };
+function HelpOthersCard({ onResult }: { onResult: (m: { tone: NoticeTone; text: string }) => void }) {
+  const [shareLocation, setShareLocation] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const native = isNativeAndroidApp();
 
-        let pairedListError: string | undefined;
+  const scan = async () => {
+    setBusy(true);
+    try {
+      const candidates = new Map<string, { name: string; serviceUuids: string[] }>();
+      const ble = await scanNativeAndroidBle((o) => {
+        const name = o.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
+        if (!name) return;
+        const serviceUuids = [...new Set((o.serviceUuids ?? []).map((u) => u.trim().toLowerCase()).filter(Boolean))].sort();
+        const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids });
+        if (!candidates.has(key)) candidates.set(key, { name, serviceUuids });
+      }, 10000);
+      // Many earbuds and speakers only appear in classic discovery.
+      const classic = await scanNativeAndroidClassic((o) => {
+        const name = o.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
+        if (!name) return;
+        const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids: [] });
+        if (!candidates.has(key)) candidates.set(key, { name, serviceUuids: [] });
+      }, 10000);
+      const observations = Array.from(candidates.values()).slice(0, 30);
+      if (observations.length === 0) {
+        onResult(ble.ok || classic.ok
+          ? { tone: 'info', text: 'No named devices nearby right now. Nothing was sent.' }
+          : { tone: 'danger', text: (ble.ok ? '' : ble.error) || (classic.ok ? '' : classic.error) || 'The scan failed.' });
+        return;
+      }
+      let location: { lat: number; lng: number } | undefined;
+      if (shareLocation) {
         try {
-          const paired = await listNativeAndroidPairedDevices();
-          for (const device of paired) {
-            addRecord({
-              id: device.address || device.id,
-              address: device.address || device.id,
-              name: device.name,
-              rssi: device.rssi,
-              uuids: [],
-              source: 'native',
-              transport: 'PAIRED',
-              paired: true,
-            });
-          }
-        } catch (caught) {
-          pairedListError = errorMessage(caught);
+          location = await currentPosition();
+        } catch (e) {
+          onResult({ tone: 'warning', text: `Couldn’t get your location (${errorText(e)}). Nothing was sent.` });
+          return;
         }
-
-        const scan = await scanNativeAndroidBle((observation) => {
-          const id = String(observation.address || observation.id || '').trim();
-          if (!id) return;
-          addRecord({
-            id,
-            address: id,
-            name: observation.name,
-            rssi: observation.rssi,
-            uuids: observation.serviceUuids ?? [],
-            source: 'native',
-            transport: 'BLE',
-            paired: records.get(id.toLowerCase())?.paired ?? false,
-          });
-        }, 8000);
-
-        const available = Array.from(records.values()).sort((a, b) => {
-          if (Boolean(a.paired) !== Boolean(b.paired)) return a.paired ? -1 : 1;
-          if (typeof a.name === 'string' && typeof b.name === 'string') return a.name.localeCompare(b.name);
-          return a.id.localeCompare(b.id);
-        });
-        setAvailableNativeDevices(available);
-
-        if (available.length === 0) {
-          const details = [scan.ok ? scan.message : scan.error, pairedListError].filter(Boolean).join(' ');
-          setError(details || 'No Bluetooth devices were found. Keep the target nearby and advertising, and check Android Bluetooth permissions.');
-        } else {
-          const scanSummary = scan.ok
-            ? `Found ${scan.devicesFound} nearby Bluetooth device(s).`
-            : `Could not search for nearby devices: ${scan.error}`;
-          setNotice(`Found ${available.length} available or paired Bluetooth device(s). Choose one below. ${scanSummary} ${pairedListError ? 'The paired-device list was unavailable.' : ''}`);
-        }
-      } catch (caught) {
-        setError(`Could not find nearby devices: ${errorMessage(caught)}`);
-      } finally {
-        setBusy(false);
       }
-      return;
+      const result = await api.recovery.submitCommunitySightings(await token(), { observations, shareLocation, ...(location ? { location } : {}) });
+      const n = result.observationsReceived;
+      onResult({ tone: 'success', text: `Thanks for helping. ${n} nearby device${n === 1 ? '' : 's'} checked against lost reports.` });
+    } catch (e) {
+      onResult({ tone: 'danger', text: errorText(e) });
+    } finally {
+      setBusy(false);
     }
-
-    const result = await requestBluetoothDevice();
-    if (result.ok === false) {
-      setError(result.error);
-      return;
-    }
-    setSelectedBluetoothDevice({ ...result.device, source: 'web', transport: 'WEB' });
-    setDeviceName(result.device.name ?? '');
-    setNotice(`Selected ${result.device.name ?? 'Bluetooth device'} in the browser picker. Browser IDs are origin-scoped and do not provide location or background scan access.`);
   };
 
-  const registerDevice = async () => {
-    if (!requireToken()) return;
-    const token = ownerToken.trim();
-    if (!selectedBluetoothDevice) {
-      setError('Select a real device with the browser Bluetooth picker before registering it.');
-      return;
-    }
+  return (
+    <Card title="Help others" subtitle="Check nearby devices against lost reports. Owners stay anonymous." icon={<HandHeart className="h-5 w-5" />}>
+      <div className="space-y-3">
+        <Toggle checked={shareLocation} onChange={setShareLocation} disabled={busy} label="Include my location" hint="Helps the owner find the spot." />
+        <Button className="w-full" busy={busy} disabled={!native} icon={<Radar className="h-4 w-4" />} onClick={() => void scan()}>
+          {busy ? 'Scanning…' : 'Scan and help'}
+        </Button>
+        {!native && <p className="text-center text-xs text-[var(--text-muted)]">Available in the Android app.</p>}
+      </div>
+    </Card>
+  );
+}
 
-    const name = deviceName.trim() || selectedBluetoothDevice.name?.trim();
-    if (!name) {
-      setError('Enter a name for this device.');
-      return;
-    }
+// ------------------------------------------------------------ report sheet
 
-    setBusy(true);
+function mergeOption(map: Map<string, BluetoothDeviceInfo>, record: BluetoothDeviceInfo) {
+  const id = String(record.address || record.id || '').trim();
+  if (!id) return;
+  const prev = map.get(id.toLowerCase());
+  map.set(id.toLowerCase(), {
+    ...prev, ...record, id, address: id, source: 'native',
+    name: record.name?.trim() || prev?.name,
+    rssi: typeof record.rssi === 'number' ? record.rssi : prev?.rssi,
+    uuids: record.uuids?.length ? record.uuids : prev?.uuids ?? [],
+    paired: Boolean(record.paired || prev?.paired),
+    transport: prev?.transport === 'PAIRED' ? 'PAIRED' : record.transport,
+  });
+}
+
+function ReportSheet({ open, prefill, onClose, onReported }: {
+  open: boolean;
+  prefill: CommunityPrefill | null;
+  onClose: () => void;
+  onReported: (record: RecoveryDeviceRecord) => void;
+}) {
+  const native = isNativeAndroidApp();
+  const [options, setOptions] = useState<BluetoothDeviceInfo[]>([]);
+  const [selected, setSelected] = useState<BluetoothDeviceInfo | null>(null);
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState<null | 'paired' | 'scan' | 'save'>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadPaired = useCallback(async () => {
+    if (!native) return;
+    setBusy('paired');
     setError(null);
-    setNotice(null);
     try {
-      const identifier = selectedBluetoothDevice.address || selectedBluetoothDevice.id;
-      const registered = await api.recovery.registerDevice(token, {
+      const map = new Map<string, BluetoothDeviceInfo>();
+      for (const d of await listNativeAndroidPairedDevices()) {
+        mergeOption(map, { id: d.address, address: d.address, name: d.name, uuids: [], transport: 'PAIRED', paired: true });
+      }
+      setOptions(Array.from(map.values()));
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [native]);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelected(null);
+    setLabel('');
+    setError(null);
+    if (prefill) {
+      setSelected({ id: prefill.address, address: prefill.address, name: prefill.name, uuids: [], transport: 'PAIRED', paired: true, source: 'native' });
+      setLabel(prefill.name ?? '');
+    }
+    void loadPaired();
+  }, [open, prefill, loadPaired]);
+
+  const searchNearby = async () => {
+    setError(null);
+    if (!native) {
+      const result = await requestBluetoothDevice();
+      if (result.ok === false) { setError(result.error); return; }
+      const picked: BluetoothDeviceInfo = { ...result.device, source: 'web', transport: 'WEB' };
+      setSelected(picked);
+      setLabel(picked.name ?? '');
+      return;
+    }
+    setBusy('scan');
+    try {
+      const map = new Map(options.map((o) => [String(o.address || o.id).toLowerCase(), o]));
+      const outcome = await scanNativeAndroidBle((o) => {
+        mergeOption(map, { id: o.address || o.id, address: o.address || o.id, name: o.name, rssi: o.rssi, uuids: o.serviceUuids ?? [], transport: 'BLE', paired: false });
+      }, 8000);
+      setOptions(Array.from(map.values()));
+      if (!outcome.ok) setError(outcome.error);
+      else if (outcome.warning) setError(outcome.warning);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const report = async () => {
+    if (!selected) return;
+    const name = label.trim() || selected.name?.trim();
+    if (!name) { setError('Give the device a name.'); return; }
+    setBusy('save');
+    setError(null);
+    try {
+      const identifier = selected.address || selected.id;
+      const record = await api.recovery.registerDevice(await token(), {
         deviceId: identifier,
         deviceIdentifier: identifier,
         deviceName: name,
         type: 'unknown',
         discoverySource: 'REAL',
         recoveryState: 'lost',
-        ...(selectedBluetoothDevice.name
-          ? { recoveryFingerprint: { name: selectedBluetoothDevice.name, serviceUuids: selectedBluetoothDevice.uuids ?? [] } }
-          : {}),
+        ...(selected.name ? { recoveryFingerprint: { name: selected.name, serviceUuids: selected.uuids ?? [] } } : {}),
       });
-      setSelectedDevice(registered);
-      setDevices(current => [registered, ...current.filter(item => item.deviceId !== registered.deviceId)]);
-      setDevicesLoaded(true);
-      setSelectedBluetoothDevice(null);
-      setRecoveryInfo(null);
-      setEncounters([]);
-      const fingerprintReady = Boolean(selectedBluetoothDevice.name);
-      setNotice(`${selectedBluetoothDevice.source === 'native'
-        ? 'Device registration was saved by the backend using the Android-reported Bluetooth address. Addresses may be randomized and are not guaranteed to be a universal hardware identity.'
-        : 'Device registration was saved by the backend using a browser-scoped identifier, which is not a universal hardware identity.'} ${fingerprintReady
-          ? (selectedBluetoothDevice.uuids?.length ?? 0) > 0
-            ? 'A name + BLE service fingerprint was registered for community candidate matching; it is not a unique hardware identity, so sightings remain unverified leads.'
-            : 'A name-only recovery fingerprint was registered. It is a weak match and may produce false candidates; owner confirmation is required.'
-          : 'Community matching is not enabled because no advertised device name was available.'}`);
-      try {
-        await loadRecoveryInfo(registered, token);
-      } catch (refreshError) {
-        setError(`Registration succeeded, but its recovery details could not be loaded: ${errorMessage(refreshError)}`);
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to register the device.');
+      onReported(record);
+    } catch (e) {
+      setError(errorText(e, 'Couldn’t report the device.'));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const loadRecoveryInfo = async (device: RecoveryDeviceRecord, token = ownerToken.trim()) => {
-    const [info, reports] = await Promise.all([
-      api.recovery.getRecoveryInfo(token, device.deviceId),
-      api.recovery.listEncounters(token, device.deviceId),
-    ]);
-    setSelectedDevice(device);
-    setRecoveryInfo(info);
-    setEncounters(reports);
-  };
+  const named = options
+    .filter((o) => o.name)
+    .sort((a, b) => Number(Boolean(b.paired)) - Number(Boolean(a.paired)) || (b.rssi ?? -200) - (a.rssi ?? -200));
 
-  const refreshRecoveryInfo = async (device = selectedDevice) => {
-    if (!requireToken() || !device) return;
-    setBusy(true);
-    setError(null);
-    setNotice(null);
+  return (
+    <BottomSheet open={open} onClose={onClose} label="Report a lost device">
+      <div className="space-y-4 px-5 pb-8 pt-1">
+        <div>
+          <h2 className="text-lg font-bold">Report a lost device</h2>
+          <p className="mt-0.5 text-sm text-[var(--text-muted)]">{selected ? 'Check the name, then report it.' : 'Choose the device you lost.'}</p>
+        </div>
+
+        {!selected ? (
+          <>
+            {busy === 'paired' ? (
+              <Notice>Loading your devices…</Notice>
+            ) : named.length > 0 ? (
+              <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-3xl bg-[var(--surface)]">
+                {named.map((o) => (
+                  <li key={o.id}>
+                    <button type="button" onClick={() => { setSelected(o); setLabel(o.name ?? ''); }} className="tap flex w-full items-center gap-3 px-4 py-3 text-left">
+                      <span className="grid h-10 w-10 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
+                        {o.paired ? <Bluetooth className="h-5 w-5" /> : <Smartphone className="h-5 w-5" />}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[15px] font-semibold">{o.name}</span>
+                        <span className="block text-xs text-[var(--text-muted)]">{o.paired ? 'Paired with this phone' : 'Nearby now'}</span>
+                      </span>
+                      <ChevronRight className="h-4 w-4 text-[var(--text-muted)]" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Empty icon={<Bluetooth className="h-6 w-6" />} title="No devices yet">Pair the device first, or search nearby.</Empty>
+            )}
+            <Button tone="secondary" className="w-full" busy={busy === 'scan'} icon={<Search className="h-4 w-4" />} onClick={() => void searchNearby()}>
+              {busy === 'scan' ? 'Searching…' : native ? 'Search nearby' : 'Choose a device'}
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 rounded-3xl bg-[var(--surface)] p-4">
+              <span className="grid h-11 w-11 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]"><Headphones className="h-5 w-5" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold">{selected.name ?? 'Unnamed device'}</span>
+                <span className="block text-xs text-[var(--text-muted)]">{selected.paired ? 'Paired with this phone' : 'Found nearby'}</span>
+              </span>
+              <button type="button" onClick={() => setSelected(null)} className="text-sm font-semibold text-[var(--accent)]">Change</button>
+            </div>
+            <Field label="Name for your report" value={label} onChange={setLabel} maxLength={100} placeholder="e.g. My earbuds" />
+            {!selected.name && <Notice tone="warning">This device doesn’t broadcast a name, so other phones can’t recognise it. You can still track it yourself.</Notice>}
+            <Button size="lg" className="w-full" busy={busy === 'save'} onClick={() => void report()}>Report as lost</Button>
+          </>
+        )}
+        {error && <Notice tone="danger">{error}</Notice>}
+      </div>
+    </BottomSheet>
+  );
+}
+
+// -------------------------------------------------------------- case sheet
+
+function CaseSheet({ record, onClose, onChanged }: { record: RecoveryDeviceRecord | null; onClose: () => void; onChanged: (r: RecoveryDeviceRecord) => void }) {
+  const [info, setInfo] = useState<RecoveryInfoRecord | null>(null);
+  const [sightings, setSightings] = useState<RecoveryEncounterRecord[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [shareLocation, setShareLocation] = useState(false);
+  const [message, setMessage] = useState<{ tone: NoticeTone; text: string } | null>(null);
+
+  const load = useCallback(async (r: RecoveryDeviceRecord) => {
+    setBusy('load');
     try {
-      await loadRecoveryInfo(device);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to refresh recovery information.');
+      const t = await token();
+      const [i, s] = await Promise.all([api.recovery.getRecoveryInfo(t, r.deviceId), api.recovery.listEncounters(t, r.deviceId)]);
+      setInfo(i);
+      setSightings(s);
+    } catch (e) {
+      setMessage({ tone: 'danger', text: errorText(e, 'Couldn’t load sightings.') });
     } finally {
-      setBusy(false);
+      setBusy(null);
+    }
+  }, []);
+
+  const recordId = record?.deviceId;
+  useEffect(() => {
+    setInfo(null);
+    setSightings([]);
+    setMessage(null);
+    if (record) void load(record);
+    // Reload only when a different device is opened, not on every state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recordId, load]);
+
+  if (!record) return null;
+  const state = info?.recoveryState ?? record.recoveryState;
+  const step = STEPS.indexOf(state);
+
+  const setState = async (next: CaseState) => {
+    setBusy(next);
+    setMessage(null);
+    try {
+      const updated = await api.recovery.updateState(await token(), record.deviceId, next);
+      onChanged(updated);
+      await load(updated);
+      setMessage({ tone: 'success', text: `Marked as ${STEP_LABEL[next].toLowerCase()}.` });
+    } catch (e) {
+      setMessage({ tone: 'danger', text: errorText(e) });
+    } finally {
+      setBusy(null);
     }
   };
 
-  const updateState = async (status: RecoveryDeviceRecord['recoveryState']) => {
-    if (!requireToken() || !selectedDevice) return;
-    const token = ownerToken.trim();
-    setBusy(true);
-    setError(null);
-    setNotice(null);
+  /** "I'm near it": confirm the device is nearby with a Bluetooth scan, then log a sighting. */
+  const confirmNearby = async () => {
+    setBusy('verify');
+    setMessage(null);
     try {
-      const updated = await api.recovery.updateState(token, selectedDevice.deviceId, status);
-      setSelectedDevice(updated);
-      setDevices(current => current.map(item => item.deviceId === updated.deviceId ? updated : item));
-      setRecoveryInfo(current => current ? { ...current, recoveryState: updated.recoveryState } : null);
-      setNotice(`Recovery state saved as ${status}.`);
-      try {
-        await loadRecoveryInfo(updated, token);
-      } catch (refreshError) {
-        setError(`Recovery state was saved, but details could not be refreshed: ${errorMessage(refreshError)}`);
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to update the recovery state.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const submitPresenceObservation = async () => {
-    if (!requireToken() || !selectedDevice) return;
-    const token = ownerToken.trim();
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const registeredIdentifier = selectedDevice.deviceIdentifier.trim().toLowerCase();
-      let observedIdentifier: string | null = null;
-      let observationDescription = 'Device selected by the owner in the Web Bluetooth picker.';
-
+      const target = record.deviceIdentifier.trim().toLowerCase();
       if (isNativeAndroidApp()) {
-        const observed = new Set<string>();
-        const bleOutcome = await scanNativeAndroidBle((observation) => {
-          const id = String(observation.address || observation.id || '').trim().toLowerCase();
-          if (id) observed.add(id);
-        }, 5000);
-
-        const classicOutcome = await scanNativeAndroidClassic((observation) => {
-          const id = String(observation.address || observation.id || '').trim().toLowerCase();
-          if (id) observed.add(id);
-        }, 5000);
-
-        observedIdentifier = observed.has(registeredIdentifier) ? registeredIdentifier : null;
-        observationDescription = 'A nearby Bluetooth signal was verified. No GPS coordinates were collected.';
-
-        if (!observedIdentifier) {
-          const reasons = [
-            !bleOutcome.ok ? bleOutcome.error : bleOutcome.message,
-            !classicOutcome.ok ? classicOutcome.error : classicOutcome.message,
-          ].filter(Boolean);
-          setError(
-            reasons.join(' ')
-              || 'The registered device was not detected in the foreground BLE or classic scan. Keep it nearby and discoverable, then retry. No encounter was submitted.',
-          );
+        const seen = new Set<string>();
+        const collect = (o: { address?: string; id?: string }) => { const id = String(o.address || o.id || '').trim().toLowerCase(); if (id) seen.add(id); };
+        await scanNativeAndroidBle(collect, 5000);
+        if (!seen.has(target)) await scanNativeAndroidClassic(collect, 5000);
+        if (!seen.has(target)) {
+          setMessage({ tone: 'warning', text: 'Not detected nearby. Earbuds must be out of the case or in pairing mode. Nothing was logged.' });
           return;
         }
       } else {
-        const result = await requestBluetoothDevice();
-        if (result.ok === false) {
-          setError(result.error);
-          return;
-        }
-        if (result.device.id.trim().toLowerCase() !== registeredIdentifier) {
-          setError('The selected browser device identifier does not match this registration. No encounter was submitted.');
-          return;
-        }
-        observedIdentifier = result.device.id;
+        const picked = await requestBluetoothDevice();
+        if (picked.ok === false) { setMessage({ tone: 'danger', text: picked.error }); return; }
+        if (picked.device.id.trim().toLowerCase() !== target) { setMessage({ tone: 'warning', text: 'That’s a different device. Nothing was logged.' }); return; }
       }
-
       let location: { lat: number; lng: number } | undefined;
       if (shareLocation) {
         try {
           location = await currentPosition();
-        } catch (locationError: unknown) {
-          const reason = locationError instanceof Error
-            ? locationError.message
-            : typeof (locationError as { message?: unknown })?.message === 'string'
-              ? String((locationError as { message: string }).message)
-              : 'Location permission was denied or unavailable.';
-          setError(`Bluetooth presence was verified, but location could not be obtained (${reason}). No encounter was submitted. Allow location access or turn off optional location sharing and retry.`);
+        } catch (e) {
+          setMessage({ tone: 'warning', text: `Found it, but couldn’t get your location (${errorText(e)}). Try again or turn off location.` });
           return;
         }
       }
-
-      await api.recovery.submitEncounter(token, selectedDevice.deviceId, {
-        source: 'REAL',
-        simulated: false,
-        isTestFixture: false,
-        description: observationDescription,
+      await api.recovery.submitEncounter(await token(), record.deviceId, {
+        source: 'REAL', simulated: false, isTestFixture: false,
+        description: 'Confirmed nearby by the owner with Bluetooth.',
         ...(location ? { location } : {}),
       });
-      setNotice(location
-        ? 'Bluetooth encounter saved with the location you explicitly chose to share.'
-        : 'Bluetooth encounter saved without GPS. No location was inferred or submitted.');
-      try {
-        await loadRecoveryInfo(selectedDevice, token);
-      } catch (refreshError) {
-        setError(`The encounter was accepted, but recovery details could not be refreshed: ${errorMessage(refreshError)}`);
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Unable to submit this observation.');
+      setMessage({ tone: 'success', text: 'Found nearby. Sighting saved.' });
+      await load(record);
+    } catch (e) {
+      setMessage({ tone: 'danger', text: errorText(e) });
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
-  const scanForCommunitySightings = async () => {
-    let token: string;
-    try {
-      token = await getFreshFirebaseIdToken() ?? ownerToken.trim();
-    } catch (caught) {
-      setError(errorMessage(caught));
-      return;
-    }
-    if (!token) {
-      setError('Sign in with your Firebase account before submitting a community sighting.');
-      return;
-    }
-    if (!isNativeAndroidApp()) {
-      setError('Community discovery requires the native Android app. Browser Web Bluetooth cannot passively scan nearby devices.');
-      return;
-    }
-
-    setBusy(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const candidates = new Map<string, { name: string; serviceUuids: string[] }>();
-      const outcome = await scanNativeAndroidBle((observation) => {
-        const name = observation.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
-        const serviceUuids = [...new Set((observation.serviceUuids ?? []).map(uuid => uuid.trim().toLowerCase()).filter(Boolean))].sort();
-        if (!name) return;
-        const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids });
-        if (!candidates.has(key)) candidates.set(key, { name, serviceUuids });
-      }, 10000);
-      // Many earbuds and speakers only appear in classic discovery, so search that too.
-      const classicOutcome = await scanNativeAndroidClassic((observation) => {
-        const name = observation.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
-        if (!name) return;
-        const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids: [] });
-        if (!candidates.has(key)) candidates.set(key, { name, serviceUuids: [] });
-      }, 10000);
-
-      const observations = Array.from(candidates.values()).slice(0, 30);
-      if (observations.length === 0) {
-        setError(outcome.ok || classicOutcome.ok
-          ? 'No nearby devices with a name were found right now, so nothing was sent. Lost earbuds are usually only visible when they are out of the case or in pairing mode — try again later or in another spot.'
-          : (outcome.ok ? '' : outcome.error) || (classicOutcome.ok ? '' : classicOutcome.error));
-        return;
-      }
-
-      let location: { lat: number; lng: number } | undefined;
-      if (communityShareLocation) {
-        try {
-          location = await currentPosition();
-        } catch (caught) {
-          setError(`Location was not obtained (${errorMessage(caught)}). No report was sent. Allow location access or disable optional location sharing.`);
-          return;
-        }
-      }
-
-      const result = await api.recovery.submitCommunitySightings(token, {
-        observations,
-        shareLocation: communityShareLocation,
-        ...(location ? { location } : {}),
-      });
-      setOwnerToken(token);
-      setActiveOwnerToken(token);
-      setNotice(`Community scan shared ${result.observationsReceived} nearby device name(s). If one matches someone's lost device, only its owner is told. These are leads, not proof that a lost device was found.`);
-    } catch (caught) {
-      setError(errorMessage(caught));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const errorMessage = (caught: unknown) =>
-    caught instanceof Error ? caught.message : 'The backend request failed.';
+  const last = info?.lastKnownLocation ?? null;
 
   return (
-    <div className="space-y-6">
-      {firebaseSignedInEmail ? (
-        <section className="flex items-center gap-3 rounded-2xl bg-[var(--surface)] p-4">
-          <div className="grid h-10 w-10 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]"><LockKeyhole className="h-5 w-5" /></div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-[var(--text)]">{firebaseSignedInEmail}</p>
-            <p className="text-xs text-[var(--text-muted)]">Signed in</p>
+    <BottomSheet open onClose={onClose} label={record.name}>
+      <div className="space-y-4 px-5 pb-8 pt-1">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="truncate text-lg font-bold">{record.name}</h2>
+            <p className="text-sm text-[var(--text-muted)]">{info ? `${info.encounterCount} sighting${info.encounterCount === 1 ? '' : 's'}` : 'Loading…'}</p>
           </div>
-          <button type="button" onClick={handleFirebaseSignOut} disabled={busy} className="rounded-xl bg-[var(--surface-raised)] px-3 py-2 text-xs font-semibold text-[var(--text-secondary)] disabled:opacity-50">Sign out</button>
-        </section>
-      ) : (
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-        <div className="mb-4 flex items-center gap-3">
-          <div className="grid h-11 w-11 place-items-center rounded-xl border border-[var(--accent)]/25 bg-[var(--accent-soft)] text-[var(--accent)]"><LockKeyhole className="h-5 w-5" /></div>
-          <div><h2 className="text-base font-semibold text-[var(--text)]">Your secure account</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">Sign in to manage only your own registered devices.</p></div>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block text-sm text-[var(--text-secondary)]">
-            Email address
-            <input
-              type="email"
-              autoComplete="email"
-              value={email}
-              disabled={busy}
-              onChange={event => setEmail(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            />
-          </label>
-          <label className="block text-sm text-[var(--text-secondary)]">
-            Password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              disabled={busy}
-              onChange={event => setPassword(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter') void authenticateWithFirebase('sign-in');
-              }}
-              className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            />
-          </label>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => void authenticateWithFirebase('sign-in')}
-            disabled={busy}
-            className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50"
-          >
-            {busy ? 'Working…' : 'Sign in'}
-          </button>
-          <button
-            type="button"
-            onClick={() => void authenticateWithFirebase('sign-up')}
-            disabled={busy}
-            className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-          >
-            Create account
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleFirebasePasswordReset()}
-            disabled={busy}
-            className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-          >
-            Forgot password?
-          </button>
-          {firebaseSignedInEmail && (
-            <button
-              type="button"
-              onClick={handleFirebaseSignOut}
-              disabled={busy}
-              className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-            >
-              Sign out
-            </button>
-          )}
-        </div>
-        <p id="recovery-auth-note" className="mt-3 text-xs text-[var(--text-muted)]">
-          BlueGuardian uses Firebase email/password authentication. If you created this user in Firebase Console, sign in with the exact password you assigned there. Use Forgot password? to request a reset email. ID tokens are verified by the backend and scoped to your Firebase user ID; credentials and refresh tokens stay in memory only. Reloading requires sign-in again.
-        </p>
-        {firebaseSignedInEmail && (
-          <p className="mt-2 text-xs text-[var(--text-muted)]">Firebase account: {firebaseSignedInEmail}</p>
-        )}
-        <button
-          type="button"
-          onClick={loadDevices}
-          disabled={busy}
-          className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50"
-        >
-          {busy ? 'Working…' : 'Load my registered devices'}
-        </button>
-      </section>
-      )}
-
-      <section className="grid gap-4 xl:grid-cols-[1fr_1fr]">
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-          <h2 className="text-lg font-semibold text-[var(--text)]">Add a device to recovery</h2>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
-            Find a nearby Bluetooth device to register it for recovery. Location sharing is optional and only used when you explicitly enable it.
-          </p>
-          <button
-            type="button"
-            onClick={selectBluetoothDevice}
-            disabled={busy}
-            className="mt-4 min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-          >
-            {busy ? 'Searching…' : isNativeAndroidApp() ? 'Find nearby devices' : 'Choose a device'}
-          </button>
-          {isNativeAndroidApp() && availableNativeDevices.length > 0 && (
-            <div className="mt-4 space-y-2" aria-label="Available Android Bluetooth devices">
-              <p className="text-xs text-[var(--text-muted)]">Select a nearby device or one already paired with your phone.</p>
-              {availableNativeDevices.map(device => (
-                <button
-                  key={device.id}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setSelectedBluetoothDevice(device);
-                    setDeviceName(device.name ?? '');
-                    setAvailableNativeDevices([]);
-                    setNotice(`Selected native Android ${device.transport ?? 'Bluetooth'} device ${device.name || 'with no advertised name'}. The app has not connected to or tracked it in the background.`);
-                  }}
-                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-[var(--border)] p-3 text-left disabled:opacity-50"
-                >
-                  <span className="min-w-0 flex-1">
-                    <span className="block break-words text-sm font-medium text-[var(--text)]">{device.name || 'Bluetooth device name unavailable'}</span>
-                    <span className="mt-1 block break-all text-xs text-[var(--text-muted)]">{device.transport ?? 'BLE'} · {device.paired ? 'Paired' : 'Nearby'} · {device.address || device.id}</span>
-                  </span>
-                  {typeof device.rssi === 'number' && <span className="shrink-0 text-xs text-[var(--text-secondary)]">{device.rssi} dBm</span>}
-                </button>
-              ))}
-            </div>
-          )}
-          {selectedBluetoothDevice && (
-            <div className="mt-4 space-y-3">
-              <p className="break-all text-xs text-[var(--text-muted)]">
-                Selected: {selectedBluetoothDevice.name ?? 'Unnamed Bluetooth device'} · {selectedBluetoothDevice.address || selectedBluetoothDevice.id}
-              </p>
-              <label className="block text-sm text-[var(--text-secondary)]">
-                Display name
-                <input
-                  value={deviceName}
-                  onChange={event => setDeviceName(event.target.value)}
-                  className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={registerDevice}
-                disabled={busy || !ownerToken.trim()}
-                className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50"
-              >
-                Register as lost
-              </button>
-            </div>
-          )}
+          <Pill color={STEP_COLOR[state]}>{STEP_LABEL[state]}</Pill>
         </div>
 
-        <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-          <div className="flex items-center justify-between gap-3">
-            <h2 className="text-lg font-semibold text-[var(--text)]">My recovery cases</h2>
-            <button
-              type="button"
-              onClick={loadDevices}
-              disabled={busy || !ownerToken.trim()}
-              aria-label="Refresh registered devices"
-              className="rounded-lg border border-[var(--border)] p-2 text-[var(--text-secondary)] disabled:opacity-50"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
-          {devices.length === 0 ? (
-            <p className="mt-4 text-sm text-[var(--text-muted)]">
-              {devicesLoaded
-                ? 'No registered devices were found for this owner.'
-                : 'No devices loaded. Authenticate with the backend to view owner-authorized records.'}
-            </p>
+        <div className="rounded-3xl bg-[var(--surface)] p-4">
+          <StepTrack steps={STEPS.map((s) => STEP_LABEL[s])} current={step < 0 ? 0 : step} color={STEP_COLOR[state]} />
+        </div>
+
+        <div className="rounded-3xl bg-[var(--surface)] p-4">
+          <p className="flex items-center gap-2 text-sm font-bold"><MapPin className="h-4 w-4 text-[var(--accent)]" /> Last sighting</p>
+          {info?.lastObservationAt ? (
+            <>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">{when(info.lastObservationAt)}{last ? '' : ' · no location shared'}</p>
+              {last && (
+                <a href={mapsUrl(last.lat, last.lng)} target="_blank" rel="noreferrer"
+                  className="tap mt-3 flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-[var(--accent)] text-sm font-semibold text-white">
+                  <MapPin className="h-4 w-4" /> Open in Maps
+                </a>
+              )}
+            </>
           ) : (
-            <ul className="mt-4 space-y-2">
-              {devices.map(device => (
-                <li key={device.deviceId}>
-                  <button
-                    type="button"
-                    onClick={() => void refreshRecoveryInfo(device)}
-                    className={`w-full rounded-lg border p-3 text-left ${selectedDevice?.deviceId === device.deviceId ? 'border-[var(--accent)]' : 'border-[var(--border)]'}`}
-                  >
-                    <span className="block text-sm font-medium text-[var(--text)]">{device.name}</span>
-                    <span className="mt-1 block text-xs text-[var(--text-muted)]">{device.recoveryState} · {device.discoverySource === 'REAL' ? 'Device record' : 'Sample'}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <p className="mt-1 text-sm text-[var(--text-muted)]">No sightings yet. They’ll appear here as soon as a phone spots it.</p>
           )}
         </div>
-      </section>
 
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5">
-        <div className="flex items-center gap-2">
-          <Bluetooth className="h-4 w-4 text-[var(--accent)]" />
-          <h2 className="text-lg font-semibold text-[var(--text)]">Help find lost devices</h2>
+        {message && <Notice tone={message.tone} onDismiss={() => setMessage(null)}>{message.text}</Notice>}
+
+        {state !== 'recovered' && (
+          <div className="space-y-2">
+            <Toggle checked={shareLocation} onChange={setShareLocation} disabled={Boolean(busy)} label="Save my location with it" />
+            <Button className="w-full" busy={busy === 'verify'} disabled={Boolean(busy)} icon={<Radar className="h-4 w-4" />} onClick={() => void confirmNearby()}>
+              {busy === 'verify' ? 'Looking…' : 'I’m near it, confirm'}
+            </Button>
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          {state === 'recovered' || state === 'found' ? (
+            <Button tone="secondary" busy={busy === 'lost'} disabled={Boolean(busy)} onClick={() => void setState('lost')}>Still lost</Button>
+          ) : (
+            <Button tone="secondary" busy={busy === 'found'} disabled={Boolean(busy)} onClick={() => void setState('found')}>I found it</Button>
+          )}
+          {state !== 'recovered' ? (
+            <Button tone="success" busy={busy === 'recovered'} disabled={Boolean(busy)} onClick={() => void setState('recovered')}>It’s back with me</Button>
+          ) : (
+            <Button tone="secondary" busy={busy === 'load'} disabled={Boolean(busy)} icon={<RefreshCw className="h-4 w-4" />} onClick={() => void load(record)}>Refresh</Button>
+          )}
         </div>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">
-          Join an optional community search to help owners receive nearby-device sightings. Matches are private leads, not confirmed recoveries. Location is shared only when you opt in, and a match never marks a device recovered automatically.
-        </p>
-        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-          <input type="checkbox" checked={communityShareLocation} onChange={event => setCommunityShareLocation(event.target.checked)} disabled={busy} className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]" />
-          <span>
-            <span className="block text-sm font-medium text-[var(--text)]">Include this phone's location (optional)</span>
-            <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">Location is optional. When switched off, sightings are sent without GPS coordinates.</span>
-          </span>
-        </label>
-        <button type="button" onClick={() => void scanForCommunitySightings()} disabled={busy || !ownerToken.trim()} className="mt-4 min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50">
-          {busy ? 'Scanning and submitting…' : 'Scan and help nearby owners'}
-        </button>
-        {!isNativeAndroidApp() && <p className="mt-2 text-xs text-[var(--text-muted)]">Community search is available in the Android app.</p>}
-      </section>
 
-      {selectedDevice && recoveryInfo && (
-        <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5" aria-live="polite">
-          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
-            <div>
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 text-[var(--accent)]" />
-                <h2 className="text-lg font-semibold text-[var(--text)]">{recoveryInfo.deviceName}</h2>
-              </div>
-              <p className="mt-1 text-sm text-[var(--text-secondary)]">
-                State: <strong>{recoveryInfo.recoveryState}</strong> · {recoveryInfo.encounterCount} encounter(s)
-              </p>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">Registered {formatDate(recoveryInfo.registeredAt)}</p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button type="button" disabled={busy} onClick={() => void refreshRecoveryInfo()} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--text)] disabled:opacity-50">Refresh sightings</button>
-              <button type="button" disabled={busy} onClick={submitPresenceObservation} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--text)] disabled:opacity-50">Verify present with Bluetooth</button>
-              {recoveryInfo.recoveryState !== 'lost' && (
-                <button type="button" disabled={busy} onClick={() => updateState('lost')} className="rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-semibold text-[var(--text)] disabled:opacity-50">Mark lost</button>
-              )}
-              {recoveryInfo.recoveryState !== 'found' && recoveryInfo.recoveryState !== 'recovered' && (
-                <button type="button" disabled={busy} onClick={() => updateState('found')} className="rounded-lg border border-[var(--accent)] px-3 py-2 text-xs font-semibold text-[var(--accent)] disabled:opacity-50">Confirm device found</button>
-              )}
-              {recoveryInfo.recoveryState !== 'recovered' && (
-                <button type="button" disabled={busy} onClick={() => updateState('recovered')} className="rounded-lg bg-[var(--success)] px-3 py-2 text-xs font-semibold text-slate-950 disabled:opacity-50">Mark recovered</button>
-              )}
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-            <label className="flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
-                checked={shareLocation}
-                onChange={event => setShareLocation(event.target.checked)}
-                disabled={busy}
-                className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
-              />
-              <span>
-                <span className="block text-sm font-medium text-[var(--text)]">Attach this phone's location to the sighting (optional)</span>
-                <span className="mt-1 block text-xs leading-5 text-[var(--text-muted)]">Only requested after Bluetooth verification, only when checked, and sent with this owner-authorized encounter. If location cannot be obtained, the encounter is not submitted until you retry without location sharing.</span>
-              </span>
-            </label>
-          </div>
-
-          <div className="mt-5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
-              <MapPin className="h-3.5 w-3.5" />
-              Last observation
-            </div>
-            {recoveryInfo.lastObservationAt ? (
-              <div className="mt-2 space-y-1">
-                <p className="text-sm text-[var(--text)]">
-                  {formatDate(recoveryInfo.lastObservationAt)}
-                  {recoveryInfo.simulated ? ' · SIMULATED' : ' · REAL Bluetooth observation'}
-                </p>
-                {recoveryInfo.lastKnownLocation ? (
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-[var(--success)]">
-                    <span>{recoveryInfo.lastKnownLocation.address
-                      ?? `${recoveryInfo.lastKnownLocation.lat}, ${recoveryInfo.lastKnownLocation.lng}`}</span>
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${recoveryInfo.lastKnownLocation.lat},${recoveryInfo.lastKnownLocation.lng}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-semibold underline underline-offset-2"
-                    >Open map</a>
-                  </div>
-                ) : (
-                  <p className="text-xs leading-5 text-[var(--text-muted)]">
-                    Location unavailable. This observation confirms Bluetooth presence only; GPS is not collected by the current recovery workflow.
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className="mt-2 text-sm text-[var(--text-muted)]">No encounter recorded yet. A location will appear only when a real, consented location is actually collected and saved.</p>
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="text-sm font-bold">Sightings</h3>
+            {state !== 'recovered' && (
+              <button type="button" onClick={() => void load(record)} disabled={Boolean(busy)} className="flex items-center gap-1 text-xs font-semibold text-[var(--accent)]">
+                <RefreshCw className={cn('h-3.5 w-3.5', busy === 'load' && 'animate-spin')} /> Refresh
+              </button>
             )}
           </div>
-
-          <div className="mt-5">
-            <h3 className="text-sm font-semibold text-[var(--text)]">Encounter history</h3>
-            {encounters.length === 0 ? (
-              <p className="mt-2 text-sm text-[var(--text-muted)]">No sightings are available for this device.</p>
-            ) : (
-              <ul className="mt-2 divide-y divide-[var(--border)]">
-                {encounters.map(encounter => (
-                  <li key={encounter._id} className="py-3">
-                    <p className="text-sm text-[var(--text)]">
-                      {formatDate(encounter.observedAt)} · {encounter.source}
-                      {encounter.simulated || encounter.isTestFixture ? ' · SIMULATED TEST DATA' : ''}
-                      {typeof encounter.confidence === 'number' ? ` · Candidate confidence ${Math.round(encounter.confidence * 100)}%` : ''}
-                    </p>
-                    {encounter.description?.toLowerCase().includes('community ble') && (
-                      <span className="mt-1 inline-flex rounded-full border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--warning)]">
-                        Unverified community candidate
-                      </span>
-                    )}
-                    {encounter.location && (
-                      <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-[var(--text-muted)]">
-                        <span>{encounter.location.address ?? `${encounter.location.lat}, ${encounter.location.lng}`}</span>
-                        <a
-                          href={`https://www.google.com/maps/search/?api=1&query=${encounter.location.lat},${encounter.location.lng}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-semibold text-[var(--accent)] underline underline-offset-2"
-                        >Open map</a>
+          {sightings.length === 0 ? (
+            <p className="rounded-2xl bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text-muted)]">None yet.</p>
+          ) : (
+            <ol className="relative space-y-3 pl-5">
+              <span className="absolute bottom-2 left-[7px] top-2 w-0.5 bg-[var(--border)]" />
+              {sightings.map((s) => {
+                const community = (s.description ?? '').toLowerCase().includes('community');
+                const strong = typeof s.confidence === 'number' && s.confidence >= 0.4;
+                const dot = community ? (strong ? 'var(--accent)' : 'var(--warning)') : 'var(--success)';
+                return (
+                  <li key={s._id} className="relative">
+                    <span className="absolute -left-5 top-1.5 h-3.5 w-3.5 rounded-full border-2 border-[var(--bg-elevated)]" style={{ background: dot }} />
+                    <div className="rounded-2xl bg-[var(--surface)] px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-semibold">{community ? 'Spotted by the community' : 'Confirmed by you'}</span>
+                        {community && <Pill color={dot}>{strong ? 'Strong match' : 'Possible match'}</Pill>}
                       </div>
-                    )}
-                    {encounter.description && <p className="mt-1 text-xs text-[var(--text-secondary)]">{encounter.description}</p>}
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                        <Clock className="h-3 w-3" /> {when(s.observedAt)}
+                        {s.location && (
+                          <a href={mapsUrl(s.location.lat, s.location.lng)} target="_blank" rel="noreferrer" className="ml-2 font-semibold text-[var(--accent)]">View on map</a>
+                        )}
+                      </p>
+                    </div>
                   </li>
-                ))}
-              </ul>
-            )}
-          </div>
+                );
+              })}
+            </ol>
+          )}
+          <p className="mt-2 text-[11px] text-[var(--text-muted)]">Community matches are based on the device’s name. Confirm before marking it found.</p>
         </section>
-      )}
-
-      {error && <p role="alert" className="rounded-lg border border-[var(--danger)]/30 bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">{error}</p>}
-      {notice && <p role="status" className="rounded-lg border border-[var(--success)]/30 bg-[var(--success)]/10 p-3 text-sm text-[var(--success)]">{notice}</p>}
-    </div>
+      </div>
+    </BottomSheet>
   );
 }

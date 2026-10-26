@@ -160,12 +160,12 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
     /** Explains why the other phone may not appear (location permission or switch off). */
     private String visibilityWarning() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && getPermissionState("location") != PermissionState.GRANTED) {
-            return "Location permission is off, so Android may hide the other phone. Allow location for BlueGuardian (no GPS position is used).";
+            return "Allow location for BlueGuardian so Android can show the other phone.";
         }
         try {
             android.location.LocationManager lm = (android.location.LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
             if (lm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !lm.isLocationEnabled()) {
-                return "Turn on Location in quick settings on this phone; Android hides nearby phones from Bluetooth search while it is off.";
+                return "Turn on Location in quick settings so Android can find the other phone.";
             }
         } catch (RuntimeException ignored) {
             // best effort
@@ -177,7 +177,7 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
     private void onSecureLinkPermissions(PluginCall call) {
         boolean advertise = "startHosting".equals(call.getMethodName());
         if (!hasAll(requiredAliases(advertise))) {
-            call.reject("BlueGuardian needs the Nearby Devices permission to create a secure link.");
+            call.reject("Allow Nearby devices for BlueGuardian to use Secure Share.");
             return;
         }
         switch (call.getMethodName()) {
@@ -263,7 +263,7 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
         if (advertiser == null) {
             closeQuietly(serverSocket);
             serverSocket = null;
-            call.reject("This phone cannot advertise over Bluetooth LE, so it cannot host. Use \"Connect\" on this phone instead.");
+            call.reject("This phone can't receive this way. Tap Send on this phone instead.");
             return;
         }
         hostCode = code;
@@ -295,7 +295,7 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
             @Override
             public void onStartFailure(int errorCode) {
                 stopHostingInternal();
-                startCall.reject("Bluetooth advertising failed (code " + errorCode + "). Turn Bluetooth off and on, then retry.");
+                startCall.reject("Couldn't become visible (code " + errorCode + "). Turn Bluetooth off and on, then try again.");
             }
         };
         try {
@@ -500,7 +500,7 @@ public class BlueGuardianSecureLinkPlugin extends Plugin {
                 call.resolve(out);
             } catch (IOException | SecurityException error) {
                 if (socket != null) closeQuietly(socket);
-                call.reject("Could not reach that phone. Make sure it is still hosting and nearby. (" + safe(error) + ")");
+                call.reject("Couldn't reach that phone. Make sure it's still on the Receive screen and close by. (" + safe(error) + ")");
             }
         }, "bg-securelink-connect").start();
     }

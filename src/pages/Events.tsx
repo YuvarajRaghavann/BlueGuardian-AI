@@ -1,8 +1,5 @@
 import { useEffect, useState } from 'react';
-import {
-  Activity,
-  ShieldCheck,
-} from 'lucide-react';
+import { Notice } from '../ui/kit';
 import { SecurityTimeline } from '../components/SecurityTimeline';
 import { SecurityAuditLog } from '../components/SecurityAuditLog';
 import { mockEvents } from '../data/mockEvents';
@@ -73,66 +70,22 @@ export function Events() {
     ? actions.slice(0, 10).map((action) => ({
         id: action.id,
         type: action.type === 'TRUST' ? 'pair' : action.type === 'BLOCK' ? 'alert' : 'scan',
-        message: `${action.deviceName} · ${action.reason}`,
+        message: `${({ TRUST: 'Trusted', BLOCK: 'Blocked', UNBLOCK: 'Unblocked', FORGET: 'Forgot', MARK_UNKNOWN: 'Removed trust from' } as Record<string, string>)[action.type] ?? 'Updated'} ${action.deviceName}`,
         severity: action.type === 'BLOCK' ? 'error' : action.type === 'TRUST' ? 'info' : 'warning',
         timestamp: action.timestamp,
         simulated: action.simulated,
       }))
     : (SIMULATOR_ENABLED ? mockEvents.slice(0, 10) : []);
-  const usingBackendEvents = backendReady && backendEvents !== null;
-  const availableEvents = usingBackendEvents ? backendEvents : localOrDemoEvents;
+  const availableEvents = backendReady && backendEvents !== null ? backendEvents : localOrDemoEvents;
   const systemEvents = visibleEvents(availableEvents, securityState.policy.showSimulatedEvents);
 
   return (
-    <div className="space-y-4">
-
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
-            <Activity className="h-4 w-4 text-[var(--accent)]" />
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-wider text-[var(--text-muted)]">
-              Visible activity
-            </p>
-            <p className="mt-0.5 text-sm font-semibold text-[var(--text)]">
-              {systemEvents.length} {usingBackendEvents ? 'backend events' : actions.length > 0 ? 'local records' : 'simulated records'}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
-            <ShieldCheck className="h-4 w-4 text-[var(--accent)]" />
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-wider text-[var(--text-muted)]">
-              Local actions
-            </p>
-            <p className="mt-0.5 text-sm font-semibold text-[var(--text)]">
-              {actions.length} browser actions
-            </p>
-          </div>
-        </div>
-      </div>
-
+    <div className="space-y-5">
       {backendEventsError && backendReady && (
-        <p role="status" className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning)]/5 p-3 text-xs leading-5 text-[var(--text-secondary)]">
-          Backend events could not be loaded ({backendEventsError}). Showing local activity instead.
-        </p>
+        <Notice tone="warning">Couldn’t load your account activity. Showing this phone’s activity.</Notice>
       )}
-
-      <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.15fr_0.85fr]">
-        <SecurityTimeline
-          events={systemEvents}
-          title={usingBackendEvents ? 'Backend Audit Events' : actions.length > 0 ? 'Browser Activity Timeline' : 'Simulated Demo Events'}
-        />
-
-        <SecurityAuditLog
-          actions={actions}
-          title="Local Action History"
-        />
-      </section>
+      <SecurityTimeline events={systemEvents} title="Recent activity" />
+      <SecurityAuditLog actions={actions} title="Your decisions" />
     </div>
   );
 }

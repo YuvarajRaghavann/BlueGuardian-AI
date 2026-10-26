@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Bluetooth, ChevronRight, Clock, Headphones, LoaderCircle, MapPin, Radar, RefreshCw, Settings, ShieldAlert, Smartphone, Watch, X,
+  Bluetooth, Clock, Headphones, LoaderCircle, MapPin, Radar, RefreshCw, Share2, Smartphone, Users, Watch, X,
 } from 'lucide-react';
-import { RecoveryCloud } from './RecoveryCloud';
+import { RecoveryCloud, type CommunityPrefill } from './RecoveryCloud';
+import { Button, Card, Empty, Notice, Segmented } from '../ui/kit';
 import { BottomSheet } from '../ui/BottomSheet';
 import {
   buildShareText, deviceLabel, lastPlace, myDevices, myDevicesSupported, proximityBand, timeAgo,
@@ -92,7 +93,7 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
     ];
     myDevices.startProximity({ address: device.address, name: device.name, durationMs: 120000 })
       .then((r) => { if (!cancelled) { setConnected(r.connected); if (r.warning) setError(r.warning); } })
-      .catch((e: unknown) => { if (!cancelled) { setError(e instanceof Error ? e.message : 'Could not start searching.'); setRunning(false); } });
+      .catch((e: unknown) => { if (!cancelled) { setError(e instanceof Error ? e.message : 'Couldn’t start searching.'); setRunning(false); } });
     const tick = setInterval(() => setNow(Date.now()), 1000);
     return () => {
       cancelled = true;
@@ -120,19 +121,19 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
               <div key={l} className={cn('w-6 rounded-t-md transition-all', band.level >= l ? 'bg-[var(--accent)]' : 'bg-[var(--surface-hover)]')} style={{ height: `${l * 25}%` }} />
             ))}
           </div>
-          <p className="mt-4 text-xl font-semibold text-[var(--text)]">{connected && !fresh ? 'Connected — within about 10 m' : band.label}</p>
+          <p className="mt-4 text-xl font-semibold text-[var(--text)]">{connected && !fresh ? 'Connected · within about 10 m' : band.label}</p>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            {fresh ? `${rssi} dBm via ${via === 'BLE' ? 'Bluetooth LE' : 'classic Bluetooth'} · move around and watch the bars` : running ? 'Listening for its signal…' : 'Search stopped.'}
+            {fresh ? `Signal ${rssi} dBm · walk around and watch the bars` : running ? 'Listening for its signal…' : 'Search stopped.'}
           </p>
         </div>
 
         <ul className="mt-5 space-y-2 text-xs leading-5 text-[var(--text-secondary)]">
           {connected ? (
-            <li>• It's connected to your phone, so it is nearby. Play a sound through it and listen:</li>
+            <li>• It’s connected, so it’s close. Play a sound and listen for it.</li>
           ) : (
-            <li>• Earbuds are only visible when they're <b>out of the case</b> or in pairing mode. In a closed case they can't be detected.</li>
+            <li>• Earbuds can only be found <b>out of the case</b> or in pairing mode.</li>
           )}
-          <li>• More bars = closer. Walk slowly and turn around; walls and bodies weaken the signal.</li>
+          <li>• More bars means closer. Walls and people weaken the signal.</li>
         </ul>
 
         {connected && (
@@ -146,7 +147,7 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
             }}
             className="mt-4 w-full rounded-xl bg-[var(--accent)] py-3 text-sm font-semibold text-white"
           >
-            {sounding ? 'Stop sound' : 'Play finding sound (10 s)'}
+            {sounding ? 'Stop sound' : 'Play a sound'}
           </button>
         )}
         {error && <p role="alert" className="mt-3 text-xs text-[var(--danger)]">{error}</p>}
@@ -158,8 +159,12 @@ function FindItSheet({ device, onClose }: { device: KnownDevice; onClose: () => 
   );
 }
 
+type Tab = 'mine' | 'community';
+
 export function Recovery() {
   const supported = myDevicesSupported();
+  const [tab, setTab] = useState<Tab>(() => (supported ? 'mine' : 'community'));
+  const [prefill, setPrefill] = useState<CommunityPrefill | null>(null);
   const [devices, setDevices] = useState<KnownDevice[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -169,7 +174,6 @@ export function Recovery() {
   const [contact, setContact] = useState<string>(() => readJson(CONTACT_KEY, ''));
   const [finding, setFinding] = useState<KnownDevice | null>(null);
   const [busyAddress, setBusyAddress] = useState<string | null>(null);
-  const [showCloud, setShowCloud] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   const refresh = useCallback(async (quiet = false) => {
@@ -193,7 +197,7 @@ export function Recovery() {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Could not read your Bluetooth devices.');
+      setError(e instanceof Error ? e.message : 'Couldn’t read your Bluetooth devices.');
     } finally {
       if (!quiet) setLoading(false);
     }
@@ -235,7 +239,7 @@ export function Recovery() {
     try {
       await task();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Something went wrong.');
+      setError(e instanceof Error ? e.message : 'Something went wrong. Try again.');
     } finally {
       setBusyAddress(null);
     }
@@ -245,7 +249,7 @@ export function Recovery() {
     const status = await myDevices.requestLocation();
     setPerm(status);
     if (status.location) {
-      setNotice('Location memory is on. Each time a device disconnects, BlueGuardian saves where your phone was.');
+      setNotice('Location memory is on.');
       await refresh(true);
     }
   });
@@ -253,8 +257,13 @@ export function Recovery() {
   const enableBackground = () => act('perm', async () => {
     const status = await myDevices.requestBackgroundLocation();
     setPerm(status);
-    if (!status.background) setNotice('On the next screen choose "Allow all the time" so places are saved even when BlueGuardian is closed.');
+    if (!status.background) setNotice('Choose “Allow all the time” on the next screen.');
   });
+
+  const askCommunity = (d: KnownDevice) => {
+    setPrefill({ address: d.address, name: d.name });
+    setTab('community');
+  };
 
   const sorted = [...devices].sort((a, b) => {
     const rank = (d: KnownDevice) => (lost[d.address] ? 4 : 0) + (d.connected ? 2 : 0) + (d.category === 'audio' || d.category === 'wearable' ? 1 : 0);
@@ -264,173 +273,144 @@ export function Recovery() {
 
   return (
     <div className="space-y-5">
-      <header>
-        <h2 className="text-[26px] font-extrabold leading-tight text-[var(--text)]">Where did I leave it?</h2>
-        <p className="mt-1 max-w-2xl text-sm leading-6 text-[var(--text-secondary)]">
-          BlueGuardian notes the time and place each time a device disconnects from this phone. That's usually where your earbuds fell out
-          or got left behind. You can open the spot in Maps, share it, or use the signal meter to find the device.
-        </p>
-      </header>
+      <Segmented<Tab>
+        layoutId="find-tab"
+        value={tab}
+        onChange={setTab}
+        options={[
+          { id: 'mine', label: <span className="inline-flex items-center gap-1.5"><MapPin className="h-4 w-4" /> My devices</span> },
+          { id: 'community', label: <span className="inline-flex items-center gap-1.5"><Users className="h-4 w-4" /> Community</span> },
+        ]}
+      />
 
-      {!supported && (
-        <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 text-sm text-[var(--text-secondary)]">
-          Find my devices works in the BlueGuardian Android app, because it needs your phone's Bluetooth and location.
-        </section>
-      )}
-
-      {supported && perm && !perm.location && (
-        <section className="rounded-2xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-5">
-          <h2 className="text-base font-semibold text-[var(--text)]">Turn on location memory</h2>
-          <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
-            Lets BlueGuardian save where your phone was when a device disconnects. Places stay on this phone unless you share them.
+      {tab === 'community' ? (
+        <RecoveryCloud prefill={prefill} onPrefillUsed={() => setPrefill(null)} />
+      ) : !supported ? (
+        <Empty icon={<Smartphone className="h-6 w-6" />} title="Available in the Android app">Finding your devices needs your phone’s Bluetooth and location.</Empty>
+      ) : (
+        <>
+          <p className="px-1 text-sm leading-6 text-[var(--text-secondary)]">
+            We note where your phone was each time a device disconnects. That’s usually where you left it.
           </p>
-          <button type="button" onClick={() => void enableLocation()} disabled={busyAddress === 'perm'}
-            className="mt-3 min-h-11 rounded-xl bg-[var(--accent)] px-5 text-sm font-semibold text-white disabled:opacity-50">
-            Turn on
-          </button>
-        </section>
-      )}
-      {supported && perm?.location && !perm.background && (
-        <section className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-[var(--text-secondary)]">
-            <b className="text-[var(--text)]">Places are saved only while BlueGuardian is open.</b> Allow location “all the time” to also save them when the app is closed.
-          </p>
-          <button type="button" onClick={() => void enableBackground()} disabled={busyAddress === 'perm'}
-            className="min-h-10 shrink-0 rounded-xl border border-[var(--accent)] px-4 text-sm font-semibold text-[var(--accent)] disabled:opacity-50">
-            Allow all the time
-          </button>
-        </section>
-      )}
 
-      {supported && (
-        <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
-          <div className="mb-3 flex items-center justify-between gap-3">
-            <h2 className="text-base font-semibold text-[var(--text)]">My devices</h2>
-            <button type="button" onClick={() => void refresh()} aria-label="Refresh" className="rounded-lg border border-[var(--border)] p-2 text-[var(--text-secondary)]">
-              {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            </button>
-          </div>
-          {devices.length === 0 && !loading && (
-            <p className="text-sm text-[var(--text-muted)]">
-              No paired devices yet. Pair your earbuds or watch in Android Bluetooth settings and they'll appear here automatically.
-              <button type="button" onClick={() => void myDevices.openBluetoothSettings()} className="ml-1 font-semibold text-[var(--accent)] underline underline-offset-2">Open Bluetooth settings</button>
-            </p>
+          {perm && !perm.location && (
+            <Card tone="accent" title="Turn on location memory" subtitle="Saves where a device was when it disconnected. Stays on this phone.">
+              <Button busy={busyAddress === 'perm'} onClick={() => void enableLocation()}>Turn on</Button>
+            </Card>
           )}
-          <ul className="space-y-3">
-            {sorted.map((d) => {
-              const seen = d.lastSeen;
-              const place = lastPlace(seen);
-              const isLost = Boolean(lost[d.address]);
-              const lastConnected = seen?.lastDisconnectedAt ?? seen?.lastSeenAt;
-              const busy = busyAddress === d.address;
-              return (
-                <li key={d.address} className={cn('rounded-2xl border p-4', isLost ? 'border-[var(--danger)]/60 bg-[var(--danger)]/5' : 'border-[var(--border)] bg-[var(--bg-elevated)]')}>
-                  <div className="flex items-start gap-3">
-                    <div className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-xl', d.connected ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--surface-hover)] text-[var(--text-secondary)]')}>
-                      <DeviceIcon device={d} className="h-5 w-5" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[15px] font-semibold text-[var(--text)]">{deviceLabel(d)}</p>
-                      <p className={cn('mt-0.5 text-xs font-medium', d.connected ? 'text-[var(--success)]' : isLost ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
-                        {d.connected
-                          ? `Connected now${d.profiles.length ? ' · ' + d.profiles.join(', ') : ''}`
-                          : isLost ? 'Marked as lost' : lastConnected ? `Last with your phone ${timeAgo(lastConnected, now)}` : 'Not seen yet'}
-                      </p>
-                    </div>
-                  </div>
+          {perm?.location && !perm.background && (
+            <Card>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-[var(--text-secondary)]"><b className="text-[var(--text)]">Only while the app is open.</b> Allow location all the time to save places when it’s closed.</p>
+                <Button tone="secondary" size="sm" busy={busyAddress === 'perm'} onClick={() => void enableBackground()}>Allow</Button>
+              </div>
+            </Card>
+          )}
 
-                  <div className="mt-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs leading-5">
-                    {place ? (
-                      <>
-                        <p className="flex items-center gap-1.5 font-medium text-[var(--text)]"><MapPin className="h-3.5 w-3.5 text-[var(--accent)]" /> Last seen here</p>
-                        <p className="text-[var(--text-secondary)]">
-                          {place.lat.toFixed(5)}, {place.lng.toFixed(5)} · ±{Math.max(5, Math.round(place.accuracy))} m · {timeAgo(place.at, now)}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="text-[var(--text-muted)]">
-                        <Clock className="mr-1 inline h-3.5 w-3.5" />
-                        {perm?.location ? 'No place saved yet. One is saved automatically the next time it connects or disconnects.' : 'Turn on location memory to save where it was last seen.'}
-                      </p>
-                    )}
-                    {seen?.lastDisconnectedAt && (
-                      <p className="mt-1 text-[var(--text-muted)]">Disconnected {new Date(seen.lastDisconnectedAt).toLocaleString()}</p>
-                    )}
-                  </div>
+          {error && <Notice tone="danger" onDismiss={() => setError(null)}>{error}</Notice>}
+          {notice && <Notice tone="success" onDismiss={() => setNotice(null)}>{notice}</Notice>}
 
-                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <button type="button" onClick={() => setFinding(d)}
-                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[var(--accent)] px-3 text-sm font-semibold text-white">
-                      <Radar className="h-4 w-4" /> Find it
-                    </button>
-                    <button type="button" disabled={busy}
-                      onClick={() => void act(d.address, () => myDevices.share({ title: `Share where my ${deviceLabel(d)} was`, text: buildShareText(d, seen, contact) }))}
-                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text)] disabled:opacity-50">
-                      Share location
-                    </button>
-                    <button type="button" disabled={!place || busy}
-                      onClick={() => place && void act(d.address, () => myDevices.openMap({ lat: place.lat, lng: place.lng, label: deviceLabel(d) }))}
-                      className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text)] disabled:opacity-40">
-                      <MapPin className="h-4 w-4" /> Open map
-                    </button>
-                    {d.connected ? (
-                      <button type="button" disabled={busy || !perm?.location}
-                        onClick={() => void act(d.address, async () => { await myDevices.saveCurrentLocationFor({ address: d.address, name: d.name, source: 'app' }); setNotice(`Saved this spot for ${deviceLabel(d)}.`); await refresh(true); })}
-                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text)] disabled:opacity-40">
-                        Save spot now
-                      </button>
-                    ) : (
-                      <button type="button" disabled={busy}
-                        onClick={() => void act(d.address, async () => {
-                          const r = await myDevices.connect({ address: d.address });
-                          setNotice(r.message);
-                          if (r.result === 'settings') await myDevices.openBluetoothSettings();
-                          await refresh(true);
-                        })}
-                        className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] px-3 text-sm font-semibold text-[var(--text)] disabled:opacity-50">
-                        {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Bluetooth className="h-4 w-4" />} Connect
-                      </button>
-                    )}
-                  </div>
-                  <button type="button" onClick={() => toggleLost(d.address)}
-                    className={cn('mt-2 text-xs font-semibold underline underline-offset-2', isLost ? 'text-[var(--success)]' : 'text-[var(--danger)]')}>
-                    {isLost ? 'I found it' : 'I lost this'}
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      )}
+          <section>
+            <div className="mb-2.5 flex items-center justify-between px-1">
+              <h2 className="text-[15px] font-bold">Your devices</h2>
+              <button type="button" onClick={() => void refresh()} aria-label="Refresh" className="tap rounded-full p-2 text-[var(--text-muted)]">
+                {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </button>
+            </div>
+            {devices.length === 0 && !loading ? (
+              <Empty icon={<Bluetooth className="h-6 w-6" />} title="No paired devices"
+                action={<Button tone="secondary" onClick={() => void myDevices.openBluetoothSettings()}>Open Bluetooth settings</Button>}>
+                Pair your earbuds or watch and they’ll appear here.
+              </Empty>
+            ) : (
+              <ul className="space-y-3">
+                {sorted.map((d) => {
+                  const seen = d.lastSeen;
+                  const place = lastPlace(seen);
+                  const isLost = Boolean(lost[d.address]);
+                  const lastConnected = seen?.lastDisconnectedAt ?? seen?.lastSeenAt;
+                  const busy = busyAddress === d.address;
+                  return (
+                    <li key={d.address} className={cn('rounded-3xl p-4', isLost ? 'bg-[var(--danger)]/10 ring-1 ring-[var(--danger)]/30' : 'bg-[var(--surface)]')}>
+                      <div className="flex items-center gap-3">
+                        <div className={cn('grid h-11 w-11 shrink-0 place-items-center rounded-2xl', d.connected ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--surface-hover)] text-[var(--text-secondary)]')}>
+                          <DeviceIcon device={d} className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[15px] font-bold text-[var(--text)]">{deviceLabel(d)}</p>
+                          <p className={cn('mt-0.5 text-xs font-medium', d.connected ? 'text-[var(--success)]' : isLost ? 'text-[var(--danger)]' : 'text-[var(--text-muted)]')}>
+                            {d.connected ? 'Connected now' : isLost ? 'Marked as lost' : lastConnected ? `Last with you ${timeAgo(lastConnected, now)}` : 'Not seen yet'}
+                          </p>
+                        </div>
+                        <button type="button" onClick={() => toggleLost(d.address)}
+                          className={cn('tap shrink-0 rounded-full px-3 py-1.5 text-xs font-bold', isLost ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--surface-raised)] text-[var(--text-secondary)]')}>
+                          {isLost ? 'Found it' : 'Lost it?'}
+                        </button>
+                      </div>
 
-      {supported && (
-        <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
-          <label htmlFor="share-contact" className="block text-sm font-semibold text-[var(--text)]">Contact in share messages (optional)</label>
-          <p className="mt-0.5 text-xs text-[var(--text-muted)]">Added to “Share location” so whoever finds your device can reach you.</p>
-          <input id="share-contact" value={contact} maxLength={80} placeholder="e.g. +91 98xxxxxx or your name"
-            onChange={(e) => { setContact(e.target.value); writeJson(CONTACT_KEY, e.target.value); }}
-            className="mt-2 min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]" />
-        </section>
-      )}
+                      <div className="mt-3 flex items-center gap-2 rounded-2xl bg-[var(--bg-elevated)] px-3 py-2.5 text-xs">
+                        {place ? (
+                          <>
+                            <MapPin className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+                            <span className="min-w-0 flex-1 text-[var(--text-secondary)]">
+                              <b className="text-[var(--text)]">Last seen here</b> · {timeAgo(place.at, now)} · ±{Math.max(5, Math.round(place.accuracy))} m
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <Clock className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+                            <span className="text-[var(--text-muted)]">{perm?.location ? 'A place is saved next time it connects or disconnects.' : 'Turn on location memory to save places.'}</span>
+                          </>
+                        )}
+                      </div>
 
-      {error && <p role="alert" className="rounded-xl border border-[var(--danger)]/30 bg-[var(--danger)]/10 p-3 text-sm text-[var(--danger)]">{error}</p>}
-      {notice && <p role="status" className="rounded-xl border border-[var(--success)]/30 bg-[var(--success)]/10 p-3 text-sm text-[var(--success)]">{notice}</p>}
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        <Button size="sm" icon={<Radar className="h-4 w-4" />} onClick={() => setFinding(d)}>Find</Button>
+                        <Button size="sm" tone="secondary" disabled={!place || busy} icon={<MapPin className="h-4 w-4" />}
+                          onClick={() => place && void act(d.address, () => myDevices.openMap({ lat: place.lat, lng: place.lng, label: deviceLabel(d) }))}>
+                          Map
+                        </Button>
+                        <Button size="sm" tone="secondary" disabled={busy} icon={<Share2 className="h-4 w-4" />}
+                          onClick={() => void act(d.address, () => myDevices.share({ title: `Where my ${deviceLabel(d)} was`, text: buildShareText(d, seen, contact) }))}>
+                          Share
+                        </Button>
+                      </div>
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        {d.connected ? (
+                          <Button size="sm" tone="ghost" disabled={busy || !perm?.location}
+                            onClick={() => void act(d.address, async () => { await myDevices.saveCurrentLocationFor({ address: d.address, name: d.name, source: 'app' }); setNotice(`Spot saved for ${deviceLabel(d)}.`); await refresh(true); })}>
+                            Save this spot
+                          </Button>
+                        ) : (
+                          <Button size="sm" tone="ghost" busy={busy} icon={<Bluetooth className="h-4 w-4" />}
+                            onClick={() => void act(d.address, async () => {
+                              const r = await myDevices.connect({ address: d.address });
+                              setNotice(r.message);
+                              if (r.result === 'settings') await myDevices.openBluetoothSettings();
+                              await refresh(true);
+                            })}>
+                            Connect
+                          </Button>
+                        )}
+                        {isLost && (
+                          <Button size="sm" tone="ghost" icon={<Users className="h-4 w-4" />} onClick={() => askCommunity(d)}>Ask the community</Button>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
 
-      <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
-        <button type="button" onClick={() => setShowCloud((v) => !v)} className="flex w-full items-center justify-between gap-3 p-4 text-left sm:p-5">
-          <span>
-            <span className="flex items-center gap-2 text-base font-semibold text-[var(--text)]"><ShieldAlert className="h-4 w-4 text-[var(--accent)]" /> Ask the community for help (optional)</span>
-            <span className="mt-1 block text-xs text-[var(--text-muted)]">Needs a BlueGuardian account. Other users' phones can report sightings of your registered device.</span>
-          </span>
-          <ChevronRight className={cn('h-5 w-5 shrink-0 text-[var(--text-muted)] transition-transform', showCloud && 'rotate-90')} />
-        </button>
-        {showCloud && <div className="border-t border-[var(--border)] p-4 sm:p-5"><RecoveryCloud /></div>}
-      </section>
+          <Card title="Your contact in shared messages" subtitle="Optional. Added when you share a device’s location.">
+            <input id="share-contact" value={contact} maxLength={80} placeholder="Phone number or name"
+              onChange={(e) => { setContact(e.target.value); writeJson(CONTACT_KEY, e.target.value); }}
+              className="min-h-12 w-full rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3.5 text-[15px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]" />
+          </Card>
 
-      {supported && (
-        <p className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-          <Settings className="h-3 w-3" /> Earbuds in a closed case can't be detected by any phone. Open the case near the saved spot and use Find it.
-        </p>
+          <p className="px-1 text-center text-[11px] text-[var(--text-muted)]">Earbuds in a closed case can’t be detected. Open the case near the saved spot, then tap Find.</p>
+        </>
       )}
 
       {finding && <FindItSheet device={finding} onClose={() => { setFinding(null); void refresh(true); }} />}

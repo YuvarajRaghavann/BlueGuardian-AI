@@ -1,331 +1,138 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { Server } from 'lucide-react';
 import { AppSettings, IntelSettings } from '../components/SettingsExtras';
-import {
-  Shield,
-  Bell,
-  Eye,
-  RefreshCw,
-  Cpu,
-  Lock,
-} from 'lucide-react';
-import { StatusBadge } from '../components/StatusBadge';
 import { useSecurity } from '../context/SecurityContext';
 import { api } from '../services/api';
 import { localDatabase } from '../services/localDatabase';
 import { getApiBaseConfig, setApiBaseUrl, type ApiBaseConfig } from '../services/apiBase';
+import { Button, Card, Disclosure, Notice, Pill, Toggle } from '../ui/kit';
+import { SIMULATOR_ENABLED } from '../config/buildFlags';
+
+const draftFor = (config: ApiBaseConfig) =>
+  config.source === 'same-origin' || (config.source === 'build' && config.baseUrl.startsWith('/')) ? '' : config.baseUrl;
 
 export function SettingsPage() {
-  const [backendHealth, setBackendHealth] = useState<{ status: string; database: string } | null>(null);
-  const [backendError, setBackendError] = useState<string | null>(null);
-  const [backendCheckVersion, setBackendCheckVersion] = useState(0);
-  const [apiBaseConfig, setApiBaseConfigState] = useState<ApiBaseConfig>(() => getApiBaseConfig());
-  const [apiBaseDraft, setApiBaseDraft] = useState(() => {
-    const config = getApiBaseConfig();
-    return config.source === 'same-origin' || (config.source === 'build' && config.baseUrl.startsWith('/'))
-      ? ''
-      : config.baseUrl;
-  });
-  const [apiBaseBusy, setApiBaseBusy] = useState(false);
-  const [apiBaseMessage, setApiBaseMessage] = useState<string | null>(null);
-  const [localStorageAvailable, setLocalStorageAvailable] = useState<boolean | null>(null);
+  const [health, setHealth] = useState<{ status: string; database: string } | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [checkVersion, setCheckVersion] = useState(0);
+  const [config, setConfig] = useState<ApiBaseConfig>(() => getApiBaseConfig());
+  const [draft, setDraft] = useState(() => draftFor(getApiBaseConfig()));
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [storageOk, setStorageOk] = useState<boolean | null>(null);
+  const { state: securityState, dispatch } = useSecurity();
+  const policy = securityState.policy;
 
   useEffect(() => {
     let cancelled = false;
+    setHealth(null);
+    setHealthError(null);
     api.health()
-      .then(result => {
-        if (!cancelled) {
-          setBackendHealth(result);
-          setBackendError(null);
-        }
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setBackendHealth(null);
-          setBackendError(error instanceof Error ? error.message : 'Backend health check failed.');
-        }
-      });
+      .then((result) => { if (!cancelled) setHealth(result); })
+      .catch((error: unknown) => { if (!cancelled) setHealthError(error instanceof Error ? error.message : 'Server unreachable.'); });
     return () => { cancelled = true; };
-  }, [backendCheckVersion]);
+  }, [checkVersion]);
 
   useEffect(() => {
     let cancelled = false;
     localDatabase.listDevices()
-      .then(() => {
-        if (!cancelled) setLocalStorageAvailable(true);
-      })
-      .catch(() => {
-        if (!cancelled) setLocalStorageAvailable(false);
-      });
+      .then(() => { if (!cancelled) setStorageOk(true); })
+      .catch(() => { if (!cancelled) setStorageOk(false); });
     return () => { cancelled = true; };
   }, []);
 
-  const { state: securityState, dispatch } = useSecurity();
-  const policy = securityState.policy;
+  const toggle = (key: keyof typeof policy) => dispatch({ type: 'SET_POLICY', payload: { [key]: !policy[key] } });
 
-  const togglePolicy = (key: keyof typeof policy) => {
-    dispatch({
-      type: 'SET_POLICY',
-      payload: { [key]: !policy[key] },
-    });
+  const applyUrl = (value: string | null, okText: string) => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const next = setApiBaseUrl(value);
+      setConfig(next);
+      setDraft(draftFor(next));
+      setMessage(next.configured ? okText : next.error || 'No server address set.');
+      setCheckVersion((v) => v + 1);
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : 'Couldn’t save the address.');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  const handleSaveApiBase = (event: FormEvent<HTMLFormElement>) => {
+  const save = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setApiBaseBusy(true);
-    setApiBaseMessage(null);
-    try {
-      const next = setApiBaseUrl(apiBaseDraft.trim() || null);
-      setApiBaseConfigState(next);
-      setApiBaseDraft(next.source === 'same-origin' || (next.source === 'build' && next.baseUrl.startsWith('/'))
-        ? ''
-        : next.baseUrl);
-      setApiBaseMessage(next.configured
-        ? 'Backend URL saved on this device. Checking the health endpoint…'
-        : next.error || 'No remote backend URL is configured.');
-      setBackendCheckVersion((version) => version + 1);
-    } catch (error: unknown) {
-      setApiBaseMessage(error instanceof Error ? error.message : 'The backend URL could not be saved.');
-    } finally {
-      setApiBaseBusy(false);
-    }
+    applyUrl(draft.trim() || null, 'Saved. Checking the connection…');
   };
 
-  const handleResetApiBase = () => {
-    setApiBaseBusy(true);
-    setApiBaseMessage(null);
-    try {
-      const next = setApiBaseUrl(null);
-      setApiBaseConfigState(next);
-      setApiBaseDraft(next.source === 'same-origin' || (next.source === 'build' && next.baseUrl.startsWith('/'))
-        ? ''
-        : next.baseUrl);
-      setApiBaseMessage(next.configured
-        ? 'Using the default backend configuration. Checking connectivity…'
-        : 'The Android app has no default remote endpoint. Enter your deployed HTTPS backend URL.');
-      setBackendCheckVersion((version) => version + 1);
-    } catch (error: unknown) {
-      setApiBaseMessage(error instanceof Error ? error.message : 'The backend URL could not be reset.');
-    } finally {
-      setApiBaseBusy(false);
-    }
-  };
-
-  const policyItems = [
-    {
-      key: 'confirmBlock' as const,
-      available: true,
-      icon: Shield,
-      title: 'Confirm before blocking device',
-      description: 'Require explicit confirmation for BLOCK actions.',
-    },
-    {
-      key: 'confirmTrust' as const,
-      available: true,
-      icon: Shield,
-      title: 'Confirm before trusting device',
-      description: 'Require explicit confirmation for TRUST actions.',
-    },
-    {
-      key: 'requireConnectionApproval' as const,
-      available: true,
-      icon: Lock,
-      title: 'Require connection approval',
-      description: 'Require explicit in-app approval before BlueGuardian opens a browser GATT connection to an untrusted BLE device. Android system pairing remains controlled by Android Settings.',
-    },
-    {
-      key: 'enforceFastPairApproval' as const,
-      available: false,
-      icon: Bell,
-      title: 'Protect Fast Pair / quick-connect',
-      description: 'Fast Pair is controlled by Android and Google Play services; a regular app cannot disable or intercept it globally.',
-    },
-    {
-      key: 'blockUnknownFileTransfers' as const,
-      available: false,
-      icon: Eye,
-      title: 'Block unknown file transfers',
-      description: 'Android owns Bluetooth file-transfer prompts; global rejection needs privileged system integration.',
-    },
-    {
-      key: 'enableRssiGuard' as const,
-      available: false,
-      icon: RefreshCw,
-      title: 'Enable RSSI anomaly guard',
-      description: 'Needs repeated native RSSI observations and calibrated thresholds; a single reading is not enough.',
-    },
-    {
-      key: 'restrictWearablesToAudio' as const,
-      available: false,
-      icon: Cpu,
-      title: 'Restrict wearables to audio-only mode',
-      description: 'Bluetooth profile negotiation is controlled by Android and the accessory; this app cannot globally restrict it.',
-    },
-    {
-      key: 'showLowConfidenceWarnings' as const,
-      available: true,
-      icon: Eye,
-      title: 'Show low-confidence AI warnings',
-      description: 'Display warnings when model confidence is below threshold.',
-    },
-    {
-      key: 'showSimulatedEvents' as const,
-      available: true,
-      icon: Bell,
-      title: 'Show simulated security events',
-      description: 'Mark simulated events in the audit log and timeline.',
-    },
-  ];
+  const serverState = !config.configured ? { label: 'Not set', color: 'var(--warning)' }
+    : healthError ? { label: 'Offline', color: 'var(--danger)' }
+      : health?.status === 'ok' ? { label: 'Online', color: 'var(--success)' }
+        : { label: 'Checking', color: 'var(--text-muted)' };
 
   return (
     <div className="space-y-4">
+      <AppSettings />
 
-      <section className="rounded-3xl bg-[var(--surface)] p-5">
-        <div className="mb-4">
-          <h2 className="text-sm font-semibold text-[var(--text)]">Backend endpoint</h2>
-          <p className="mt-1 max-w-3xl text-xs leading-5 text-[var(--text-muted)]">
-            Configure where this app sends health, device, threat, action, event and recovery API requests. The endpoint is saved on this device and is not a secret. For the Android APK, use the deployed backend’s HTTPS URL. If you omit the trailing <code>/api</code>, BlueGuardian adds it automatically.
-          </p>
+      <Card title="Safety prompts" subtitle="Ask before decisions that change how a device is treated.">
+        <div className="space-y-2">
+          <Toggle checked={policy.confirmBlock} onChange={() => toggle('confirmBlock')} label="Confirm before blocking" />
+          <Toggle checked={policy.confirmTrust} onChange={() => toggle('confirmTrust')} label="Confirm before trusting" />
+          <Toggle checked={policy.requireConnectionApproval} onChange={() => toggle('requireConnectionApproval')} label="Approve new connections" hint="Ask before connecting to a device you haven’t trusted." />
+          <Toggle checked={policy.showLowConfidenceWarnings} onChange={() => toggle('showLowConfidenceWarnings')} label="Show early warnings" hint="Include alerts that are still uncertain." />
+          {SIMULATOR_ENABLED && (
+            <Toggle checked={policy.showSimulatedEvents} onChange={() => toggle('showSimulatedEvents')} label="Show sample activity" hint="Demo builds only." />
+          )}
         </div>
-        <form onSubmit={handleSaveApiBase} className="space-y-3">
-          <label className="block text-sm text-[var(--text-secondary)]">
-            Backend API base URL
+      </Card>
+
+      <IntelSettings />
+
+      <Disclosure label="Advanced">
+        <div className="rounded-2xl bg-[var(--bg-elevated)] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <p className="flex items-center gap-2 text-sm font-semibold"><Server className="h-4 w-4 text-[var(--accent)]" /> Server</p>
+            <Pill color={serverState.color}>{serverState.label}</Pill>
+          </div>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Used for your account and community search.</p>
+          <form onSubmit={save} className="mt-3 space-y-2">
             <input
               type="url"
               inputMode="url"
-              value={apiBaseDraft}
-              onChange={(event) => setApiBaseDraft(event.target.value)}
-              placeholder="https://your-backend.example.com/api"
-              disabled={apiBaseBusy}
-              className="mt-1 min-h-11 w-full rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-              aria-describedby="backend-url-help"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="https://your-server.example.com/api"
+              disabled={busy}
+              aria-label="Server address"
+              className="min-h-11 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3.5 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
             />
-          </label>
-          <p id="backend-url-help" className="text-xs leading-5 text-[var(--text-muted)]">
-            Active endpoint: <span className="break-all font-mono">{apiBaseConfig.baseUrl || 'Not configured for this Android build'}</span>
-            {' · '}
-            {apiBaseConfig.source === 'device' ? 'Saved on this device' : apiBaseConfig.source === 'build' ? 'Build configuration' : apiBaseConfig.source === 'same-origin' ? 'Browser same-origin /api proxy' : 'Configuration required'}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={apiBaseBusy}
-              className="min-h-10 rounded-lg bg-[var(--accent)] px-4 text-sm font-semibold text-slate-950 disabled:opacity-50"
-            >
-              {apiBaseBusy ? 'Saving…' : 'Save and test backend'}
-            </button>
-            <button
-              type="button"
-              onClick={handleResetApiBase}
-              disabled={apiBaseBusy}
-              className="min-h-10 rounded-lg border border-[var(--border)] px-4 text-sm font-semibold text-[var(--text)] disabled:opacity-50"
-            >
-              Use default
-            </button>
-          </div>
-          {apiBaseMessage && <p role="status" className="text-xs leading-5 text-[var(--text-secondary)]">{apiBaseMessage}</p>}
-          <p className="text-xs leading-5 text-[var(--text-muted)]">
-            The server must allow the Capacitor Android WebView origin <code>https://localhost</code> in <code>BLUEGUARDIAN_CORS_ORIGINS</code>. The current owner-token backend is for development only; protected APIs deliberately fail closed in production until OIDC/JWKS identity verification is configured.
-          </p>
-        </form>
-      </section>
-
-      <section className="rounded-3xl bg-[var(--surface)] p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">Backend and database</h2>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">Live result from the configured, unauthenticated `/api/health` endpoint.</p>
-          </div>
-          <StatusBadge
-            label={!apiBaseConfig.configured ? 'SETUP REQUIRED' : backendError ? 'UNAVAILABLE' : backendHealth?.status.toUpperCase() ?? 'CHECKING'}
-            variant={!apiBaseConfig.configured ? 'warning' : backendError ? 'danger' : backendHealth?.status === 'ok' ? 'success' : 'warning'}
-          />
-        </div>
-        <p className="mt-3 text-sm text-[var(--text-secondary)]">
-          Database: {backendHealth?.database ?? (backendError ? 'unknown' : 'checking')}
-        </p>
-        {backendError && <p role="alert" className="mt-2 text-xs text-[var(--danger)]">{backendError}</p>}
-      </section>
-
-      <section className="rounded-3xl bg-[var(--surface)] p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">Browser-local records</h2>
-            <p className="mt-1 max-w-2xl text-xs leading-5 text-[var(--text-muted)]">
-              Device observations and development assessments remain available in IndexedDB. After an owner token is successfully verified on the Device Recovery page, supported device, threat and security-action workflows can also synchronize through the configured owner-scoped backend. Local data remains available if the remote service is unavailable.
-            </p>
-          </div>
-          <StatusBadge
-            label={localStorageAvailable === null ? 'CHECKING' : localStorageAvailable ? 'AVAILABLE' : 'UNAVAILABLE'}
-            variant={localStorageAvailable === null ? 'warning' : localStorageAvailable ? 'success' : 'danger'}
-          />
-        </div>
-      </section>
-
-      {/* Model configuration */}
-      <IntelSettings />
-
-      {/* Security policy */}
-      <section className="rounded-3xl bg-[var(--surface)] p-5">
-        <div className="mb-5 flex gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)]">
-            <Lock className="h-5 w-5 text-[var(--accent)]" />
-          </div>
-
-          <div>
-            <h2 className="text-sm font-semibold text-[var(--text)]">
-              Security Policy
-            </h2>
-
-            <p className="mt-1 text-xs text-[var(--text-muted)]">
-              Enabled controls change BlueGuardian's own decisions and UI. The disabled items below require Android/OS privileges that a normal app or browser does not have; enabling a checkbox would falsely imply system-wide protection.
-            </p>
-          </div>
+            <p className="break-all text-[11px] text-[var(--text-muted)]">In use: {config.baseUrl || 'none'}</p>
+            <div className="flex gap-2">
+              <Button size="sm" type="submit" busy={busy}>Save and test</Button>
+              <Button size="sm" tone="secondary" disabled={busy} onClick={() => applyUrl(null, 'Using the default server. Checking…')}>Use default</Button>
+            </div>
+            {message && <p role="status" className="text-xs text-[var(--text-secondary)]">{message}</p>}
+            {healthError && config.configured && <Notice tone="danger">{healthError}</Notice>}
+            {health && <p className="text-xs text-[var(--text-muted)]">Database: {health.database}</p>}
+          </form>
         </div>
 
-        <div className="divide-y divide-[var(--border)] border-y border-[var(--border)]">
-          {policyItems.map(item => {
-            const Icon = item.icon;
-            const enabled = policy[item.key];
-
-            return (
-              <label
-                key={item.key}
-                className={`flex items-center justify-between gap-4 py-4 ${item.available ? 'cursor-pointer' : 'cursor-not-allowed opacity-70'}`}
-              >
-                <div className="flex min-w-0 items-start gap-3">
-                  <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--text)]">
-                      {item.title}
-                    </p>
-
-                    <p className="mt-0.5 text-xs leading-5 text-[var(--text-muted)]">
-                      {item.description}
-                    </p>
-                    {!item.available && (
-                      <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-[var(--warning)]">
-                        Requires system-level Android support
-                      </p>
-                    )}
-                  </div>
-                </div>
-
-                <input
-                  type="checkbox"
-                  checked={item.available && enabled}
-                  disabled={!item.available}
-                  onChange={() => togglePolicy(item.key)}
-                  className="h-5 w-5 shrink-0 accent-[var(--accent)]"
-                />
-              </label>
-            );
-          })}
+        <div className="flex items-center justify-between rounded-2xl bg-[var(--bg-elevated)] px-4 py-3">
+          <span className="text-sm font-semibold">On-device storage</span>
+          <Pill color={storageOk === null ? 'var(--text-muted)' : storageOk ? 'var(--success)' : 'var(--danger)'}>
+            {storageOk === null ? 'Checking' : storageOk ? 'Working' : 'Unavailable'}
+          </Pill>
         </div>
-      </section>
 
-      {/* General */}
-      <AppSettings />
+        <div className="rounded-2xl bg-[var(--bg-elevated)] p-4">
+          <p className="text-sm font-semibold">Managed by Android</p>
+          <p className="mt-0.5 text-xs text-[var(--text-muted)]">Apps can’t change these system-wide, so BlueGuardian doesn’t pretend to.</p>
+          <ul className="mt-2 space-y-1 text-xs text-[var(--text-secondary)]">
+            <li>• Fast Pair pop-ups</li>
+            <li>• Bluetooth file-transfer prompts</li>
+            <li>• Which features earbuds and watches can use</li>
+          </ul>
+        </div>
+      </Disclosure>
     </div>
   );
 }

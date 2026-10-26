@@ -15,7 +15,7 @@ export function IntelSettings() {
   return (
     <section className="rounded-3xl bg-[var(--surface)] p-5">
       <h2 className="text-base font-semibold">Detection and trust</h2>
-      <p className="mt-1 text-sm text-[var(--text-secondary)]">Learned on this phone from your own scans. Nothing is uploaded.</p>
+      <p className="mt-1 text-sm text-[var(--text-secondary)]">Learned from your scans. Stays on this phone.</p>
       <div className="mt-4 grid grid-cols-3 gap-2 text-center">
         {[[snap.env.scans, 'scans'], [devices, 'devices'], [snap.findings.length, 'alerts']].map(([n, l]) => (
           <div key={String(l)} className="rounded-2xl bg-[var(--bg-elevated)] py-3">
@@ -26,7 +26,7 @@ export function IntelSettings() {
       </div>
       {confirm ? (
         <div className="mt-4 rounded-2xl bg-[var(--danger)]/10 p-3">
-          <p className="text-sm">Erase all trust scores, history and alerts? Your paired devices stay paired.</p>
+          <p className="text-sm">Erase all trust scores, history and alerts? Paired devices stay paired.</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
             <button type="button" onClick={() => setConfirm(false)} className="tap rounded-xl bg-[var(--surface-raised)] py-2.5 text-sm">Cancel</button>
             <button type="button" onClick={() => { intel.replace(emptySnapshot()); setConfirm(false); }} className="tap rounded-xl bg-[var(--danger)] py-2.5 text-sm font-semibold text-[#1a0d08]">Erase</button>
@@ -75,14 +75,14 @@ export function AppSettings() {
           </div>
           <Row icon={Bluetooth} title="Nearby devices" ok={bt} action="Allow" onClick={() => void myDevices.requestBluetooth().then(refresh).catch(refresh)} />
           <Row icon={MapPin} title="Location" ok={loc?.location ?? null} action="Allow" onClick={() => void myDevices.requestLocation().then(refresh).catch(refresh)} />
-          <Row icon={MapPin} title="Location when closed" ok={loc?.background ?? null} action="Allow" onClick={() => void myDevices.requestBackgroundLocation().then(refresh).catch(refresh)} />
+          <Row icon={MapPin} title="Location in background" ok={loc?.background ?? null} action="Allow" onClick={() => void myDevices.requestBackgroundLocation().then(refresh).catch(refresh)} />
         </section>
       )}
       <section className="flex items-center gap-4 rounded-3xl bg-[var(--surface)] p-5">
         <LogoMark className="h-12 w-12" />
         <div className="flex-1">
           <p className="font-display text-base font-semibold">BlueGuardian</p>
-          <p className="text-xs text-[var(--text-muted)]">Version 1.0 · Bluetooth trust and protection</p>
+          <p className="text-xs text-[var(--text-muted)]">Version 1.0</p>
         </div>
         <button type="button" onClick={() => navigate('/welcome')} className="tap rounded-full bg-[var(--surface-raised)] px-4 py-2 text-sm font-semibold">Replay intro</button>
       </section>

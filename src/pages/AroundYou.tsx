@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { LoaderCircle, ScanLine } from 'lucide-react';
 import { DeviceCard } from '../components/DeviceCard';
@@ -11,6 +11,8 @@ import { Radar } from '../ui/Radar';
 import { VERDICT_STYLE } from '../intel/guardian';
 import { guardianFor, useGuardianVersion } from '../intel/guardianStore';
 import { cn } from '../utils/cn';
+import { normalizeBluetoothName } from '../services/bluetoothService';
+import { Notice } from '../ui/kit';
 
 type Filter = 'all' | 'safe' | 'caution' | 'unsafe';
 const FILTERS: Array<{ id: Filter; label: string }> = [
@@ -23,7 +25,7 @@ const FILTERS: Array<{ id: Filter; label: string }> = [
 const seen = (d: BluetoothDevice) => new Date(d.lastSeen).getTime();
 
 export function AroundYou() {
-  const { state, scanCombinedDevices, scanRealDevices } = useBluetoothDevices();
+  const { state, scanCombinedDevices, scanRealDevices, refreshKnownDevices } = useBluetoothDevices();
   useIntel();
   useGuardianVersion();
   const reduce = useReducedMotion();
@@ -31,10 +33,28 @@ export function AroundYou() {
   const [selected, setSelected] = useState<BluetoothDevice | null>(null);
   const native = isNativeAndroidApp();
   const scanning = state.scan.state === 'scanning';
+  const [showUnnamed, setShowUnnamed] = useState(false);
+  const [dismissedMsg, setDismissedMsg] = useState<string | null>(null);
 
-  const real = useMemo(() => state.devices.filter((d) => d.discoverySource === 'REAL'), [state.devices]);
+  // Like Android's Bluetooth screen: paired and connected devices appear as soon as you open it.
+  useEffect(() => {
+    if (native) void refreshKnownDevices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [native]);
+
+  const real = useMemo(() => {
+    // Older builds stored one device under separate classic and combined records; show it once.
+    const combined = new Set(state.devices.filter((d) => d.id.startsWith('android-combined:') && d.address).map((d) => String(d.address).toLowerCase()));
+    return state.devices.filter((d) => d.discoverySource === 'REAL'
+      && !(d.id.startsWith('android-classic:') && d.address && combined.has(d.address.toLowerCase())));
+  }, [state.devices]);
   const lastScan = real.length ? Math.max(...real.map(seen)) : null;
-  const around = real.filter((d) => d.paired || (lastScan !== null && lastScan - seen(d) < 10 * 60_000));
+  const recent = real.filter((d) => d.paired || (lastScan !== null && lastScan - seen(d) < 10 * 60_000));
+  // Nameless advertisers (rotating phone/beacon addresses) are hidden like Android settings does,
+  // unless they are risky, paired, connected or recognised.
+  const isNamed = (d: BluetoothDevice) => Boolean(normalizeBluetoothName(d.name)) || Boolean(d.paired) || d.connectionStatus === 'connected' || Boolean(d.familyLabel);
+  const unnamed = recent.filter((d) => !isNamed(d) && guardianFor(d).verdict !== 'unsafe');
+  const around = showUnnamed ? recent : recent.filter((d) => !unnamed.includes(d));
 
   const tagged = around.map((d) => {
     const g = guardianFor(d);
@@ -81,9 +101,15 @@ export function AroundYou() {
         <div className="rounded-3xl bg-[var(--surface)] px-6 py-10 text-center">
           <p className="text-lg font-bold">{around.length ? 'Nothing in this group' : 'No devices yet'}</p>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
-            {around.length ? 'Try another filter.' : native ? 'Scan to see every Bluetooth device near you, including your connected earbuds.' : 'Choose a Bluetooth device to check it.'}
+            {around.length ? 'Try another filter.' : native ? 'Scan to check every Bluetooth device near you.' : 'Choose a Bluetooth device to check it.'}
           </p>
         </div>
+      )}
+
+      {unnamed.length > 0 && (
+        <button type="button" onClick={() => setShowUnnamed((v) => !v)} className="w-full text-center text-sm font-semibold text-[var(--accent)]">
+          {showUnnamed ? 'Hide devices without a name' : `Show ${unnamed.length} device${unnamed.length === 1 ? '' : 's'} without a name`}
+        </button>
       )}
 
       <button type="button" onClick={scan} disabled={scanning}
@@ -91,7 +117,11 @@ export function AroundYou() {
         {scanning ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <ScanLine className="h-5 w-5" />}
         {scanning ? 'Scanning…' : native ? 'Scan again' : 'Choose a device'}
       </button>
-      {state.scan.state === 'error' && state.scan.error && <p className="text-center text-sm text-[var(--danger)]">{state.scan.error}</p>}
+      {!scanning && state.scan.error && state.scan.error !== dismissedMsg && (
+        <Notice tone={state.scan.state === 'error' || state.scan.state === 'permission-denied' ? 'danger' : 'info'} onDismiss={() => setDismissedMsg(state.scan.error ?? null)}>
+          {state.scan.state === 'permission-denied' ? 'Allow Nearby devices for BlueGuardian in Settings, then scan again.' : state.scan.error}
+        </Notice>
+      )}
 
       <DeviceDetailModal device={selected} onClose={() => setSelected(null)} />
     </div>

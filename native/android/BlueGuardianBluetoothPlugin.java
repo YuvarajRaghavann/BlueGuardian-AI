@@ -100,7 +100,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
     private void onModernBluetoothPermissions(PluginCall call) {
         if (getPermissionState("bluetoothScan") != PermissionState.GRANTED
             || getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
-            call.reject("BlueGuardian needs Nearby Devices permission to scan for BLE devices.");
+            call.reject("Allow Nearby devices for BlueGuardian to scan.");
             return;
         }
         startScanAfterPermissions(call);
@@ -131,7 +131,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
         try {
             if (!adapter.isEnabled()) {
-                call.reject("Bluetooth is turned off. Enable Bluetooth in Android Settings and retry.");
+                call.reject("Bluetooth is off. Turn it on and scan again.");
                 return;
             }
         } catch (SecurityException error) {
@@ -229,12 +229,12 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
      */
     private String visibilityWarning() {
         if (getPermissionState("location") != PermissionState.GRANTED) {
-            return "Location permission is off, so Android hides some nearby devices. Allow location for BlueGuardian to see everything (no GPS position is collected by scanning).";
+            return "Some devices are hidden because location is off for BlueGuardian. Allow it in Settings to see everything.";
         }
         try {
             android.location.LocationManager lm = (android.location.LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
             if (lm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !lm.isLocationEnabled()) {
-                return "The phone's Location switch is off, so Android hides some nearby devices. Turn Location on in quick settings and search again.";
+                return "Some devices are hidden because Location is off. Turn it on in quick settings and scan again.";
             }
         } catch (RuntimeException ignored) {
             // best effort
@@ -367,7 +367,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         if (getPermissionState("bluetoothScan") != PermissionState.GRANTED
             || getPermissionState("bluetoothConnect") != PermissionState.GRANTED
             || getPermissionState("location") != PermissionState.GRANTED) {
-            call.reject("Classic Bluetooth discovery needs Nearby Devices and Location permission on this Android version. Allow precise location for BlueGuardian in Android Settings; this feature does not collect GPS coordinates.");
+            call.reject("Allow location for BlueGuardian to find earbuds and speakers nearby.");
             return;
         }
         startClassicDiscoveryAfterPermissions(call);
@@ -393,7 +393,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
         try {
             if (!adapter.isEnabled()) {
-                call.reject("Bluetooth is turned off. Enable Bluetooth in Android Settings and retry.");
+                call.reject("Bluetooth is off. Turn it on and scan again.");
                 return;
             }
         } catch (SecurityException error) {
@@ -677,7 +677,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
         try {
             if (!adapter.isEnabled()) {
-                call.reject("Bluetooth is turned off. Enable Bluetooth in Android Settings and retry.");
+                call.reject("Bluetooth is off. Turn it on and scan again.");
                 return;
             }
 

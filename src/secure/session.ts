@@ -207,7 +207,7 @@ export class SecureSession {
   /** Feed one received frame. Frames are processed strictly in order. */
   receiveFrame(data: Uint8Array): Promise<void> {
     this.inbox = this.inbox.then(() => this.handleFrame(data)).catch((error: unknown) => {
-      this.notice(error instanceof Error ? error.message : 'Secure link error.', 'danger');
+      this.notice(error instanceof Error ? error.message : 'Connection error.', 'danger');
     });
     return this.inbox;
   }
@@ -339,7 +339,7 @@ export class SecureSession {
       this.o.log.add('verification_rejected', this.peerId ?? 'unknown', { reason: 'codes did not match' });
       await this.sendControl({ t: 'verify_rejected', reason: 'codes did not match' });
       await this.close('verification codes did not match', true);
-      this.notice('Codes did not match. The connection was closed; someone may be intercepting it.', 'danger');
+      this.notice('The codes didn’t match, so the connection was closed. Someone may be interfering. Try again somewhere else.', 'danger');
       return;
     }
     this.localVerified = true;
@@ -378,7 +378,7 @@ export class SecureSession {
     if (this.repairMode) {
       this.o.engine.completeRepair(peerId);
       this.o.log.add('repaired', peerId, { keyEpoch: record.keyEpoch, probationTrust: this.o.engine.config.probationTrust });
-      this.notice(`${this.peerName} re-paired. It starts on probation (chat only) and earns file access back.`, 'success');
+      this.notice(`${this.peerName} is paired again. File sharing unlocks after a short check.`, 'success');
     } else {
       const known = this.o.engine.get(peerId);
       if (!known || known.state !== 'ACTIVE') this.o.engine.enroll(peerId);
@@ -461,7 +461,7 @@ export class SecureSession {
         return;
       case 'verify_rejected':
         this.o.log.add('verification_rejected_by_peer', peer, { reason: m.reason });
-        this.notice('The other phone reported that the codes did not match. Connection closed.', 'danger');
+        this.notice('The other phone said the codes didn’t match. Connection closed.', 'danger');
         await this.close('peer rejected verification', false);
         return;
       case 'recover_challenge': {
@@ -484,7 +484,7 @@ export class SecureSession {
         const expected = record ? this.recoveryAnswer(this.recoveryChallenge, fromBase64(record.recoverySecret)) : null;
         if (!expected || !m.r || !equalBytes(expected, fromBase64(m.r))) {
           this.o.log.add('repair_failed', peer, { reason: 'recovery proof did not verify' });
-          this.notice('Re-pair failed: the other phone could not prove it is the device you paired before. Remove it and pair as a new device only if you are sure.', 'danger');
+          this.notice('This phone couldn’t prove it’s the one you paired before. Remove it and pair again only if you’re sure.', 'danger');
           await this.close('re-pair proof failed', true);
           return;
         }
@@ -504,7 +504,7 @@ export class SecureSession {
         return; // informational: the peer's view of us
       case 'isolated':
         this.o.log.add('peer_isolated_us', peer, { reason: m.reason });
-        this.notice(`${this.peerName} isolated this link (${m.reason}).`, 'warning');
+        this.notice(`${this.peerName} ended the connection for safety.`, 'warning');
         await this.close('isolated by peer', false);
         return;
       case 'chat':
@@ -554,7 +554,7 @@ export class SecureSession {
   // ------------------------------------------------------------------- chat
   async sendChat(text: string): Promise<ChatMessage> {
     const peer = this.need(this.peerId);
-    if (this.phase !== 'active') throw new Error('The link is not verified yet.');
+    if (this.phase !== 'active') throw new Error('Confirm the code on both phones first.');
     if (!this.o.engine.authorize(peer, 'chat')) throw new Error('Chat is disabled while this device is isolated.');
     const message: ChatMessage = { id: toHex(randomBytes(8)), from: 'me', text: text.slice(0, 4000), at: this.now() };
     await this.sendControl({ t: 'chat', id: message.id, text: message.text });
@@ -564,13 +564,13 @@ export class SecureSession {
   // ------------------------------------------------------------ file: sender
   async sendFile(source: FileSource, onHashProgress?: (fraction: number) => void): Promise<TransferProgress> {
     const peer = this.need(this.peerId);
-    if (this.phase !== 'active') throw new Error('The link is not verified yet.');
+    if (this.phase !== 'active') throw new Error('Confirm the code on both phones first.');
     if (!this.o.engine.authorize(peer, 'file_send')) {
-      throw new Error('File sharing is paused: this device is not at FULL trust right now.');
+      throw new Error('File sharing is paused while the connection is checked. Try again in a moment.');
     }
     const name = sanitizeFileName(source.name);
     const policy = checkOfferPolicy(name, source.size, this.o.maxFileBytes ?? MAX_FILE_BYTES);
-    if (!policy.ok) throw new Error(`This file can't be sent: ${policy.reason}.`);
+    if (!policy.ok) throw new Error(`This file can’t be sent: ${policy.reason}.`);
 
     const hasher = new Sha256();
     for (let offset = 0; offset < source.size; offset += 1024 * 1024) {
@@ -666,14 +666,14 @@ export class SecureSession {
     }
     if (this.phase !== 'active' || !this.o.engine.authorize(peer, 'file_receive')) {
       await this.sendControl({ t: 'file_reject', id: manifest.id, reason: 'receiver has file transfer disabled for this device right now' });
-      this.notice(`Blocked a file from ${this.peerName}: it is not at FULL trust.`, 'warning');
+      this.notice(`File from ${this.peerName} blocked while the connection is being checked.`, 'warning');
       return;
     }
     const policy = checkOfferPolicy(manifest.name, manifest.size, this.o.maxFileBytes ?? MAX_FILE_BYTES);
     if (!policy.ok) {
       await this.sendControl({ t: 'file_reject', id: manifest.id, reason: policy.reason ?? 'blocked by policy' });
       this.o.log.add('file_blocked', peer, { name: manifest.name, reason: policy.reason ?? null });
-      this.notice(`Blocked "${manifest.name}" from ${this.peerName}: ${policy.reason}.`, 'warning');
+      this.notice(`Blocked “${manifest.name}”: ${policy.reason}.`, 'warning');
       return;
     }
     const opened = await this.o.sink.open(manifest);
@@ -808,7 +808,7 @@ export class SecureSession {
     for (const action of decision.actions) {
       if (action.type === 'level_change') {
         this.o.log.add('trust_level_change', peer, { from: action.from, to: action.to, trust: Math.round(decision.trust), reasons: decision.reasons, telemetry: observation });
-        this.notice(`${this.peerName}: trust ${action.from} → ${action.to}${decision.reasons[0] ? ` (${decision.reasons[0]})` : ''}`, action.to === 'FULL' ? 'success' : 'warning');
+        this.notice(action.to === 'FULL' ? 'Connection verified. File sharing is on.' : action.to === 'RESTRICTED' ? 'Unusual activity on the connection. File sharing is paused for now.' : 'Connection blocked for safety.', action.to === 'FULL' ? 'success' : 'warning');
       } else if (action.type === 'rotate_keys') {
         await this.rotateSendKey(action.reason);
       } else if (action.type === 'recover') {
@@ -842,7 +842,7 @@ export class SecureSession {
       trust: Math.round(decision.trust),
       reasons: decision.reasons,
     });
-    this.notice(`${this.peerName} was isolated: ${decision.reasons[0] ?? 'trust too low'}. Re-pair it face to face to restore access.`, 'danger');
+    this.notice(`${this.peerName} was disconnected for safety. Pair again in person to reconnect.`, 'danger');
     await this.close('isolated by trust engine', false);
   }
 

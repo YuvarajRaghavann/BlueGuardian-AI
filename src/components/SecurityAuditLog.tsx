@@ -1,54 +1,50 @@
 import { formatDistanceToNow } from 'date-fns';
-import type { SecurityAction } from '../types';
-import { StatusBadge } from './StatusBadge';
-import { cn } from '../utils/cn';
+import { Ban, CheckCircle, RotateCcw, HelpCircle, Trash2 } from 'lucide-react';
+import type { SecurityAction, SecurityActionType } from '../types';
+import { Pill } from '../ui/kit';
 
-interface SecurityAuditLogProps {
-  actions: SecurityAction[];
-  title?: string;
-}
+const ACTION: Partial<Record<SecurityActionType, { label: string; icon: typeof Ban; color: string }>> = {
+  TRUST: { label: 'Trusted', icon: CheckCircle, color: 'var(--success)' },
+  MARK_UNKNOWN: { label: 'Trust removed', icon: HelpCircle, color: 'var(--text-secondary)' },
+  BLOCK: { label: 'Blocked', icon: Ban, color: 'var(--danger)' },
+  UNBLOCK: { label: 'Unblocked', icon: RotateCcw, color: 'var(--accent)' },
+  FORGET: { label: 'Forgotten', icon: Trash2, color: 'var(--text-muted)' },
+  INVESTIGATE: { label: 'Under review', icon: HelpCircle, color: 'var(--warning)' },
+  RESOLVE_THREAT: { label: 'Alert resolved', icon: CheckCircle, color: 'var(--success)' },
+  DISMISS_THREAT: { label: 'Alert dismissed', icon: RotateCcw, color: 'var(--text-secondary)' },
+  IGNORE_DEVICE: { label: 'Ignored', icon: HelpCircle, color: 'var(--text-muted)' },
+};
 
-export function SecurityAuditLog({ actions, title = 'Security Audit Log' }: SecurityAuditLogProps) {
-  if (actions.length === 0) {
-    return (
-      <div className="bg-card/80 backdrop-blur-sm rounded-xl p-6 border border-gray-800">
-        <h3 className="font-semibold text-white mb-4">{title}</h3>
-        <p className="text-muted text-center py-8">No browser actions are recorded. Local approvals, app-level blocks, and dismissals appear here when made.</p>
-      </div>
-    );
-  }
-
+/** Trust, block and forget decisions made on this phone. */
+export function SecurityAuditLog({ actions, title = 'Your decisions' }: { actions: SecurityAction[]; title?: string }) {
   return (
-    <div className="bg-card/80 backdrop-blur-sm rounded-xl p-6 border border-gray-800">
-      <h3 className="font-semibold text-white mb-4">{title}</h3>
-      <div className="space-y-3 max-h-96 overflow-y-auto">
-        {actions.map((action, idx) => (
-          <div key={action.id} className={cn('flex items-start gap-4 relative', idx < actions.length - 1 && 'pb-3')}>
-            <div className="relative flex-shrink-0">
-              <div className="w-2 h-2 rounded-full mt-2 bg-gray-600" />
-              {idx < actions.length - 1 && (
-                <div className="absolute left-1 top-4 bottom-0 w-0.5 bg-gray-700" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0 pl-3">
-              <div className="flex items-center gap-2 flex-wrap">
-                <StatusBadge label={action.type} variant="info" />
-                <StatusBadge label={action.source} variant={action.source === 'USER' ? 'success' : 'warning'} />
-                {action.simulated && <StatusBadge label="SIMULATED" variant="warning" />}
-              </div>
-              <p className="text-sm text-white mt-1">
-                <strong>{action.deviceName}</strong> · {action.reason}
-              </p>
-              <p className="text-xs text-muted mt-1">
-                Outcome: {action.type === 'BLOCK' ? 'Blocked from future app-level access' : action.type === 'TRUST' ? 'Approved and treated as a trusted device candidate' : action.type === 'MARK_UNKNOWN' ? 'Device identity reset to unknown' : 'Security decision recorded'}
-              </p>
-              <p className="text-xs text-muted mt-1 ml-8">
-                {formatDistanceToNow(action.timestamp, { addSuffix: true })}
-              </p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <section>
+      <h2 className="mb-2.5 px-1 text-[15px] font-bold">{title}</h2>
+      {actions.length === 0 ? (
+        <p className="rounded-3xl bg-[var(--surface)] px-4 py-4 text-sm text-[var(--text-muted)]">When you trust, block or forget a device, it’s recorded here.</p>
+      ) : (
+        <ol className="divide-y divide-[var(--border)] overflow-hidden rounded-3xl bg-[var(--surface)]">
+          {actions.map((action) => {
+            const a = ACTION[action.type] ?? { label: action.type.replace(/_/g, ' ').toLowerCase(), icon: HelpCircle, color: 'var(--text-secondary)' };
+            return (
+              <li key={action.id} className="flex items-center gap-3 px-4 py-3">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ background: `color-mix(in srgb, ${a.color} 15%, transparent)`, color: a.color }}>
+                  <a.icon className="h-4 w-4" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{action.deviceName}</p>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-[var(--text-muted)]">
+                    <span style={{ color: a.color }}>{a.label}</span>
+                    · {formatDistanceToNow(action.timestamp, { addSuffix: true })}
+                    {action.source === 'SYSTEM' && <Pill>Automatic</Pill>}
+                    {action.simulated && <Pill color="var(--warning)">Sample</Pill>}
+                  </p>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }

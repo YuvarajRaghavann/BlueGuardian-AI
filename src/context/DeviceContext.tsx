@@ -994,7 +994,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           scanObservations.push({ address: item.address, name: item.name, transport: 'PAIRED', paired: item.paired, connected: item.connected });
         }
       } catch (error: unknown) {
-        messages.push('Paired devices: ' + (error instanceof Error ? error.message : 'unavailable'));
+        messages.push(error instanceof Error ? error.message : 'Couldn’t read paired devices.');
       }
 
       // The transports are intentionally sequential, not simultaneous. This avoids
@@ -1024,7 +1024,6 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           bleError = bleResult.error;
         } else {
           if (bleResult.warning) messages.push(bleResult.warning);
-          if (bleResult.devicesFound === 0 && bleResult.message) messages.push('BLE: ' + bleResult.message);
         }
       } catch (error: unknown) {
         bleError = error instanceof Error ? error.message : 'Unknown BLE discovery error.';
@@ -1049,7 +1048,6 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           classicError = classicResult.error;
         } else {
           if (classicResult.warning && !messages.includes(classicResult.warning)) messages.push(classicResult.warning);
-          if (classicResult.devicesFound === 0 && classicResult.message) messages.push('Classic: ' + classicResult.message);
         }
       } catch (error: unknown) {
         classicError = error instanceof Error ? error.message : 'Unknown classic discovery error.';
@@ -1063,8 +1061,8 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         }
       });
 
-      if (bleError) messages.push('BLE scan failed: ' + bleError);
-      if (classicError) messages.push('Classic scan failed: ' + classicError);
+      if (bleError && bleError !== classicError) messages.push(bleError);
+      if (classicError) messages.push(classicError);
       const bothFailed = Boolean(bleError && classicError);
       const permissionFailure = bothFailed && /permission|denied|not allowed/i.test(bleError + ' ' + classicError);
 
@@ -1079,7 +1077,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           error: messages.length > 0
             ? messages.join(' ')
             : observedIdentities.size === 0
-              ? 'Combined scan completed, but Android reported no BLE advertisements or discoverable classic devices.'
+              ? 'No devices found. Check that Bluetooth is on and the device is nearby.'
               : undefined,
         },
       });

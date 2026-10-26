@@ -20,7 +20,7 @@ const TITLES: Record<string, string> = {
   '/dashboard': 'BlueGuardian',
   '/devices': 'Around you',
   '/threats': 'Alerts',
-  '/recovery': 'Find my devices',
+  '/recovery': 'Find',
   '/secure-share': 'Secure Share',
   '/events': 'Activity',
   '/analytics': 'Insights',
@@ -111,7 +111,7 @@ export function DashboardLayout() {
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[15px] font-semibold">{account.email ?? 'Not signed in'}</span>
                 <span className="block text-xs text-[var(--text-muted)]">
-                  {account.status === 'signed-in' ? 'Signed in, secured by Keystore' : account.status === 'restoring' ? 'Signing in…' : account.status === 'offline' ? 'Offline, will reconnect' : 'Sign in for community recovery'}
+                  {account.status === 'signed-in' ? 'Signed in' : account.status === 'restoring' ? 'Signing in…' : account.status === 'offline' ? 'Offline · reconnects automatically' : 'Sign in to use community search'}
                 </span>
               </span>
               {account.email ? (
@@ -123,9 +123,9 @@ export function DashboardLayout() {
               )}
             </div>
             {[
-              { to: '/events', label: 'Activity', sub: 'Everything that happened, in order', icon: Activity },
-              { to: '/analytics', label: 'Insights', sub: 'Trends from your scans', icon: BarChart2 },
-              { to: '/settings', label: 'Settings', sub: 'Permissions, backend and policies', icon: Settings },
+              { to: '/events', label: 'Activity', sub: 'What happened, and when', icon: Activity },
+              { to: '/analytics', label: 'Insights', sub: 'Patterns from your scans', icon: BarChart2 },
+              { to: '/settings', label: 'Settings', sub: 'Permissions and preferences', icon: Settings },
             ].map(({ to, label, sub, icon: Icon }) => (
               <button key={to} type="button" onClick={() => { setMoreOpen(false); navigate(to); }}
                 className="tap flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left hover:bg-[var(--surface)]">

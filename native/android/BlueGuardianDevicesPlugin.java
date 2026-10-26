@@ -219,7 +219,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
         }
         boolean ok = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? granted("bluetoothConnect") : true;
         if (!ok) {
-            call.reject("BlueGuardian needs the Nearby Devices permission for this.");
+            call.reject("Allow Nearby devices for BlueGuardian, then try again.");
             return;
         }
         switch (call.getMethodName()) {
@@ -247,7 +247,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
                 return null;
             }
         } catch (SecurityException error) {
-            call.reject("Allow Nearby Devices for BlueGuardian and try again.");
+            call.reject("Allow Nearby devices for BlueGuardian, then try again.");
             return null;
         }
         return adapter;
@@ -419,7 +419,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
                 if (!out.containsKey(address)) out.put(address, describe(adapter.getRemoteDevice(address), connected));
             }
         } catch (SecurityException error) {
-            call.reject("Allow Nearby Devices for BlueGuardian and try again.");
+            call.reject("Allow Nearby devices for BlueGuardian, then try again.");
             return;
         }
         JSONObject lastSeen = BlueGuardianPresenceReceiver.LastSeenStore.readAll(getContext());
@@ -484,7 +484,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
             bond = device.getBondState();
             type = device.getType();
         } catch (SecurityException error) {
-            call.reject("Allow Nearby Devices for BlueGuardian and try again.");
+            call.reject("Allow Nearby devices for BlueGuardian, then try again.");
             return;
         }
 
@@ -492,7 +492,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
         if (isConnectedNow(adapter, device)) {
             JSObject out = new JSObject();
             out.put("result", "connected");
-            out.put("message", "Connected to this phone.");
+            out.put("message", "Already connected.");
             call.resolve(out);
             return;
         }
@@ -513,7 +513,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
             if (!started) {
                 JSObject out = new JSObject();
                 out.put("result", "settings");
-                out.put("message", "Android didn't start pairing. Put the device in pairing mode (for earbuds: open the case or hold the button until the light blinks) and tap again, or pair it in Bluetooth settings.");
+                out.put("message", "Pairing didn't start. Put the device in pairing mode and try again.");
                 call.resolve(out);
                 return;
             }
@@ -536,7 +536,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
             resetPendingPair();
             JSObject out = new JSObject();
             out.put("result", "pairing");
-            out.put("message", "Still waiting for pairing. Accept the prompt on screen (and on the device if it shows a code), then check the device list.");
+            out.put("message", "Still waiting. Accept the pairing request on screen.");
             resolveKeptAlive(pending, out);
         };
         mainHandler.postDelayed(pendingPairTimeout, 45000);
@@ -565,7 +565,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
         if (state == BluetoothDevice.BOND_NONE) {
             JSObject out = new JSObject();
             out.put("result", "settings");
-            out.put("message", "Pairing was cancelled or the device refused it. Put the device in pairing mode and try again.");
+            out.put("message", "Pairing was cancelled. Put the device in pairing mode and try again.");
             resolveKeptAlive(pending, out);
             return;
         }
@@ -644,10 +644,10 @@ public class BlueGuardianDevicesPlugin extends Plugin {
                     out.put("message", "Connected.");
                 } else if (requested) {
                     out.put("result", "requested");
-                    out.put("message", "Paired. Asked Android to connect; if it doesn't connect in a few seconds, take the earbuds out of the case, or tap the device in Bluetooth settings.");
+                    out.put("message", "Paired. If it doesn't connect in a few seconds, tap it in Bluetooth settings.");
                 } else {
                     out.put("result", "settings");
-                    out.put("message", "Paired. Android only lets its own Bluetooth settings reconnect earbuds and speakers, so tap \"Open Bluetooth settings\" and tap the device there. Tip: take the earbuds out of the case first; most reconnect on their own.");
+                    out.put("message", "Android reconnects earbuds and speakers from its Bluetooth settings. Tap the device there.");
                 }
                 resolveKeptAlive(call, out);
                 return;
@@ -668,7 +668,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
             closeGatt(device.getAddress());
             JSObject out = new JSObject();
             out.put("result", "settings");
-            out.put("message", "The device didn't accept a connection. Make sure it's awake and not connected to another phone, then try again.");
+            out.put("message", "The device didn't respond. Make sure it's on and not connected to another phone.");
             resolveKeptAlive(call, out);
         };
         mainHandler.postDelayed(timeout, 12000);
@@ -679,8 +679,8 @@ public class BlueGuardianDevicesPlugin extends Plugin {
             JSObject out = new JSObject();
             out.put("result", connected ? "connected" : "settings");
             out.put("message", connected
-                ? "Connected. BlueGuardian keeps this link open while the app is running."
-                : "The device closed the connection. Make sure it's awake and not connected to another phone, then try again.");
+                ? "Connected."
+                : "The device ended the connection. Try again.");
             resolveKeptAlive(call, out);
         });
         if (!opened) {
@@ -688,7 +688,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
             mainHandler.removeCallbacks(timeout);
             JSObject out = new JSObject();
             out.put("result", "settings");
-            out.put("message", "Android refused to open a connection to this device.");
+            out.put("message", "Couldn't connect to this device.");
             resolveKeptAlive(call, out);
         }
     }
@@ -876,7 +876,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
             if (gattRef[0] == null) finish.run();
         } catch (SecurityException error) {
             finished[0] = true;
-            call.reject("Allow Nearby Devices for BlueGuardian and try again.");
+            call.reject("Allow Nearby devices for BlueGuardian, then try again.");
         }
     }
 
@@ -971,12 +971,12 @@ public class BlueGuardianDevicesPlugin extends Plugin {
 
     private String scanVisibilityWarning() {
         if (!granted("location")) {
-            return "Location permission is off, so Android hides the device's signal. Allow location for BlueGuardian and try again.";
+            return "Allow location for BlueGuardian so Android can show this device's signal.";
         }
         try {
             android.location.LocationManager lm = (android.location.LocationManager) getContext().getSystemService(Context.LOCATION_SERVICE);
             if (lm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !lm.isLocationEnabled()) {
-                return "Turn on Location in quick settings; Android hides Bluetooth signals while it is off.";
+                return "Turn on Location in quick settings so Android can show Bluetooth signals.";
             }
         } catch (RuntimeException ignored) {
             // best effort
@@ -1073,7 +1073,7 @@ public class BlueGuardianDevicesPlugin extends Plugin {
         }
         BlueGuardianPresenceReceiver.LastSeenStore.captureLocation(getContext(), 10000, location -> {
             if (location == null) {
-                call.reject("Couldn't get a location fix. Turn on Location in quick settings and try again.");
+                call.reject("Couldn't get your location. Turn on Location and try again.");
                 return;
             }
             call.resolve(locationJson(location));

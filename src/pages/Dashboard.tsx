@@ -68,12 +68,12 @@ export function Dashboard() {
         <Radar dots={dots} scanning={scanning} onScan={scan} onSelect={(id) => setSelected(real.find((d) => d.id === id) ?? null)} />
         <motion.div className="mt-4 text-center" initial={reduce ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
           <h2 className="text-[26px] font-extrabold leading-tight">
-            {scanning ? 'Checking…' : unsafe ? `${unsafe} unsafe device${unsafe === 1 ? '' : 's'} near you` : alerts.length ? `${alerts.length} alert${alerts.length === 1 ? '' : 's'} near you` : around.length ? 'All clear around you' : 'Tap your phone to scan'}
+            {scanning ? 'Checking…' : unsafe ? `${unsafe} unsafe device${unsafe === 1 ? '' : 's'} near you` : alerts.length ? `${alerts.length} alert${alerts.length === 1 ? '' : 's'} near you` : around.length ? 'All clear around you' : 'Tap to scan'}
           </h2>
           <p className="mt-1 text-sm text-[var(--text-secondary)]">
             {lastScan
               ? `${around.length} devices checked, ${safe} safe. Scanned ${formatDistanceToNow(lastScan, { addSuffix: true })}.`
-              : 'BlueGuardian checks every Bluetooth device near you before you connect.'}
+              : 'Check every Bluetooth device near you before you connect.'}
           </p>
         </motion.div>
       </section>

@@ -1,13 +1,15 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
-  Activity, Ban, CheckCircle, Database, Link, LoaderCircle, Lock, Radio, RefreshCw,
-  Search, Shield, ShieldAlert, ShieldCheck, Signal, Smartphone, Trash2, Unlink, X,
+  ArrowDownToLine, ArrowUpFromLine, Check, Download, FileText, LoaderCircle, Lock, MessageSquare, Pencil, Radio,
+  RefreshCw, Search, Send, ShieldAlert, ShieldCheck, Smartphone, Trash2, Unlink, X,
 } from 'lucide-react';
 import { useSecureLink, type PendingOffer } from '../context/SecureLinkContext';
 import { fromBase64 } from '../secure/crypto/bytes';
 import { fingerprint } from '../secure/peerStore';
 import type { TransferProgress } from '../secure/session';
 import type { TrustLevel } from '../secure/trustEngine';
+import { Button, Card, Disclosure, Empty, Notice, Pill, StepTrack, errorText } from '../ui/kit';
 import { cn } from '../utils/cn';
 
 function formatBytes(n: number): string {
@@ -16,108 +18,78 @@ function formatBytes(n: number): string {
   return `${(n / 1048576).toFixed(1)} MB`;
 }
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-const LEVEL_STYLE: Record<TrustLevel, { label: string; color: string; note: string }> = {
-  FULL: { label: 'Full access', color: 'var(--success)', note: 'Chat and file sharing allowed.' },
-  RESTRICTED: { label: 'Restricted', color: 'var(--warning)', note: 'File sharing paused; chat only. Keys were rotated.' },
-  ISOLATED: { label: 'Isolated', color: 'var(--danger)', note: 'Link closed and pairing revoked. Re-pair face to face.' },
+const LEVEL: Record<TrustLevel, { label: string; color: string; note: string }> = {
+  FULL: { label: 'Protected', color: 'var(--success)', note: 'Encrypted and verified. Files and messages are on.' },
+  RESTRICTED: { label: 'Checking', color: 'var(--warning)', note: 'Unusual activity. Messages only until it settles.' },
+  ISOLATED: { label: 'Blocked', color: 'var(--danger)', note: 'Disconnected for safety. Pair again in person.' },
 };
 
-function Card({ title, icon, children, action }: { title: string; icon: ReactNode; children: ReactNode; action?: ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 sm:p-5">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
-          <span className="text-[var(--accent)]">{icon}</span>
-          {title}
-        </h2>
-        {action}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function Button({ children, onClick, tone = 'primary', disabled, className, type = 'button' }: {
-  children: ReactNode;
-  type?: 'button' | 'submit';
-  onClick?: () => void;
-  tone?: 'primary' | 'ghost' | 'danger' | 'success';
-  disabled?: boolean;
-  className?: string;
-}) {
-  const tones = {
-    primary: 'bg-[var(--accent)] text-[#041016] hover:bg-[var(--accent-strong)]',
-    ghost: 'border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-white',
-    danger: 'border border-[var(--danger)]/50 text-[var(--danger)] hover:bg-[var(--danger)]/10',
-    success: 'bg-[var(--success)] text-[#041016] hover:opacity-90',
-  };
-  return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn('inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50', tones[tone], className)}
-    >
-      {children}
-    </button>
-  );
-}
-
-function TrustSparkline({ values }: { values: number[] }) {
-  if (values.length < 2) return null;
-  const w = 240;
-  const h = 48;
-  const points = values.map((v, i) => `${(i / (values.length - 1)) * w},${h - (v / 100) * h}`).join(' ');
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-12 w-full" role="img" aria-label="Trust score over the last minute">
-      <line x1="0" x2={w} y1={h - 0.7 * h} y2={h - 0.7 * h} stroke="var(--warning)" strokeOpacity="0.35" strokeDasharray="3 4" />
-      <line x1="0" x2={w} y1={h - 0.4 * h} y2={h - 0.4 * h} stroke="var(--danger)" strokeOpacity="0.35" strokeDasharray="3 4" />
-      <polyline points={points} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" />
-    </svg>
-  );
+function transferText(t: TransferProgress): { text: string; color: string } {
+  const pct = t.size ? Math.round((t.bytes / t.size) * 100) : 100;
+  switch (t.state) {
+    case 'offered': return { text: 'Waiting for them to accept', color: 'var(--text-muted)' };
+    case 'awaiting_approval': return { text: 'Waiting for you to accept', color: 'var(--warning)' };
+    case 'transferring': return { text: `${t.direction === 'send' ? 'Sending' : 'Receiving'} · ${pct}%`, color: 'var(--accent)' };
+    case 'verifying': return { text: 'Checking file…', color: 'var(--accent)' };
+    case 'done': return { text: t.direction === 'send' ? 'Sent' : 'Received · saved to inbox', color: 'var(--success)' };
+    case 'rejected': return { text: 'Declined', color: 'var(--text-muted)' };
+    case 'cancelled': return { text: t.reason ? `Stopped · ${t.reason}` : 'Stopped', color: 'var(--warning)' };
+    default: return { text: t.reason ? `Failed · ${t.reason}` : 'Failed', color: 'var(--danger)' };
+  }
 }
 
 function TransferRow({ t }: { t: TransferProgress }) {
+  const s = transferText(t);
   const pct = t.size ? Math.round((t.bytes / t.size) * 100) : 100;
-  const bad = t.state === 'failed' || t.state === 'rejected' || t.state === 'cancelled';
+  const Icon = t.direction === 'send' ? ArrowUpFromLine : ArrowDownToLine;
   return (
-    <li className="rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-      <div className="flex items-center justify-between gap-2 text-sm">
-        <span className="min-w-0 truncate font-medium text-[var(--text)]">{t.direction === 'send' ? '↑' : '↓'} {t.name}</span>
-        <span className={cn('shrink-0 text-xs', bad ? 'text-[var(--danger)]' : t.state === 'done' ? 'text-[var(--success)]' : 'text-[var(--text-muted)]')}>
-          {t.state.replace('_', ' ')}
-        </span>
+    <li className="flex items-center gap-3 px-4 py-3">
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--surface-raised)] text-[var(--text-secondary)]"><Icon className="h-4 w-4" /></span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="truncate text-sm font-semibold">{t.name}</p>
+          <span className="shrink-0 text-[11px] text-[var(--text-muted)]">{formatBytes(t.size)}</span>
+        </div>
+        {(t.state === 'transferring' || t.state === 'verifying') && (
+          <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[var(--surface-hover)]">
+            <motion.div className="h-full rounded-full bg-[var(--accent)]" animate={{ width: `${pct}%` }} transition={{ ease: 'easeOut' }} />
+          </div>
+        )}
+        <p className="mt-1 truncate text-xs" style={{ color: s.color }}>{s.text}</p>
       </div>
-      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-hover)]">
-        <div className="h-full rounded-full bg-[var(--accent)] transition-all" style={{ width: `${pct}%` }} />
-      </div>
-      <p className="mt-1.5 text-[11px] text-[var(--text-muted)]">
-        {formatBytes(t.bytes)} of {formatBytes(t.size)}
-        {t.resumedFrom ? ` · resumed from ${formatBytes(t.resumedFrom)}` : ''}
-        {t.reason ? ` · ${t.reason}` : ''}
-      </p>
     </li>
   );
 }
 
-function OfferCard({ offer, onAnswer }: { offer: PendingOffer; onAnswer: (accept: boolean) => void }) {
+function OfferCard({ offer, onAnswer, busy }: { offer: PendingOffer; onAnswer: (accept: boolean) => void; busy: boolean }) {
   const m = offer.manifest;
   return (
-    <div className="rounded-xl border border-[var(--accent)]/40 bg-[var(--accent-soft)] p-3">
-      <p className="text-sm font-semibold text-[var(--text)]">Incoming file: {m.name}</p>
-      <p className="mt-1 text-xs text-[var(--text-secondary)]">
-        {formatBytes(m.size)} · SHA-256 {m.sha256.slice(0, 12)}…
-        {offer.resumeFromBytes > 0 ? ` · resumes from ${formatBytes(offer.resumeFromBytes)}` : ''}
-      </p>
-      <p className="mt-1 text-[11px] text-[var(--text-muted)]">It goes into quarantine first, is checked, and is never opened automatically.</p>
-      <div className="mt-3 flex gap-2">
-        <Button tone="success" onClick={() => onAnswer(true)}><CheckCircle className="h-4 w-4" /> Accept</Button>
-        <Button tone="ghost" onClick={() => onAnswer(false)}><Ban className="h-4 w-4" /> Decline</Button>
+    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-3xl bg-[var(--accent-soft)] p-4 ring-1 ring-[var(--border-strong)]">
+      <div className="flex items-center gap-3">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-[var(--bg-elevated)] text-[var(--accent)]"><FileText className="h-5 w-5" /></span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[15px] font-bold">{m.name}</p>
+          <p className="text-xs text-[var(--text-secondary)]">{formatBytes(m.size)}{offer.resumeFromBytes > 0 ? ` · resumes at ${formatBytes(offer.resumeFromBytes)}` : ''}</p>
+        </div>
       </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Button tone="secondary" disabled={busy} onClick={() => onAnswer(false)}>Decline</Button>
+        <Button tone="success" disabled={busy} icon={<Check className="h-4 w-4" />} onClick={() => onAnswer(true)}>Accept</Button>
+      </div>
+    </motion.div>
+  );
+}
+
+function Pulse({ children }: { children: ReactNode }) {
+  const reduce = useReducedMotion();
+  return (
+    <div className="relative mx-auto grid h-36 w-36 place-items-center">
+      {!reduce && [0, 1].map((i) => (
+        <motion.span key={i} className="absolute inset-0 rounded-full border-2 border-[var(--accent)]"
+          initial={{ scale: 0.6, opacity: 0.5 }} animate={{ scale: 1.25, opacity: 0 }}
+          transition={{ duration: 2.2, repeat: Infinity, delay: i * 1.1, ease: 'easeOut' }} />
+      ))}
+      <span className="relative grid h-24 w-24 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">{children}</span>
     </div>
   );
 }
@@ -126,10 +98,26 @@ export function SecureShare() {
   const link = useSecureLink();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
   const [chatDraft, setChatDraft] = useState('');
+  const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(link.localName);
-  const [showLog, setShowLog] = useState(false);
+  const [queue, setQueue] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  const chatEnd = useRef<HTMLDivElement>(null);
+
+  useEffect(() => { chatEnd.current?.scrollIntoView({ block: 'nearest' }); }, [link.chats.length, chatOpen]);
+  useEffect(() => { setNameDraft(link.localName); }, [link.localName]);
+
+  // A search that ends with no phones gets a clear hint instead of silently resetting.
+  const [noPhone, setNoPhone] = useState(false);
+  const prevMode = useRef(link.mode);
+  useEffect(() => {
+    if (prevMode.current === 'discovering' && link.mode === 'idle' && link.hosts.length === 0) setNoPhone(true);
+    if (link.mode !== 'idle') setNoPhone(false);
+    prevMode.current = link.mode;
+  }, [link.mode, link.hosts.length]);
 
   const run = async (label: string, task: () => Promise<unknown>) => {
     setBusy(label);
@@ -143,167 +131,171 @@ export function SecureShare() {
     }
   };
 
+  /** Sends the chosen files one after another; the screen stays usable meanwhile. */
+  const sendFiles = async (files: File[]) => {
+    setError(null);
+    setQueue((n) => n + files.length);
+    for (const file of files) {
+      try {
+        await link.sendFile(file);
+      } catch (e) {
+        setError(`${file.name}: ${errorText(e)}`);
+      } finally {
+        setQueue((n) => Math.max(0, n - 1));
+      }
+    }
+  };
+
   const level = link.trust?.level ?? null;
-  const caps = link.trust?.capabilities ?? [];
-  const canSendFiles = link.phase === 'active' && (level === null || caps.includes('file_send'));
+  const canSendFiles = link.phase === 'active' && (level === null || (link.trust?.capabilities ?? []).includes('file_send'));
+  const inSession = link.mode === 'session' || link.phase === 'verifying' || link.phase === 'active' || link.phase === 'handshaking';
+  const stage = link.phase === 'active' ? 2 : link.phase === 'verifying' ? 1 : 0;
+  const peer = link.verify?.peerName ?? 'the other phone';
 
   return (
-    <div className="relative space-y-5 sm:space-y-6">
-      <header className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-gradient-to-br from-[var(--surface)] via-[var(--surface)] to-[var(--surface-raised)] p-5 sm:p-6">
-        <h2 className="text-[24px] font-extrabold leading-tight text-[var(--text)]">Phone-to-phone, verified and encrypted</h2>
-        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-[var(--text-secondary)]">
-          Pair once by comparing a 6-digit code. Every message and file is end-to-end encrypted, and the link is
-          re-checked every second: if the other phone starts behaving suspiciously it loses file access first, then is cut off.
-        </p>
-        {link.ready && (
-          <div className="mt-4 flex flex-wrap gap-2 text-[11px]">
-            <span className="rounded-full border border-[var(--border)] px-2.5 py-1 text-[var(--text-secondary)]">This phone: <span className="font-mono text-[var(--text)]">{link.myFingerprint}</span></span>
-            <span className={cn('rounded-full border px-2.5 py-1', link.keyProtection === 'software' ? 'border-[var(--warning)]/50 text-[var(--warning)]' : 'border-[var(--success)]/50 text-[var(--success)]')}>
-              Keys: {link.keyProtection === 'strongbox' ? 'StrongBox hardware' : link.keyProtection === 'keystore' ? 'Android Keystore' : 'software only (browser preview)'}
-            </span>
-          </div>
-        )}
-      </header>
-
-      {link.notices.length > 0 && (
-        <div className="space-y-2" aria-live="polite">
-          {link.notices.map((n) => (
-            <div key={n.id} className={cn('flex items-start justify-between gap-3 rounded-xl border p-3 text-sm',
-              n.tone === 'danger' ? 'border-[var(--danger)]/50 text-[var(--danger)]'
-                : n.tone === 'warning' ? 'border-[var(--warning)]/50 text-[var(--warning)]'
-                  : n.tone === 'success' ? 'border-[var(--success)]/50 text-[var(--success)]'
-                    : 'border-[var(--border)] text-[var(--text-secondary)]')}
-            >
-              <span>{n.text}</span>
-              <button type="button" aria-label="Dismiss" onClick={() => link.dismissNotice(n.id)} className="shrink-0 p-1"><X className="h-4 w-4" /></button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {error && (
-        <div className="flex items-start justify-between gap-3 rounded-xl border border-[var(--danger)]/50 p-3 text-sm text-[var(--danger)]">
-          <span>{error}</span>
-          <button type="button" aria-label="Dismiss" onClick={() => setError(null)} className="shrink-0 p-1"><X className="h-4 w-4" /></button>
-        </div>
-      )}
+    <div className="space-y-5">
+      {/* Notices from the connection and this screen */}
+      <AnimatePresence initial={false}>
+        {link.notices.slice(0, 2).map((n) => (
+          <motion.div key={n.id} initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}>
+            <Notice tone={n.tone} onDismiss={() => link.dismissNotice(n.id)}>{n.text}</Notice>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+      {error && <Notice tone="danger" onDismiss={() => setError(null)}>{error}</Notice>}
+      {saved && <Notice tone="success" onDismiss={() => setSaved(null)}>Saved to {saved}</Notice>}
 
       {!link.supported && (
-        <Card title="Open the Android app" icon={<Smartphone className="h-4 w-4" />}>
-          <p className="text-sm text-[var(--text-secondary)]">
-            Secure Share uses Bluetooth LE channels that only the BlueGuardian Android app (Android 10 or newer) can open.
-            Install the APK on two phones, open Secure Share on both, and follow the steps.
-          </p>
+        <Empty icon={<Smartphone className="h-6 w-6" />} title="Available in the Android app">
+          Install BlueGuardian on both phones (Android 10 or newer) to share files securely.
+        </Empty>
+      )}
+      {link.initError && <Notice tone="danger">{link.initError}</Notice>}
+      {link.capabilities && !link.capabilities.l2cap && (
+        <Notice tone="warning">Secure Share needs Android 10 or newer.</Notice>
+      )}
+
+      {/* ------------------------------------------------------------ start */}
+      {link.supported && link.ready && link.mode === 'idle' && !inSession && link.hosts.length === 0 && (
+        <>
+          <div className="text-center">
+            <h2 className="text-[22px] font-extrabold">Share files privately</h2>
+            <p className="mt-1 text-sm text-[var(--text-secondary)]">Phone to phone over Bluetooth. Encrypted, no internet needed.</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button type="button" disabled={Boolean(busy)} onClick={() => void run('discover', link.discover)}
+              className="tap flex flex-col items-center gap-3 rounded-3xl bg-[var(--accent)] p-5 text-white shadow-[0_14px_36px_rgba(140,124,255,0.3)] disabled:opacity-60">
+              <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/15"><Send className="h-7 w-7" /></span>
+              <span className="text-base font-bold">Send</span>
+              <span className="text-xs text-white/80">Find the other phone</span>
+            </button>
+            <button type="button" disabled={Boolean(busy)} onClick={() => void run('host', link.startHosting)}
+              className="tap flex flex-col items-center gap-3 rounded-3xl bg-[var(--surface)] p-5 disabled:opacity-60">
+              <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]"><ArrowDownToLine className="h-7 w-7" /></span>
+              <span className="text-base font-bold">Receive</span>
+              <span className="text-xs text-[var(--text-muted)]">Show a code to connect</span>
+            </button>
+          </div>
+          <p className="text-center text-xs text-[var(--text-muted)]">Once connected, both phones can send.</p>
+
+          <div className="flex items-center justify-between rounded-2xl bg-[var(--surface)] px-4 py-3">
+            {editingName ? (
+              <form className="flex w-full items-center gap-2" onSubmit={(e) => { e.preventDefault(); link.setLocalName(nameDraft); setEditingName(false); }}>
+                <input autoFocus value={nameDraft} maxLength={40} onChange={(e) => setNameDraft(e.target.value)}
+                  className="min-h-10 flex-1 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-sm outline-none focus:border-[var(--accent)]" />
+                <Button size="sm" type="submit">Save</Button>
+              </form>
+            ) : (
+              <>
+                <span className="min-w-0 text-sm text-[var(--text-secondary)]">Shown as <b className="text-[var(--text)]">{link.localName}</b></span>
+                <button type="button" onClick={() => setEditingName(true)} className="flex items-center gap-1 text-sm font-semibold text-[var(--accent)]"><Pencil className="h-3.5 w-3.5" /> Edit</button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+
+      {/* ---------------------------------------------------------- receive */}
+      {link.mode === 'hosting' && (
+        <Card className="text-center">
+          <Pulse><Radio className="h-9 w-9" /></Pulse>
+          <p className="mt-4 text-sm text-[var(--text-secondary)]">On the other phone, tap <b className="text-[var(--text)]">Send</b> and choose</p>
+          <p className="font-display mt-2 text-5xl font-semibold tracking-[0.3em]">{link.hostCode}</p>
+          <p className="mt-3 text-xs text-[var(--text-muted)]">Keep this screen open.</p>
+          <Button tone="secondary" className="mt-4" onClick={() => void run('stop', link.stopHosting)}>Cancel</Button>
         </Card>
       )}
 
-      {link.initError && (
-        <Card title="Secure Share could not start" icon={<ShieldAlert className="h-4 w-4" />}>
-          <p className="text-sm text-[var(--danger)]">{link.initError}</p>
-        </Card>
-      )}
-
-      {link.supported && link.ready && link.mode === 'idle' && (
-        <Card title="Start a secure link" icon={<Link className="h-4 w-4" />}>
-          <label className="block text-xs text-[var(--text-muted)]" htmlFor="secure-name">Name shown to the other phone</label>
-          <div className="mt-1 flex gap-2">
-            <input
-              id="secure-name"
-              value={nameDraft}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onBlur={() => link.setLocalName(nameDraft)}
-              maxLength={40}
-              className="min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <button type="button" disabled={!!busy} onClick={() => run('host', link.startHosting)}
-              className="rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-50">
-              <Radio className="h-5 w-5 text-[var(--accent)]" />
-              <p className="mt-2 text-sm font-semibold text-[var(--text)]">Receive on this phone</p>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">Makes this phone visible and shows a 4-digit code.</p>
-            </button>
-            <button type="button" disabled={!!busy} onClick={() => run('discover', link.discover)}
-              className="rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] p-4 text-left transition-colors hover:border-[var(--accent)] disabled:opacity-50">
-              <Search className="h-5 w-5 text-[var(--accent)]" />
-              <p className="mt-2 text-sm font-semibold text-[var(--text)]">Connect to a phone</p>
-              <p className="mt-1 text-xs text-[var(--text-muted)]">Finds a phone that is receiving and connects to it.</p>
-            </button>
-          </div>
-          {link.capabilities && !link.capabilities.l2cap && (
-            <p className="mt-3 text-xs text-[var(--warning)]">Secure Share needs Android 10 or newer; this phone reports API level {link.capabilities.sdk}.</p>
+      {/* ------------------------------------------------------------- send */}
+      {(link.mode === 'discovering' || (link.mode === 'idle' && link.hosts.length > 0) || link.mode === 'connecting') && !inSession && (
+        <Card
+          title={link.mode === 'connecting' ? 'Connecting…' : link.mode === 'discovering' ? 'Looking for phones…' : 'Choose the phone'}
+          subtitle={link.mode === 'connecting' ? 'This takes a few seconds.' : 'Pick the code shown on the other phone.'}
+          action={link.mode === 'idle'
+            ? <Button tone="ghost" size="sm" icon={<RefreshCw className="h-4 w-4" />} onClick={() => void run('discover', link.discover)}>Search again</Button>
+            : <LoaderCircle className="h-5 w-5 animate-spin text-[var(--accent)]" />}
+        >
+          {link.hosts.length === 0 ? (
+            link.mode === 'discovering' ? (
+              <div className="py-4"><Pulse><Search className="h-9 w-9" /></Pulse></div>
+            ) : null
+          ) : (
+            <ul className="grid grid-cols-2 gap-2">
+              {link.hosts.map((h) => (
+                <li key={h.address}>
+                  <button type="button" disabled={Boolean(busy) || link.mode === 'connecting'} onClick={() => void run('connect', () => link.connectTo(h))}
+                    className="tap flex w-full flex-col items-center rounded-2xl bg-[var(--bg-elevated)] p-4 ring-1 ring-[var(--border)] hover:ring-[var(--accent)] disabled:opacity-60">
+                    <span className="font-display text-3xl font-semibold tracking-[0.2em]">{h.code}</span>
+                    <span className="mt-1 text-[11px] text-[var(--text-muted)]">{h.rssi > -65 ? 'Very close' : h.rssi > -80 ? 'Nearby' : 'Far away'}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {link.mode !== 'connecting' && (
+            <Button tone="ghost" size="sm" className="mt-3 w-full" onClick={() => { prevMode.current = 'idle'; void link.stopDiscovery(); }}>Cancel</Button>
           )}
         </Card>
       )}
-
-      {link.mode === 'hosting' && (
-        <Card title="Waiting for the other phone" icon={<Radio className="h-4 w-4" />}>
-          <p className="text-sm text-[var(--text-secondary)]">On the other phone, open Secure Share → Connect to a phone, and pick the one with this code:</p>
-          <p className="mt-3 font-mono text-5xl font-semibold tracking-[0.3em] text-[var(--text)]">{link.hostCode}</p>
-          <div className="mt-4 flex items-center gap-3">
-            <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent)]" />
-            <span className="text-xs text-[var(--text-muted)]">Visible over Bluetooth while this screen is open.</span>
-          </div>
-          <Button tone="ghost" className="mt-4" onClick={() => run('stop', link.stopHosting)}>Stop</Button>
-        </Card>
+      {noPhone && link.mode === 'idle' && !inSession && (
+        <Notice tone="info" onDismiss={() => setNoPhone(false)}>No phone found. Make sure the other phone tapped Receive and is close by, then tap Send again.</Notice>
       )}
 
-      {(link.mode === 'discovering' || (link.mode === 'idle' && link.hosts.length > 0)) && (
-        <Card
-          title={link.mode === 'discovering' ? 'Looking for phones…' : 'Phones found'}
-          icon={<Search className="h-4 w-4" />}
-          action={link.mode === 'idle' ? <Button tone="ghost" onClick={() => run('discover', link.discover)}><RefreshCw className="h-4 w-4" /> Search again</Button> : <LoaderCircle className="h-4 w-4 animate-spin text-[var(--accent)]" />}
-        >
-          {link.hosts.length === 0 && <p className="text-sm text-[var(--text-muted)]">Make sure the other phone tapped “Receive on this phone”.</p>}
-          <ul className="space-y-2">
-            {link.hosts.map((h) => (
-              <li key={h.address}>
-                <button type="button" disabled={!!busy} onClick={() => run('connect', () => link.connectTo(h))}
-                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3 text-left hover:border-[var(--accent)] disabled:opacity-50">
-                  <span>
-                    <span className="block text-sm font-semibold text-[var(--text)]">Code <span className="font-mono tracking-widest">{h.code}</span></span>
-                    <span className="block text-[11px] text-[var(--text-muted)]">{h.address}</span>
-                  </span>
-                  <span className="flex items-center gap-1 text-xs text-[var(--text-secondary)]"><Signal className="h-3.5 w-3.5" />{h.rssi} dBm</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      {link.mode === 'connecting' && (
-        <Card title="Connecting…" icon={<LoaderCircle className="h-4 w-4 animate-spin" />}>
-          <p className="text-sm text-[var(--text-secondary)]">Opening an encrypted channel to the other phone.</p>
-        </Card>
+      {/* ---------------------------------------------------------- session */}
+      {inSession && (
+        <div className="rounded-3xl bg-[var(--surface)] p-4">
+          <StepTrack steps={['Connect', 'Confirm', 'Share']} current={stage} />
+        </div>
       )}
 
       {link.mode === 'session' && link.phase === 'handshaking' && (
-        <Card title="Exchanging keys…" icon={<LoaderCircle className="h-4 w-4 animate-spin" />}>
-          <p className="text-sm text-[var(--text-secondary)]">Running the X25519 / Noise handshake.</p>
+        <Card className="text-center">
+          <Pulse><Lock className="h-9 w-9" /></Pulse>
+          <p className="mt-3 font-semibold">Securing the connection…</p>
         </Card>
       )}
 
       {link.phase === 'verifying' && link.verify && (
-        <Card title={link.verify.repair ? 'Re-pair a revoked device' : link.verify.known ? 'Recognised device' : 'Check the code'} icon={<ShieldCheck className="h-4 w-4" />}>
+        <Card className="text-center">
           {link.verify.known ? (
-            <p className="text-sm text-[var(--text-secondary)]">{link.verify.peerName} was paired before; its key matches. Verifying automatically…</p>
+            <>
+              <Pulse><ShieldCheck className="h-9 w-9" /></Pulse>
+              <p className="mt-3 font-semibold">Reconnecting to {link.verify.peerName}…</p>
+            </>
           ) : (
             <>
               <p className="text-sm text-[var(--text-secondary)]">
-                {link.verify.repair
-                  ? `${link.verify.peerName} was isolated earlier. Stand next to it and compare codes; it must also prove the secret from your first pairing.`
-                  : `Connected to “${link.verify.peerName}”. Both phones must show exactly the same code.`}
+                {link.verify.repair ? `Pair ${link.verify.peerName} again. ` : ''}Check that <b className="text-[var(--text)]">{link.verify.peerName}</b> shows the same code
               </p>
-              <p className="mt-4 text-center font-mono text-5xl font-semibold tracking-[0.25em] text-[var(--text)]">
+              <p className="font-display my-5 text-5xl font-semibold tracking-[0.2em]">
                 {link.verify.sas.slice(0, 3)} {link.verify.sas.slice(3)}
               </p>
-              <p className="mt-2 text-center text-[11px] text-[var(--text-muted)]">Their key fingerprint: {link.verify.peerFingerprint}</p>
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <Button tone="success" disabled={!!busy} onClick={() => run('confirm', () => link.confirmCode(true))}><CheckCircle className="h-4 w-4" /> Codes match</Button>
-                <Button tone="danger" disabled={!!busy} onClick={() => run('confirm', () => link.confirmCode(false))}><Ban className="h-4 w-4" /> Different</Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button tone="danger" disabled={Boolean(busy)} onClick={() => void run('confirm', () => link.confirmCode(false))}>Different</Button>
+                <Button tone="success" disabled={Boolean(busy)} icon={<Check className="h-4 w-4" />} onClick={() => void run('confirm', () => link.confirmCode(true))}>Same code</Button>
               </div>
-              <p className="mt-3 text-[11px] text-[var(--text-muted)]">Different codes mean someone may be intercepting the connection. Tap “Different” and try again elsewhere.</p>
+              <p className="mt-3 text-[11px] text-[var(--text-muted)]">You only do this once per phone.</p>
             </>
           )}
         </Card>
@@ -311,163 +303,231 @@ export function SecureShare() {
 
       {link.phase === 'active' && (
         <>
-          <Card
-            title={`Secure link with ${link.verify?.peerName ?? 'peer'}`}
-            icon={<Lock className="h-4 w-4" />}
-            action={<Button tone="ghost" onClick={() => run('disconnect', link.disconnect)}><Unlink className="h-4 w-4" /> Disconnect</Button>}
-          >
-            <div className="grid gap-4 sm:grid-cols-[auto,1fr] sm:items-center">
-              <div className="flex items-center gap-3">
-                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border-2 text-xl font-semibold"
-                  style={{ borderColor: level ? LEVEL_STYLE[level].color : 'var(--border)', color: level ? LEVEL_STYLE[level].color : 'var(--text-muted)' }}>
-                  {link.trust ? Math.round(link.trust.trust) : '—'}
-                </div>
-                <div>
-                  <p className="text-sm font-semibold" style={{ color: level ? LEVEL_STYLE[level].color : 'var(--text)' }}>{level ? LEVEL_STYLE[level].label : 'Scoring…'}</p>
-                  <p className="text-xs text-[var(--text-muted)]">{level ? LEVEL_STYLE[level].note : 'First trust check runs within a second.'}</p>
-                </div>
-              </div>
-              <TrustSparkline values={link.trustHistory} />
+          <div className="flex items-center gap-3 rounded-3xl bg-[var(--surface)] p-4">
+            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl" style={{ background: `color-mix(in srgb, ${level ? LEVEL[level].color : 'var(--accent)'} 16%, transparent)`, color: level ? LEVEL[level].color : 'var(--accent)' }}>
+              {level === 'FULL' || level === null ? <ShieldCheck className="h-6 w-6" /> : <ShieldAlert className="h-6 w-6" />}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-bold">{peer}</p>
+              <p className="text-xs text-[var(--text-muted)]">{level ? LEVEL[level].note : 'Encrypted and verified.'}</p>
             </div>
-            {link.trust && (
-              <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
-                {([['Crypto', link.trust.risks.crypto], ['Physical', link.trust.risks.proximity], ['Behaviour', link.trust.risks.ml]] as const).map(([label, risk]) => (
-                  <div key={label} className="rounded-lg border border-[var(--border)] p-2">
-                    <p className="text-[var(--text-muted)]">{label} risk</p>
-                    <p className={cn('mt-0.5 font-semibold', risk > 0.3 ? 'text-[var(--danger)]' : 'text-[var(--text)]')}>{Math.round(risk * 100)}%</p>
-                  </div>
-                ))}
+            <Pill color={level ? LEVEL[level].color : 'var(--success)'}>{level ? LEVEL[level].label : 'Protected'}</Pill>
+          </div>
+
+          {link.offers.length > 0 && (
+            <section className="space-y-2">
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-[15px] font-bold">Incoming {link.offers.length === 1 ? 'file' : `files (${link.offers.length})`}</h2>
+                {link.offers.length > 1 && (
+                  <button type="button" disabled={Boolean(busy)} className="text-sm font-semibold text-[var(--accent)]"
+                    onClick={() => void run('offer', async () => { for (const o of link.offers) await link.respondToOffer(o.manifest.id, true); })}>
+                    Accept all
+                  </button>
+                )}
               </div>
-            )}
-            {link.trust && link.trust.reasons.length > 0 && (
-              <ul className="mt-3 space-y-1 text-xs text-[var(--warning)]">
-                {link.trust.reasons.slice(0, 3).map((r) => <li key={r}>• {r}</li>)}
-              </ul>
-            )}
-          </Card>
+              <AnimatePresence initial={false}>
+                {link.offers.map((offer) => (
+                  <OfferCard key={offer.manifest.id} offer={offer} busy={busy === 'offer'} onAnswer={(accept) => void run('offer', () => link.respondToOffer(offer.manifest.id, accept))} />
+                ))}
+              </AnimatePresence>
+            </section>
+          )}
 
-          {link.offers.map((offer) => (
-            <OfferCard key={offer.manifest.id} offer={offer} onAnswer={(accept) => void run('offer', () => link.respondToOffer(offer.manifest.id, accept))} />
-          ))}
+          <input
+            ref={fileInput}
+            type="file"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = Array.from(e.target.files ?? []);
+              e.target.value = '';
+              if (files.length) void sendFiles(files);
+            }}
+          />
+          <Button size="lg" className="w-full" disabled={!canSendFiles} icon={queue > 0 ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <ArrowUpFromLine className="h-5 w-5" />}
+            onClick={() => fileInput.current?.click()}>
+            {queue > 0 ? `Sending ${queue} file${queue === 1 ? '' : 's'}… add more` : 'Send files'}
+          </Button>
+          <p className="-mt-2 text-center text-xs text-[var(--text-muted)]">
+            {canSendFiles ? 'Photos, documents, audio and video up to 100 MB each. Apps are blocked.' : 'File sharing resumes once the connection settles.'}
+          </p>
 
-          <Card title="Send a file" icon={<Shield className="h-4 w-4" />}>
-            <input
-              ref={fileInput}
-              type="file"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = '';
-                if (file) void run('send', () => link.sendFile(file));
-              }}
-            />
-            <Button disabled={!canSendFiles || busy === 'send'} onClick={() => fileInput.current?.click()}>
-              {busy === 'send' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
-              Choose file to send
+          <div className="grid grid-cols-2 gap-2">
+            <Button tone="secondary" icon={<MessageSquare className="h-4 w-4" />} onClick={() => setChatOpen((v) => !v)}>
+              {chatOpen ? 'Hide messages' : `Messages${link.chats.length ? ` (${link.chats.length})` : ''}`}
             </Button>
-            <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-              {canSendFiles
-                ? 'Photos, PDFs, documents, audio, video and text up to 100 MB. Apps and scripts are blocked.'
-                : 'File sharing is paused while this device is below full trust.'}
-            </p>
-          </Card>
+            <Button tone="danger" icon={<Unlink className="h-4 w-4" />} onClick={() => void run('disconnect', link.disconnect)}>Disconnect</Button>
+          </div>
 
-          <Card title="Messages" icon={<Activity className="h-4 w-4" />}>
-            <ul className="max-h-64 space-y-2 overflow-y-auto">
-              {link.chats.length === 0 && <li className="text-xs text-[var(--text-muted)]">No messages yet.</li>}
-              {link.chats.map((m) => (
-                <li key={m.id} className={cn('max-w-[85%] rounded-xl px-3 py-2 text-sm', m.from === 'me' ? 'ml-auto bg-[var(--accent-soft)] text-[var(--text)]' : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)]')}>
-                  {m.text}
-                </li>
-              ))}
-            </ul>
-            <form className="mt-3 flex gap-2" onSubmit={(e) => {
-              e.preventDefault();
-              const text = chatDraft.trim();
-              if (!text) return;
-              setChatDraft('');
-              void run('chat', () => link.sendChat(text));
-            }}>
-              <input value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} placeholder="Encrypted message"
-                className="min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]" />
-              <Button type="submit">Send</Button>
-            </form>
-          </Card>
+          <AnimatePresence initial={false}>
+            {chatOpen && (
+              <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
+                <div className="rounded-3xl bg-[var(--surface)] p-4">
+                  <ul className="max-h-64 space-y-2 overflow-y-auto">
+                    {link.chats.length === 0 && <li className="py-4 text-center text-xs text-[var(--text-muted)]">No messages yet. Messages are encrypted too.</li>}
+                    {link.chats.map((m) => (
+                      <li key={m.id} className={cn('max-w-[85%] rounded-2xl px-3 py-2 text-sm', m.from === 'me' ? 'ml-auto bg-[var(--accent)] text-white' : 'bg-[var(--bg-elevated)] text-[var(--text)]')}>{m.text}</li>
+                    ))}
+                    <div ref={chatEnd} />
+                  </ul>
+                  <form className="mt-3 flex gap-2" onSubmit={(e) => {
+                    e.preventDefault();
+                    const text = chatDraft.trim();
+                    if (!text) return;
+                    setChatDraft('');
+                    void run('chat', () => link.sendChat(text));
+                  }}>
+                    <input value={chatDraft} onChange={(e) => setChatDraft(e.target.value)} placeholder="Message"
+                      className="min-h-11 w-full rounded-2xl border border-[var(--border)] bg-[var(--bg-elevated)] px-3.5 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]" />
+                    <Button type="submit" icon={<Send className="h-4 w-4" />}>Send</Button>
+                  </form>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </>
       )}
 
+      {inSession && link.phase !== 'active' && (
+        <Button tone="ghost" className="w-full" onClick={() => void run('disconnect', link.disconnect)}>Cancel</Button>
+      )}
+
+      {/* -------------------------------------------------------- transfers */}
       {link.transfers.length > 0 && (
-        <Card title="Transfers" icon={<Activity className="h-4 w-4" />}>
-          <ul className="space-y-2">{link.transfers.map((t) => <TransferRow key={t.id} t={t} />)}</ul>
-        </Card>
+        <section>
+          <h2 className="mb-2.5 px-1 text-[15px] font-bold">Transfers</h2>
+          <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-3xl bg-[var(--surface)]">
+            {link.transfers.map((t) => <TransferRow key={t.id} t={t} />)}
+          </ul>
+        </section>
       )}
 
+      {/* ------------------------------------------------------------ inbox */}
       {link.supported && link.ready && (
-        <Card title="Quarantine (received files)" icon={<Database className="h-4 w-4" />}
-          action={<Button tone="ghost" onClick={() => run('refresh', link.refreshQuarantine)}><RefreshCw className="h-4 w-4" /></Button>}>
-          <p className="mb-3 text-[11px] text-[var(--text-muted)]">Verified files stay in app-private storage. Nothing is opened automatically; save a file to Downloads only if you expected it.</p>
-          {link.quarantine.length === 0 && <p className="text-sm text-[var(--text-muted)]">No received files.</p>}
-          <ul className="space-y-2">
-            {link.quarantine.map((f) => (
-              <li key={f.key} className="rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-                <p className="truncate text-sm font-medium text-[var(--text)]">{f.name}</p>
-                <p className="text-[11px] text-[var(--text-muted)]">{formatBytes(f.size)} · {f.kind} · from {f.from || 'unknown'} · {new Date(f.receivedAt).toLocaleString()}</p>
-                <div className="mt-2 flex gap-2">
-                  <Button tone="ghost" onClick={() => run('export', async () => { const where = await link.exportFile(f.key); setError(null); window.alert(`Saved to ${where}`); })}>Save to Downloads</Button>
-                  <Button tone="danger" onClick={() => run('delete', () => link.deleteFile(f.key))}><Trash2 className="h-4 w-4" /></Button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
-
-      {link.ready && (
-        <Card title="Paired phones" icon={<Smartphone className="h-4 w-4" />}>
-          {link.peers.length === 0 && <p className="text-sm text-[var(--text-muted)]">No paired phones yet.</p>}
-          <ul className="space-y-2">
-            {link.peers.map((p) => {
-              let fp = '';
-              try { fp = fingerprint(fromBase64(p.staticKey)); } catch { fp = ''; }
-              return (
-                <li key={p.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
-                  <div className="min-w-0">
-                    <p className="flex items-center gap-2 text-sm font-medium text-[var(--text)]">
-                      {p.status === 'trusted' ? <ShieldCheck className="h-4 w-4 text-[var(--success)]" /> : <ShieldAlert className="h-4 w-4 text-[var(--danger)]" />}
-                      <span className="truncate">{p.name}</span>
-                    </p>
-                    <p className="text-[11px] text-[var(--text-muted)]">
-                      {fp} · {p.status === 'trusted' ? 'trusted' : `revoked: ${p.revokedReason ?? 'needs re-pair'}`}
-                      {p.keyEpoch > 0 ? ` · re-paired ${p.keyEpoch}×` : ''}
-                    </p>
-                  </div>
-                  <Button tone="ghost" onClick={() => run('forget', () => link.forgetPeer(p.id))}><Trash2 className="h-4 w-4" /></Button>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
-      )}
-
-      {link.ready && (
-        <Card title="Forensic log" icon={<Activity className="h-4 w-4" />}
-          action={<span className={cn('text-[11px] font-medium', link.logValid ? 'text-[var(--success)]' : 'text-[var(--danger)]')}>{link.logValid ? 'Hash chain intact' : 'Hash chain BROKEN'}</span>}>
-          <p className="text-[11px] text-[var(--text-muted)]">Every security event is chained with SHA-256, so edits or deletions are detectable.</p>
-          <div className="mt-3 flex gap-2">
-            <Button tone="ghost" onClick={() => setShowLog((v) => !v)}>{showLog ? 'Hide events' : `Show events (${link.log.length})`}</Button>
-            <Button tone="ghost" onClick={() => run('copy', async () => { await navigator.clipboard.writeText(link.exportLog()); })}>Copy log</Button>
+        <section>
+          <div className="mb-2.5 flex items-center justify-between px-1">
+            <h2 className="text-[15px] font-bold">Received files</h2>
+            <button type="button" onClick={() => void link.refreshQuarantine()} aria-label="Refresh" className="tap rounded-full p-2 text-[var(--text-muted)]"><RefreshCw className="h-4 w-4" /></button>
           </div>
-          {showLog && (
-            <ul className="mt-3 max-h-80 space-y-1.5 overflow-y-auto font-mono text-[11px]">
-              {link.log.map((e) => (
-                <li key={e.hash} className="rounded-lg border border-[var(--border)] p-2 text-[var(--text-secondary)]">
-                  <span className="text-[var(--text)]">{new Date(e.t).toLocaleTimeString()} {e.event}</span>
-                  <span className="text-[var(--text-muted)]"> · {e.peer} · {e.hash.slice(0, 10)}</span>
+          {link.quarantine.length === 0 ? (
+            <p className="rounded-3xl bg-[var(--surface)] px-4 py-4 text-sm text-[var(--text-muted)]">Files you receive are checked and kept here. Nothing opens automatically.</p>
+          ) : (
+            <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-3xl bg-[var(--surface)]">
+              {link.quarantine.map((f) => (
+                <li key={f.key} className="flex items-center gap-3 px-4 py-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[var(--success)]/15 text-[var(--success)]"><FileText className="h-4 w-4" /></span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-semibold">{f.name}</p>
+                    <p className="truncate text-xs text-[var(--text-muted)]">{formatBytes(f.size)} · from {f.from || 'unknown'} · checked</p>
+                  </div>
+                  <button type="button" aria-label={`Save ${f.name} to Downloads`} disabled={Boolean(busy)}
+                    onClick={() => void run(`save:${f.key}`, async () => { setSaved(await link.exportFile(f.key)); })}
+                    className="tap grid h-10 w-10 place-items-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)] disabled:opacity-50">
+                    {busy === `save:${f.key}` ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  </button>
+                  <button type="button" aria-label={`Delete ${f.name}`} disabled={Boolean(busy)}
+                    onClick={() => void run(`delete:${f.key}`, () => link.deleteFile(f.key))}
+                    className="tap grid h-10 w-10 place-items-center rounded-full text-[var(--text-muted)] disabled:opacity-50">
+                    <Trash2 className="h-4 w-4" />
+                  </button>
                 </li>
               ))}
             </ul>
           )}
-        </Card>
+        </section>
+      )}
+
+      {/* ---------------------------------------------------------- details */}
+      {link.ready && (
+        <Disclosure label="Details">
+          {link.phase === 'active' && link.trust && (
+            <div className="rounded-2xl bg-[var(--bg-elevated)] p-4">
+              <p className="text-sm font-semibold">Connection check</p>
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">Re-checked every second. Score {Math.round(link.trust.trust)}/100.</p>
+              <TrustSparkline values={link.trustHistory} />
+              <div className="mt-2 grid grid-cols-3 gap-2 text-center text-[11px]">
+                {([['Encryption', link.trust.risks.crypto], ['Signal', link.trust.risks.proximity], ['Behaviour', link.trust.risks.ml]] as const).map(([label, risk]) => (
+                  <div key={label} className="rounded-xl bg-[var(--surface)] p-2">
+                    <p className="text-[var(--text-muted)]">{label}</p>
+                    <p className={cn('mt-0.5 font-semibold', risk > 0.3 ? 'text-[var(--danger)]' : 'text-[var(--success)]')}>{risk > 0.3 ? 'Check' : 'OK'}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-2xl bg-[var(--bg-elevated)] p-4 text-xs leading-5 text-[var(--text-secondary)]">
+            <p>This phone’s ID: <span className="font-mono text-[var(--text)]">{link.myFingerprint}</span></p>
+            <p className="mt-1">Keys protected by {link.keyProtection === 'strongbox' ? 'StrongBox hardware' : link.keyProtection === 'keystore' ? 'Android Keystore' : 'software (preview only)'}.</p>
+          </div>
+
+          <div>
+            <p className="mb-2 text-sm font-semibold">Paired phones</p>
+            {link.peers.length === 0 ? (
+              <p className="text-xs text-[var(--text-muted)]">None yet.</p>
+            ) : (
+              <ul className="space-y-2">
+                {link.peers.map((p) => {
+                  let fp = '';
+                  try { fp = fingerprint(fromBase64(p.staticKey)); } catch { fp = ''; }
+                  return (
+                    <li key={p.id} className="flex items-center gap-3 rounded-2xl bg-[var(--bg-elevated)] px-3 py-2.5">
+                      {p.status === 'trusted' ? <ShieldCheck className="h-4 w-4 shrink-0 text-[var(--success)]" /> : <ShieldAlert className="h-4 w-4 shrink-0 text-[var(--danger)]" />}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{p.name}</span>
+                        <span className="block truncate text-[11px] text-[var(--text-muted)]">{p.status === 'trusted' ? fp : 'Needs pairing again in person'}</span>
+                      </span>
+                      <button type="button" aria-label={`Forget ${p.name}`} onClick={() => void run('forget', () => link.forgetPeer(p.id))} className="tap rounded-full p-2 text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+
+          <SecurityLog />
+        </Disclosure>
+      )}
+    </div>
+  );
+}
+
+function TrustSparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null;
+  const w = 240;
+  const h = 40;
+  const points = values.map((v, i) => `${(i / (values.length - 1)) * w},${h - (v / 100) * h}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="mt-2 h-10 w-full" role="img" aria-label="Connection score over the last minute">
+      <polyline points={points} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SecurityLog() {
+  const link = useSecureLink();
+  const [show, setShow] = useState(false);
+  const [copied, setCopied] = useState(false);
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-semibold">Security log</p>
+        <Pill color={link.logValid ? 'var(--success)' : 'var(--danger)'}>{link.logValid ? 'Intact' : 'Tampered'}</Pill>
+      </div>
+      <p className="mt-0.5 text-xs text-[var(--text-muted)]">Every event is chained, so edits are detectable.</p>
+      <div className="mt-2 flex gap-2">
+        <Button size="sm" tone="secondary" onClick={() => setShow((v) => !v)}>{show ? 'Hide' : `Show ${link.log.length} events`}</Button>
+        <Button size="sm" tone="secondary" onClick={() => void navigator.clipboard.writeText(link.exportLog()).then(() => setCopied(true)).catch(() => undefined)}>{copied ? 'Copied' : 'Copy log'}</Button>
+      </div>
+      {show && (
+        <ul className="mt-2 max-h-72 space-y-1 overflow-y-auto font-mono text-[11px]">
+          {link.log.map((e) => (
+            <li key={e.hash} className="rounded-xl bg-[var(--bg-elevated)] px-2.5 py-1.5 text-[var(--text-secondary)]">
+              <span className="text-[var(--text)]">{new Date(e.t).toLocaleTimeString()} {e.event.replace(/_/g, ' ')}</span>
+              <span className="text-[var(--text-muted)]"> · {e.hash.slice(0, 8)}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
