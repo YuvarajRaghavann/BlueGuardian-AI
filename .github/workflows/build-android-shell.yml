@@ -1,9 +1,10 @@
 name: Build BlueGuardian Android Shell
-# Final UX reliability branch: build from the latest approval and navigation fixes.
+# Builds and tests on main and on Android feature branches; the APK is attached to each run.
 
 on:
   push:
     branches:
+      - main
       - 'android/phase2-cloud-build-*'
       - 'android/phase4-classic-discovery-*'
       - 'android/phase5-combined-scanning-*'
