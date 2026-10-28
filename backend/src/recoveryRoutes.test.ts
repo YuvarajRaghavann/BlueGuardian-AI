@@ -107,6 +107,7 @@ vi.mock('./models/RecoveryEncounter', () => {
 });
 
 import app from './app';
+import { resetRecoveryRateLimit } from './routes/recovery';
 
 describe('recovery API integration', () => {
   let origin: string;
@@ -130,6 +131,7 @@ describe('recovery API integration', () => {
   });
 
   beforeEach(() => {
+    resetRecoveryRateLimit();
     store.devices.length = 0;
     store.encounters.length = 0;
     store.deviceFindError = undefined;

@@ -18,6 +18,11 @@ const rateLimitWindowMs = 60_000;
 const rateLimitMaxRequests = 10;
 const rateLimitStore = new Map<string, { count: number; windowStart: number }>();
 
+/** Tests share one process and IP; each test starts with a fresh rate-limit window. */
+export function resetRecoveryRateLimit(): void {
+  rateLimitStore.clear();
+}
+
 // Records created before recoveryEnabled existed are included for backwards compatibility.
 // New non-recovery device records explicitly store recoveryEnabled=false.
 const recoveryEnabledOrLegacy = { $or: [{ recoveryEnabled: true }, { recoveryEnabled: { $exists: false } }] };
