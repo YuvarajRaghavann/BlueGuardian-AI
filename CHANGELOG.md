@@ -2,6 +2,28 @@
 
 Notable changes to BlueGuardian, newest first. Each release corresponds to a phase of the [project journey](docs/journey/JOURNEY.md).
 
+## Phase 9 — Field fixes before the presentation · 2026-10-28
+
+### Scanning: every device shows up
+- **Android's scan throttle no longer hides devices.** Android silently returns *nothing* to an app that starts more than 5 scans in 30 s (Around + Find + Share each start one). Scans now reuse a running scan and wait for a free slot instead of running blind; the limit is shared across the app.
+- **Legacy + extended scanning together:** a plain legacy scan (most reliable for names in scan responses on every chipset) plus a Bluetooth 5 extended-advertising scan where supported.
+- **Nameless devices are shown, not hidden.** iPhones and most new Android phones, watches and earbuds advertise without a name. They now appear labelled by maker from their Bluetooth SIG company ID ("Apple Bluetooth device"), and the app then **asks them their name** with a short, non-bonding GATT read (Device Name, Appearance, maker, model), strongest signal first.
+- Classic discovery keeps LE devices whose names Android's inquiry resolved; old Bluetooth 2.x/3.x devices are found by classic inquiry running alongside the BLE scan.
+
+### Community recovery
+- Report and Help-others use the full scan (BLE + classic together + name lookup) instead of a short BLE-only pass, and list nameless devices too.
+- **Address matching:** helpers send a one-way salted hash of each stable Bluetooth address (never the address). Lost devices are matched by address (strong lead), exact name + services, or name, so nameless and generically named devices can be found. Backend: `recoveryAddressHash`, up to 60 observations per submission, falls back gracefully on older servers.
+
+### Secure Share: stable links on Android 8+
+- **GATT transport** (write-without-response + notifications, MTU 517): Secure Share now works on Android 8 and 9, and automatically falls back to it when a phone's L2CAP channel can't open.
+- While a link is live the host stops advertising and nothing scans; the link runs at high connection priority and RSSI is read from the connection itself (the old background scan competed with transfers and caused drops).
+- **Auto-reconnect:** after a radio drop the host stays visible with the same code and the sender finds and reconnects to it; the pinned peer is re-verified automatically and transfers resume from the last chunk.
+- **BTGuard false isolations fixed:** soft evidence from one method can pause sharing but never revoke a pairing (corroboration); a soft dip must persist two windows; frames already in flight for a cancelled transfer and pings queued behind file chunks no longer count as attacks; windows where Android throttled the WebView are skipped; the sender waits for trust to return instead of cancelling a transfer.
+- **"Re-pair proof failed" fixed:** both phones now adopt the new recovery secret when either side re-pairs, so the next re-pair can still prove itself.
+
+### BTGuard verdict for scanned devices
+- The Guardian verdict is now the BTGuard three-method fusion used for the secure link: protocol & identity, radio physics (received signal vs advertised transmit power, signal stability), and behaviour over time, fused into one score (`src/intel/btguardScan.ts`). **Unsafe needs hard evidence or two methods agreeing.** The device sheet shows the score and each method.
+
 ## Phase 8 — Hardening, redesign and publishing · 2026-10-26 to 2026-10-27
 
 ### Added

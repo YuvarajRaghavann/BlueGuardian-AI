@@ -33,7 +33,9 @@ export function AroundYou() {
   const [selected, setSelected] = useState<BluetoothDevice | null>(null);
   const native = isNativeAndroidApp();
   const scanning = state.scan.state === 'scanning';
-  const [showUnnamed, setShowUnnamed] = useState(false);
+  // Every device is shown by default, named or not: nameless ones are labelled by maker
+  // ("Apple Bluetooth device") and named over GATT after the scan. Hiding them is opt-in.
+  const [showUnnamed, setShowUnnamed] = useState(true);
   const [dismissedMsg, setDismissedMsg] = useState<string | null>(null);
 
   // Like Android's Bluetooth screen: paired and connected devices appear as soon as you open it.
@@ -50,8 +52,7 @@ export function AroundYou() {
   }, [state.devices]);
   const nowIds = new Set(devicesAroundNow(real, state.scan.startedAt).map((d) => d.id));
   const recent = real.filter((d) => d.paired || nowIds.has(d.id));
-  // Nameless advertisers (rotating phone/beacon addresses) are hidden like Android settings does,
-  // unless they are risky, paired, connected or recognised.
+  // Nameless advertisers can be hidden on request, unless they are risky, paired, connected or recognised.
   const isNamed = (d: BluetoothDevice) => Boolean(normalizeBluetoothName(d.name)) || Boolean(d.paired) || d.connectionStatus === 'connected' || Boolean(d.familyLabel);
   const unnamed = recent.filter((d) => !isNamed(d) && guardianFor(d).verdict !== 'unsafe');
   const around = showUnnamed ? recent : recent.filter((d) => !unnamed.includes(d));
@@ -108,7 +109,7 @@ export function AroundYou() {
 
       {unnamed.length > 0 && (
         <button type="button" onClick={() => setShowUnnamed((v) => !v)} className="w-full text-center text-sm font-semibold text-[var(--accent)]">
-          {showUnnamed ? 'Hide devices without a name' : `Show ${unnamed.length} device${unnamed.length === 1 ? '' : 's'} without a name`}
+          {showUnnamed ? `Hide ${unnamed.length} device${unnamed.length === 1 ? '' : 's'} without a name` : `Show ${unnamed.length} device${unnamed.length === 1 ? '' : 's'} without a name`}
         </button>
       )}
 

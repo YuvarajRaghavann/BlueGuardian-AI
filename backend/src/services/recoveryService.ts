@@ -12,6 +12,23 @@ export interface RegistrationInput {
   recoveryFingerprintHash?: string;
   /** Hash of the advertised name alone, so a sighting with different/no service UUIDs still matches. */
   recoveryNameHash?: string;
+  /** Salted hash of the device's Bluetooth address, so nameless devices can be matched too. */
+  recoveryAddressHash?: string;
+}
+
+const MAC_PATTERN = /^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$/i;
+export const ADDRESS_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+/**
+ * Community address key. Helpers hash every address on their phone before sending
+ * (same formula in src/services/recoveryHash.ts), so the server never receives the
+ * raw addresses of bystanders' devices. Only stable addresses (classic MACs, public
+ * and static LE addresses) can match; rotating private addresses simply never do.
+ */
+export function addressHashOf(identifier: string): string | undefined {
+  const mac = identifier.trim().toUpperCase();
+  if (!MAC_PATTERN.test(mac)) return undefined;
+  return createHash('sha256').update(`blueguardian-recovery-address-v1:${mac}`).digest('hex');
 }
 
 export interface EncounterInput {
@@ -100,6 +117,7 @@ export function validateRegistrationInput(payload: Record<string, any>): Registr
     recoveryState,
     recoveryFingerprintHash,
     recoveryNameHash,
+    recoveryAddressHash: addressHashOf(normalizedIdentifier),
   };
 }
 

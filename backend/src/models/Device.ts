@@ -28,6 +28,8 @@ export interface IDevice extends Document {
   recoveryFingerprintHash?: string;
   /** SHA-256 of the canonical advertised name only (same formula, empty UUID list). */
   recoveryNameHash?: string;
+  /** SHA-256 of a salted, canonical Bluetooth address (stable MACs only). */
+  recoveryAddressHash?: string;
   registeredAt?: Date;
   firstSeen: Date;
   lastSeen: Date;
@@ -62,6 +64,7 @@ const DeviceSchema = new Schema<IDevice>({
   recoveryState: { type: String, enum: ['lost', 'searching', 'found', 'recovered'], default: 'lost' },
   recoveryFingerprintHash: { type: String, index: true, select: false },
   recoveryNameHash: { type: String, index: true, select: false },
+  recoveryAddressHash: { type: String, index: true, select: false },
   registeredAt: { type: Date, default: Date.now },
   firstSeen: { type: Date, default: Date.now },
   lastSeen: { type: Date, default: Date.now },

@@ -30,11 +30,13 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 @CapacitorPlugin(
     name = "BlueGuardianBluetooth",
@@ -56,7 +58,18 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
     private BluetoothLeScanner activeScanner;
     private ScanCallback activeScanCallback;
+    /** Second scan client for Bluetooth 5 extended advertisements (only where the controller supports them). */
+    private ScanCallback activeExtendedCallback;
     private Runnable stopScanRunnable;
+    private Runnable delayedStartRunnable;
+    /** Recently scanned devices, so a follow-up GATT name lookup uses the right LE address type. */
+    private final Map<String, BluetoothDevice> scannedDevices = new java.util.LinkedHashMap<String, BluetoothDevice>(64, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, BluetoothDevice> eldest) {
+            return size() > 512;
+        }
+    };
+    private boolean resolvingNames;
     private int activeDurationMs = DEFAULT_SCAN_DURATION_MS;
 
     private BluetoothAdapter activeClassicAdapter;
@@ -151,32 +164,147 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             return;
         }
 
-        stopBleScanInternal(false);
-        seenAddresses.clear();
-        lastEmittedAt.clear();
-
         Integer requestedDuration = call.getInt("durationMs");
         activeDurationMs = requestedDuration == null
             ? DEFAULT_SCAN_DURATION_MS
             : Math.max(MIN_SCAN_DURATION_MS, Math.min(MAX_SCAN_DURATION_MS, requestedDuration));
 
+        JSObject result = new JSObject();
+        result.put("started", true);
+        result.put("durationMs", activeDurationMs);
+        String warning = visibilityWarning();
+        if (warning != null) result.put("warning", warning);
+
+        // A scan is already running (Around, Find and Share can all ask): keep the radio
+        // scanning and just restart the window. Stopping and starting again is what makes
+        // Android throttle the app, after which it silently delivers NO results at all.
+        if (activeScanCallback != null) {
+            seenAddresses.clear();
+            lastEmittedAt.clear();
+            if (stopScanRunnable != null) mainHandler.removeCallbacks(stopScanRunnable);
+            stopScanRunnable = () -> stopBleScanInternal(true);
+            mainHandler.postDelayed(stopScanRunnable, activeDurationMs);
+            result.put("reused", true);
+            call.resolve(result);
+            return;
+        }
+
+        stopBleScanInternal(false);
+        seenAddresses.clear();
+        lastEmittedAt.clear();
+
+        boolean extendedSupported = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try { extendedSupported = adapter.isLeExtendedAdvertisingSupported(); } catch (RuntimeException ignored) { /* legacy only */ }
+        }
+        final boolean wantExtended = extendedSupported;
+        final int startsNeeded = wantExtended ? 2 : 1;
+
+        // Android allows 5 scan starts per 30 s per app; the 6th is accepted but returns
+        // nothing. Wait for a free slot instead of running a scan that can't see anything.
+        long delay = ScanBudget.delayFor(startsNeeded);
+        if (delay > 0) {
+            result.put("startDelayMs", delay);
+            final BluetoothLeScanner delayedScanner = scanner;
+            delayedStartRunnable = () -> {
+                delayedStartRunnable = null;
+                String error = startScanners(delayedScanner, wantExtended);
+                if (error != null) {
+                    JSObject state = new JSObject();
+                    state.put("state", "error");
+                    state.put("message", error);
+                    notifyListeners("scanState", state);
+                }
+            };
+            mainHandler.postDelayed(delayedStartRunnable, delay);
+            call.resolve(result);
+            return;
+        }
+
+        String error = startScanners(scanner, wantExtended);
+        if (error != null) {
+            call.reject(error);
+            return;
+        }
+        call.resolve(result);
+    }
+
+    /** Starts the legacy scan (best for names in scan responses) plus, where supported, an extended scan. */
+    @SuppressLint("MissingPermission")
+    private String startScanners(BluetoothLeScanner scanner, boolean extended) {
         activeScanner = scanner;
-        activeScanCallback = new ScanCallback() {
+        activeScanCallback = newScanCallback(true);
+        try {
+            // Plain legacy settings: the most compatible mode across Android 8-16 and every
+            // chipset; scan responses (where most devices put their name) are merged reliably.
+            ScanSettings legacy = new ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+                .setReportDelay(0)
+                .build();
+            scanner.startScan(null, legacy, activeScanCallback);
+            ScanBudget.record(1);
+        } catch (SecurityException error) {
+            stopBleScanInternal(false);
+            return "Android denied access to Bluetooth scanning. Check Nearby Devices permission.";
+        } catch (RuntimeException error) {
+            stopBleScanInternal(false);
+            return "Android could not start BLE scanning: " + safeMessage(error);
+        }
+
+        if (extended && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Bluetooth 5 extended advertisements (newer earbuds, watches, LE Audio). Best effort:
+            // a failure here never cancels the legacy scan above.
+            try {
+                activeExtendedCallback = newScanCallback(false);
+                ScanSettings ext = new ScanSettings.Builder()
+                    .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                    .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+                    .setLegacy(false)
+                    .setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED)
+                    .build();
+                scanner.startScan(null, ext, activeExtendedCallback);
+                ScanBudget.record(1);
+            } catch (RuntimeException ignored) {
+                activeExtendedCallback = null;
+            }
+        }
+
+        stopScanRunnable = () -> stopBleScanInternal(true);
+        mainHandler.postDelayed(stopScanRunnable, activeDurationMs);
+        JSObject state = new JSObject();
+        state.put("state", "scanning");
+        state.put("durationMs", activeDurationMs);
+        notifyListeners("scanState", state);
+        return null;
+    }
+
+    private ScanCallback newScanCallback(final boolean primary) {
+        return new ScanCallback() {
+            private boolean current() {
+                return primary ? activeScanCallback == this : activeExtendedCallback == this;
+            }
+
             @Override
             public void onScanResult(int callbackType, ScanResult result) {
-                if (activeScanCallback != this) return;
+                if (!current()) return;
                 emitObservation(result);
             }
 
             @Override
             public void onBatchScanResults(List<ScanResult> results) {
-                if (activeScanCallback != this || results == null) return;
+                if (!current() || results == null) return;
                 for (ScanResult result : results) emitObservation(result);
             }
 
             @Override
             public void onScanFailed(int errorCode) {
-                if (activeScanCallback != this) return;
+                if (!current()) return;
+                if (!primary) {
+                    // The extended scan is optional; keep the legacy scan running.
+                    activeExtendedCallback = null;
+                    return;
+                }
                 JSObject state = new JSObject();
                 state.put("state", "error");
                 state.put("code", errorCode);
@@ -185,42 +313,37 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                 stopBleScanInternal(false);
             }
         };
+    }
 
-        try {
-            ScanSettings.Builder builder = new ScanSettings.Builder()
-                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-                .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                builder.setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
-                    .setNumOfMatches(ScanSettings.MATCH_NUM_MAX_ADVERTISEMENT);
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Also receive Bluetooth 5 extended advertisements (newer earbuds, watches, phones),
-                // but only where the controller supports them; otherwise keep the legacy scan.
-                boolean extended = false;
-                try { extended = adapter.isLeExtendedAdvertisingSupported(); } catch (RuntimeException ignored) { /* keep legacy */ }
-                if (extended) builder.setLegacy(false).setPhy(ScanSettings.PHY_LE_ALL_SUPPORTED);
-            }
-            activeScanner.startScan(null, builder.build(), activeScanCallback);
-        } catch (SecurityException error) {
-            stopBleScanInternal(false);
-            call.reject("Android denied access to Bluetooth scanning. Check Nearby Devices permission.");
-            return;
-        } catch (RuntimeException error) {
-            stopBleScanInternal(false);
-            call.reject("Android could not start BLE scanning: " + safeMessage(error));
-            return;
+    /**
+     * Android's per-app scan limit (5 starts in any 30 s window, enforced silently since
+     * Android 7). Shared by every plugin in the app that starts a BLE scan.
+     */
+    public static final class ScanBudget {
+        private static final long WINDOW_MS = 30_000L;
+        private static final int MAX_STARTS = 5;
+        private static final java.util.ArrayDeque<Long> STARTS = new java.util.ArrayDeque<>();
+
+        private ScanBudget() { }
+
+        /** Milliseconds to wait before {@code starts} more scans can begin without being throttled. */
+        public static synchronized long delayFor(int starts) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            while (!STARTS.isEmpty() && now - STARTS.peekFirst() >= WINDOW_MS) STARTS.pollFirst();
+            int free = MAX_STARTS - STARTS.size();
+            if (free >= starts) return 0L;
+            // The (starts - free)-th oldest start must age out of the window first.
+            int index = Math.max(0, starts - free - 1);
+            Long[] ordered = STARTS.toArray(new Long[0]);
+            long oldest = ordered[Math.min(index, ordered.length - 1)];
+            return Math.max(0L, WINDOW_MS - (now - oldest)) + 250L;
         }
 
-        stopScanRunnable = () -> stopBleScanInternal(true);
-        mainHandler.postDelayed(stopScanRunnable, activeDurationMs);
-
-        JSObject result = new JSObject();
-        result.put("started", true);
-        result.put("durationMs", activeDurationMs);
-        String warning = visibilityWarning();
-        if (warning != null) result.put("warning", warning);
-        call.resolve(result);
+        public static synchronized void record(int starts) {
+            long now = android.os.SystemClock.elapsedRealtime();
+            for (int i = 0; i < starts; i++) STARTS.addLast(now);
+            while (STARTS.size() > 32) STARTS.pollFirst();
+        }
     }
 
     /**
@@ -262,6 +385,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
 
         final long now = System.currentTimeMillis();
         seenAddresses.add(address);
+        scannedDevices.put(address.toUpperCase(java.util.Locale.ROOT), device);
         Long last = lastEmittedAt.get(address);
         if (last != null && now - last < MIN_EMIT_INTERVAL_MS) return;
         lastEmittedAt.put(address, now);
@@ -457,9 +581,10 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                         return;
                     }
                     if (address == null || address.trim().isEmpty()) return;
-                    // Do not present a known LE-only device as a classic discovery result.
-                    // Dual-mode and unknown-type results from classic inquiry remain eligible.
-                    if (deviceType == BluetoothDevice.DEVICE_TYPE_LE) return;
+                    // Android's discovery also runs an LE inquiry and resolves names for LE
+                    // devices the plain BLE scan may only see nameless. Keep them, marked LE.
+                    boolean leOnly = deviceType == BluetoothDevice.DEVICE_TYPE_LE;
+                    if (leOnly) scannedDevices.put(address.toUpperCase(java.util.Locale.ROOT), device);
                     // Classic inquiry often reports a device first without its name and resolves
                     // the name a moment later. Re-send the device once its name is known so the
                     // list shows "Galaxy Buds2" instead of "name unavailable".
@@ -484,6 +609,7 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
                     }
                     if (rssiValue != Short.MIN_VALUE) observation.put("rssi", (int) rssiValue);
                     observation.put("transport", "CLASSIC");
+                    if (leOnly) observation.put("leOnly", true);
                     observation.put("source", "REAL");
                     observation.put("paired", device.getBondState() == BluetoothDevice.BOND_BONDED);
                     observation.put("observedAt", System.currentTimeMillis());
@@ -727,23 +853,33 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
         call.resolve(result);
     }
 
+    @SuppressLint("MissingPermission")
     private void stopBleScanInternal(boolean emitComplete) {
-        boolean wasScanning = activeScanCallback != null;
+        boolean wasScanning = activeScanCallback != null || delayedStartRunnable != null;
         if (stopScanRunnable != null) {
             mainHandler.removeCallbacks(stopScanRunnable);
             stopScanRunnable = null;
         }
+        if (delayedStartRunnable != null) {
+            mainHandler.removeCallbacks(delayedStartRunnable);
+            delayedStartRunnable = null;
+        }
 
         BluetoothLeScanner scanner = activeScanner;
         ScanCallback callback = activeScanCallback;
+        ScanCallback extendedCallback = activeExtendedCallback;
         activeScanner = null;
         activeScanCallback = null;
+        activeExtendedCallback = null;
 
-        if (scanner != null && callback != null) {
-            try {
-                scanner.stopScan(callback);
-            } catch (SecurityException | IllegalArgumentException ignored) {
-                // Permission may have been revoked or Android may have ended the scan.
+        if (scanner != null) {
+            for (ScanCallback cb : new ScanCallback[] { callback, extendedCallback }) {
+                if (cb == null) continue;
+                try {
+                    scanner.stopScan(cb);
+                } catch (RuntimeException ignored) {
+                    // Permission may have been revoked, the adapter turned off, or Android ended the scan.
+                }
             }
         }
 
@@ -753,6 +889,187 @@ public class BlueGuardianBluetoothPlugin extends Plugin {
             state.put("devicesFound", seenAddresses.size());
             state.put("durationMs", activeDurationMs);
             notifyListeners("scanState", state);
+        }
+    }
+
+    // ------------------------------------------------------------ name lookup
+
+    private static final UUID GAP_SERVICE = UUID.fromString("00001800-0000-1000-8000-00805f9b34fb");
+    private static final UUID GAP_DEVICE_NAME = UUID.fromString("00002a00-0000-1000-8000-00805f9b34fb");
+    private static final UUID GAP_APPEARANCE = UUID.fromString("00002a01-0000-1000-8000-00805f9b34fb");
+    private static final UUID DIS_SERVICE = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb");
+    private static final UUID DIS_MANUFACTURER = UUID.fromString("00002a29-0000-1000-8000-00805f9b34fb");
+    private static final UUID DIS_MODEL = UUID.fromString("00002a24-0000-1000-8000-00805f9b34fb");
+    private static final int MAX_NAME_LOOKUPS = 12;
+
+    /**
+     * Many phones (every iPhone, most new Android phones) and accessories advertise
+     * without a name; the name lives in the GAP "Device Name" characteristic. For each
+     * nameless, connectable device the app asks about, connect briefly WITHOUT pairing,
+     * read Device Name / Appearance / maker / model, and disconnect. Nothing is written.
+     * Results stream as "nameResolved" events; the call resolves when all are done.
+     */
+    @PluginMethod
+    public void resolveNames(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+            && getPermissionState("bluetoothConnect") != PermissionState.GRANTED) {
+            call.reject("Allow Nearby devices for BlueGuardian to identify devices.");
+            return;
+        }
+        BluetoothManager manager = (BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
+        final BluetoothAdapter adapter = manager != null ? manager.getAdapter() : null;
+        if (adapter == null) {
+            call.reject("Android did not provide a Bluetooth adapter.");
+            return;
+        }
+        if (resolvingNames) {
+            call.reject("Already identifying devices.");
+            return;
+        }
+        JSArray requested = call.getArray("addresses");
+        final java.util.ArrayDeque<String> queue = new java.util.ArrayDeque<>();
+        if (requested != null) {
+            for (int i = 0; i < requested.length() && queue.size() < MAX_NAME_LOOKUPS; i++) {
+                String a = requested.optString(i, "").trim().toUpperCase(java.util.Locale.ROOT);
+                if (BluetoothAdapter.checkBluetoothAddress(a) && !queue.contains(a)) queue.add(a);
+            }
+        }
+        Integer perDevice = call.getInt("timeoutMs", 5000);
+        final int timeoutMs = Math.max(2500, Math.min(9000, perDevice == null ? 5000 : perDevice));
+        final int[] resolved = { 0 };
+        resolvingNames = true;
+        final Runnable[] next = new Runnable[1];
+        next[0] = () -> {
+            String address = queue.poll();
+            if (address == null) {
+                resolvingNames = false;
+                JSObject out = new JSObject();
+                out.put("resolved", resolved[0]);
+                call.resolve(out);
+                return;
+            }
+            BluetoothDevice device = scannedDevices.get(address);
+            try {
+                if (device == null) device = adapter.getRemoteDevice(address);
+            } catch (IllegalArgumentException error) {
+                mainHandler.post(next[0]);
+                return;
+            }
+            lookUpName(device, address, timeoutMs, (found) -> {
+                if (found) resolved[0]++;
+                // Give the controller a breath between connections.
+                mainHandler.postDelayed(next[0], 150);
+            });
+        };
+        mainHandler.post(next[0]);
+    }
+
+    private interface LookupDone { void done(boolean found); }
+
+    @SuppressLint("MissingPermission")
+    private void lookUpName(final BluetoothDevice device, final String address, int timeoutMs, final LookupDone done) {
+        final JSObject event = new JSObject();
+        event.put("address", address);
+        final boolean[] finished = { false };
+        final android.bluetooth.BluetoothGatt[] gattRef = new android.bluetooth.BluetoothGatt[1];
+        final java.util.ArrayDeque<android.bluetooth.BluetoothGattCharacteristic> reads = new java.util.ArrayDeque<>();
+
+        final Runnable finish = () -> {
+            if (finished[0]) return;
+            finished[0] = true;
+            android.bluetooth.BluetoothGatt gatt = gattRef[0];
+            if (gatt != null) {
+                try { gatt.disconnect(); } catch (RuntimeException ignored) { /* already gone */ }
+                try { gatt.close(); } catch (RuntimeException ignored) { /* already gone */ }
+            }
+            boolean found = event.has("name") || event.has("manufacturer") || event.has("model");
+            event.put("ok", found);
+            notifyListeners("nameResolved", event);
+            done.done(found);
+        };
+        mainHandler.postDelayed(finish, timeoutMs);
+
+        android.bluetooth.BluetoothGattCallback callback = new android.bluetooth.BluetoothGattCallback() {
+            private void readNext(android.bluetooth.BluetoothGatt gatt) {
+                while (!reads.isEmpty()) {
+                    try {
+                        if (gatt.readCharacteristic(reads.poll())) return;
+                    } catch (RuntimeException ignored) { /* skip this one */ }
+                }
+                mainHandler.post(finish);
+            }
+
+            @Override
+            public void onConnectionStateChange(android.bluetooth.BluetoothGatt gatt, int status, int newState) {
+                if (newState == android.bluetooth.BluetoothProfile.STATE_CONNECTED) {
+                    try {
+                        if (!gatt.discoverServices()) mainHandler.post(finish);
+                    } catch (RuntimeException error) {
+                        mainHandler.post(finish);
+                    }
+                } else if (newState == android.bluetooth.BluetoothProfile.STATE_DISCONNECTED) {
+                    mainHandler.post(finish);
+                }
+            }
+
+            @Override
+            public void onServicesDiscovered(android.bluetooth.BluetoothGatt gatt, int status) {
+                android.bluetooth.BluetoothGattService gap = gatt.getService(GAP_SERVICE);
+                android.bluetooth.BluetoothGattService dis = gatt.getService(DIS_SERVICE);
+                if (gap != null) {
+                    android.bluetooth.BluetoothGattCharacteristic n = gap.getCharacteristic(GAP_DEVICE_NAME);
+                    android.bluetooth.BluetoothGattCharacteristic a = gap.getCharacteristic(GAP_APPEARANCE);
+                    if (n != null) reads.add(n);
+                    if (a != null) reads.add(a);
+                }
+                if (dis != null) {
+                    android.bluetooth.BluetoothGattCharacteristic m = dis.getCharacteristic(DIS_MANUFACTURER);
+                    android.bluetooth.BluetoothGattCharacteristic md = dis.getCharacteristic(DIS_MODEL);
+                    if (m != null) reads.add(m);
+                    if (md != null) reads.add(md);
+                }
+                readNext(gatt);
+            }
+
+            @Override
+            @SuppressWarnings("deprecation")
+            public void onCharacteristicRead(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic c, int status) {
+                handle(gatt, c, c.getValue(), status);
+            }
+
+            @Override
+            public void onCharacteristicRead(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic c, byte[] value, int status) {
+                handle(gatt, c, value, status);
+            }
+
+            private void handle(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic c, byte[] value, int status) {
+                if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS && value != null && value.length > 0) {
+                    UUID id = c.getUuid();
+                    if (GAP_APPEARANCE.equals(id) && value.length >= 2) {
+                        event.put("appearance", (value[0] & 0xff) | ((value[1] & 0xff) << 8));
+                    } else {
+                        String text = new String(value, StandardCharsets.UTF_8).replaceAll("[\\p{Cntrl}]", " ").trim();
+                        if (text.length() > 96) text = text.substring(0, 96);
+                        if (!text.isEmpty()) {
+                            if (GAP_DEVICE_NAME.equals(id)) event.put("name", text);
+                            else if (DIS_MANUFACTURER.equals(id)) event.put("manufacturer", text);
+                            else if (DIS_MODEL.equals(id)) event.put("model", text);
+                        }
+                    }
+                }
+                readNext(gatt);
+            }
+        };
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                gattRef[0] = device.connectGatt(getContext(), false, callback, BluetoothDevice.TRANSPORT_LE);
+            } else {
+                gattRef[0] = device.connectGatt(getContext(), false, callback);
+            }
+            if (gattRef[0] == null) mainHandler.post(finish);
+        } catch (RuntimeException error) {
+            mainHandler.post(finish);
         }
     }
 

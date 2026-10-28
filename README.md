@@ -76,7 +76,7 @@ The APK is built by GitHub Actions on every push to `main` and to `android/phase
 
 1. Open the latest run of **[Build BlueGuardian Android Shell](https://github.com/YuvarajRaghavann/BlueGuardian-AI/actions/workflows/build-android-shell.yml)**.
 2. Under **Artifacts**, download `blueguardian-android-debug-<commit>` and unzip `app-debug.apk`.
-3. Install it on an Android 10+ phone (uninstall any earlier debug build first — each debug build is signed with a new key).
+3. Install it on an Android 8+ phone (uninstall any earlier debug build first — each debug build is signed with a new key).
 4. Allow **Nearby devices** and **Location** when asked. Android hides most Bluetooth devices from apps without location.
 
 Full instructions, including signed release builds and server deployment: **[Getting Started](docs/guide/GETTING_STARTED.md)**.

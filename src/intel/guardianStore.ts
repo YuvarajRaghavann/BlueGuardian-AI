@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { BluetoothDevice } from '../types';
 import { assessDevice, type GattInspection, type GuardianResult } from './guardian';
 import { intel } from './store';
+import { sd } from './engine';
 import { myDevices } from '../services/myDevices';
 
 const KEY = 'blueguardian.inspections.v1';
@@ -56,6 +57,10 @@ export function guardianFor(device: BluetoothDevice): GuardianResult {
     opinion: intel.trustOf(address),
     scans: profile?.scans,
     inspection: inspectionFor(address),
+    rssi: device.rssi,
+    txPower: device.txPower,
+    rssiSd: profile?.rssi ? sd(profile.rssi) : undefined,
+    rssiSamples: profile?.rssi?.n,
   });
 }
 

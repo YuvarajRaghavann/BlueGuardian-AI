@@ -10,7 +10,9 @@ import { setOwnerToken } from '../services/ownerSession';
 import { requestBluetoothDevice, type BluetoothDeviceInfo } from '../services/bluetoothService';
 import { getFreshFirebaseIdToken, sendFirebasePasswordResetEmail } from '../services/firebaseAuth';
 import { signIn as accountSignIn, signOut as accountSignOut, useAccount } from '../services/accountSession';
-import { isNativeAndroidApp, listNativeAndroidPairedDevices, scanNativeAndroidBle, scanNativeAndroidClassic } from '../services/nativeBluetoothService';
+import { isNativeAndroidApp, listNativeAndroidPairedDevices, scanEverythingNearby, type NearbyDevice } from '../services/nativeBluetoothService';
+import { isStableAddress, recoveryAddressHash } from '../services/recoveryHash';
+import { vendorFromAdvert, classLabel } from '../intel/vendor';
 import { myDevices } from '../services/myDevices';
 import { BottomSheet } from '../ui/BottomSheet';
 import { Button, Card, Empty, Field, Notice, Pill, SectionTitle, StepTrack, Toggle, errorText, type NoticeTone } from '../ui/kit';
@@ -284,31 +286,25 @@ function CaseCard({ record, onOpen }: { record: RecoveryDeviceRecord; onOpen: ()
 function HelpOthersCard({ onResult }: { onResult: (m: { tone: NoticeTone; text: string }) => void }) {
   const [shareLocation, setShareLocation] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<number | null>(null);
   const native = isNativeAndroidApp();
 
   const scan = async () => {
     setBusy(true);
+    setProgress(null);
     try {
-      const candidates = new Map<string, { name: string; serviceUuids: string[] }>();
-      const ble = await scanNativeAndroidBle((o) => {
-        const name = o.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
-        if (!name) return;
-        const serviceUuids = [...new Set((o.serviceUuids ?? []).map((u) => u.trim().toLowerCase()).filter(Boolean))].sort();
-        const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids });
-        if (!candidates.has(key)) candidates.set(key, { name, serviceUuids });
-      }, 10000);
-      // Many earbuds and speakers only appear in classic discovery.
-      const classic = await scanNativeAndroidClassic((o) => {
-        const name = o.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
-        if (!name) return;
-        const key = JSON.stringify({ name: name.toLowerCase(), serviceUuids: [] });
-        if (!candidates.has(key)) candidates.set(key, { name, serviceUuids: [] });
-      }, 10000);
-      const observations = Array.from(candidates.values()).slice(0, 30);
+      // BLE + classic together (old earbuds, speakers and car kits only answer classic
+      // inquiry), plus a name lookup for nameless devices, the same scan as Around.
+      const nearby = await scanEverythingNearby({
+        durationMs: 12000,
+        includePaired: false,
+        onUpdate: (list) => setProgress(list.filter((d) => d.lastSeen > 0).length),
+      });
+      const observations = buildCommunityObservations(nearby.devices);
       if (observations.length === 0) {
-        onResult(ble.ok || classic.ok
-          ? { tone: 'info', text: 'No named devices nearby right now. Nothing was sent.' }
-          : { tone: 'danger', text: (ble.ok ? '' : ble.error) || (classic.ok ? '' : classic.error) || 'The scan failed.' });
+        onResult(nearby.errors.length === 2
+          ? { tone: 'danger', text: nearby.errors[0] || 'The scan failed.' }
+          : { tone: 'info', text: 'No Bluetooth devices nearby right now. Nothing was sent.' });
         return;
       }
       let location: { lat: number; lng: number } | undefined;
@@ -320,13 +316,22 @@ function HelpOthersCard({ onResult }: { onResult: (m: { tone: NoticeTone; text: 
           return;
         }
       }
-      const result = await api.recovery.submitCommunitySightings(await token(), { observations, shareLocation, ...(location ? { location } : {}) });
-      const n = result.observationsReceived;
+      const t = await token();
+      let n: number;
+      try {
+        n = (await api.recovery.submitCommunitySightings(t, { observations, shareLocation, ...(location ? { location } : {}) })).observationsReceived;
+      } catch (e) {
+        // An older server only accepts named observations; send those instead of failing.
+        const named = observations.filter((o) => o.name).map(({ name, serviceUuids }) => ({ name, serviceUuids })).slice(0, 30);
+        if (named.length === 0) throw e;
+        n = (await api.recovery.submitCommunitySightings(t, { observations: named, shareLocation, ...(location ? { location } : {}) })).observationsReceived;
+      }
       onResult({ tone: 'success', text: `Thanks for helping. ${n} nearby device${n === 1 ? '' : 's'} checked against lost reports.` });
     } catch (e) {
       onResult({ tone: 'danger', text: errorText(e) });
     } finally {
       setBusy(false);
+      setProgress(null);
     }
   };
 
@@ -335,7 +340,7 @@ function HelpOthersCard({ onResult }: { onResult: (m: { tone: NoticeTone; text: 
       <div className="space-y-3">
         <Toggle checked={shareLocation} onChange={setShareLocation} disabled={busy} label="Include my location" hint="Helps the owner find the spot." />
         <Button className="w-full" busy={busy} disabled={!native} icon={<Radar className="h-4 w-4" />} onClick={() => void scan()}>
-          {busy ? 'Scanning…' : 'Scan and help'}
+          {busy ? (progress ? `Scanning… ${progress} found` : 'Scanning…') : 'Scan and help'}
         </Button>
         {!native && <p className="text-center text-xs text-[var(--text-muted)]">Available in the Android app.</p>}
       </div>
@@ -343,9 +348,37 @@ function HelpOthersCard({ onResult }: { onResult: (m: { tone: NoticeTone; text: 
   );
 }
 
+/**
+ * What a helper sends: hashed stable addresses (works for nameless devices) and
+ * advertised names. Raw addresses never leave the phone. Strongest signals first.
+ */
+function buildCommunityObservations(devices: NearbyDevice[]): Array<{ name?: string; serviceUuids: string[]; addressHash?: string }> {
+  const out: Array<{ name?: string; serviceUuids: string[]; addressHash?: string; rssi: number }> = [];
+  for (const d of devices) {
+    if (d.lastSeen <= 0) continue; // paired but not heard: not nearby
+    const name = d.name?.normalize('NFKC').replace(/\s+/g, ' ').trim();
+    const stable = isStableAddress(d.address, d.addressType, d.transports.includes('CLASSIC'));
+    const addressHash = stable ? recoveryAddressHash(d.address) : undefined;
+    if (!name && !addressHash) continue;
+    const serviceUuids = [...new Set(d.serviceUuids.map((u) => u.trim().toLowerCase()).filter(Boolean))].sort();
+    out.push({ ...(name ? { name } : {}), serviceUuids, ...(addressHash ? { addressHash } : {}), rssi: d.rssi ?? -127 });
+  }
+  return out.sort((a, b) => b.rssi - a.rssi).slice(0, 60)
+    .map((o) => ({ ...(o.name ? { name: o.name } : {}), serviceUuids: o.serviceUuids, ...(o.addressHash ? { addressHash: o.addressHash } : {}) }));
+}
+
+/** A label for a device that doesn't broadcast a name. */
+function namelessLabel(d: { maker?: string; manufacturerData?: Record<string, string>; majorClass?: number }): string {
+  const maker = d.maker || vendorFromAdvert(d.manufacturerData);
+  if (maker) return `${maker} device`;
+  return classLabel(d.majorClass) ?? 'Unnamed device';
+}
+
 // ------------------------------------------------------------ report sheet
 
-function mergeOption(map: Map<string, BluetoothDeviceInfo>, record: BluetoothDeviceInfo) {
+type ReportOption = BluetoothDeviceInfo & { label?: string; stable?: boolean };
+
+function mergeOption(map: Map<string, ReportOption>, record: ReportOption) {
   const id = String(record.address || record.id || '').trim();
   if (!id) return;
   const prev = map.get(id.toLowerCase());
@@ -356,6 +389,8 @@ function mergeOption(map: Map<string, BluetoothDeviceInfo>, record: BluetoothDev
     uuids: record.uuids?.length ? record.uuids : prev?.uuids ?? [],
     paired: Boolean(record.paired || prev?.paired),
     transport: prev?.transport === 'PAIRED' ? 'PAIRED' : record.transport,
+    label: record.label ?? prev?.label,
+    stable: record.stable ?? prev?.stable,
   });
 }
 
@@ -366,8 +401,9 @@ function ReportSheet({ open, prefill, onClose, onReported }: {
   onReported: (record: RecoveryDeviceRecord) => void;
 }) {
   const native = isNativeAndroidApp();
-  const [options, setOptions] = useState<BluetoothDeviceInfo[]>([]);
-  const [selected, setSelected] = useState<BluetoothDeviceInfo | null>(null);
+  const [options, setOptions] = useState<ReportOption[]>([]);
+  const [selected, setSelected] = useState<ReportOption | null>(null);
+  const [showOthers, setShowOthers] = useState(false);
   const [label, setLabel] = useState('');
   const [busy, setBusy] = useState<null | 'paired' | 'scan' | 'save'>(null);
   const [error, setError] = useState<string | null>(null);
@@ -377,7 +413,7 @@ function ReportSheet({ open, prefill, onClose, onReported }: {
     setBusy('paired');
     setError(null);
     try {
-      const map = new Map<string, BluetoothDeviceInfo>();
+      const map = new Map<string, ReportOption>();
       for (const d of await listNativeAndroidPairedDevices()) {
         mergeOption(map, { id: d.address, address: d.address, name: d.name, uuids: [], transport: 'PAIRED', paired: true });
       }
@@ -414,11 +450,22 @@ function ReportSheet({ open, prefill, onClose, onReported }: {
     setBusy('scan');
     try {
       const map = new Map(options.map((o) => [String(o.address || o.id).toLowerCase(), o]));
-      const outcome = await scanNativeAndroidBle((o) => {
-        mergeOption(map, { id: o.address || o.id, address: o.address || o.id, name: o.name, rssi: o.rssi, uuids: o.serviceUuids ?? [], transport: 'BLE', paired: false });
-      }, 8000);
-      setOptions(Array.from(map.values()));
-      if (!outcome.ok) setError(outcome.error);
+      const apply = (list: NearbyDevice[]) => {
+        for (const d of list) {
+          if (d.lastSeen <= 0) continue;
+          mergeOption(map, {
+            id: d.address, address: d.address, name: d.name, rssi: d.rssi, uuids: d.serviceUuids,
+            transport: d.transports.includes('CLASSIC') ? 'CLASSIC' : 'BLE', paired: d.paired,
+            label: d.name ? undefined : namelessLabel(d),
+            stable: isStableAddress(d.address, d.addressType, d.transports.includes('CLASSIC')),
+          });
+        }
+        setOptions(Array.from(map.values()));
+      };
+      // BLE + classic together, plus name lookup for nameless phones and accessories.
+      const outcome = await scanEverythingNearby({ durationMs: 12000, includePaired: false, onUpdate: apply });
+      apply(outcome.devices);
+      if (outcome.errors.length === 2) setError(outcome.errors[0]);
       else if (outcome.warning) setError(outcome.warning);
     } catch (e) {
       setError(errorText(e));
@@ -452,9 +499,11 @@ function ReportSheet({ open, prefill, onClose, onReported }: {
     }
   };
 
-  const named = options
-    .filter((o) => o.name)
-    .sort((a, b) => Number(Boolean(b.paired)) - Number(Boolean(a.paired)) || (b.rssi ?? -200) - (a.rssi ?? -200));
+  const byStrength = (a: ReportOption, b: ReportOption) => Number(Boolean(b.paired)) - Number(Boolean(a.paired)) || (b.rssi ?? -200) - (a.rssi ?? -200);
+  const named = options.filter((o) => o.name).sort(byStrength);
+  // Nameless devices can still be reported: a stable address lets other phones match it.
+  const others = options.filter((o) => !o.name).sort(byStrength);
+  const listed = showOthers ? [...named, ...others] : named;
 
   return (
     <BottomSheet open={open} onClose={onClose} label="Report a lost device">
@@ -468,17 +517,19 @@ function ReportSheet({ open, prefill, onClose, onReported }: {
           <>
             {busy === 'paired' ? (
               <Notice>Loading your devices…</Notice>
-            ) : named.length > 0 ? (
+            ) : listed.length > 0 ? (
               <ul className="divide-y divide-[var(--border)] overflow-hidden rounded-3xl bg-[var(--surface)]">
-                {named.map((o) => (
+                {listed.map((o) => (
                   <li key={o.id}>
-                    <button type="button" onClick={() => { setSelected(o); setLabel(o.name ?? ''); }} className="tap flex w-full items-center gap-3 px-4 py-3 text-left">
+                    <button type="button" onClick={() => { setSelected(o); setLabel(o.name ?? o.label ?? ''); }} className="tap flex w-full items-center gap-3 px-4 py-3 text-left">
                       <span className="grid h-10 w-10 place-items-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent)]">
                         {o.paired ? <Bluetooth className="h-5 w-5" /> : <Smartphone className="h-5 w-5" />}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[15px] font-semibold">{o.name}</span>
-                        <span className="block text-xs text-[var(--text-muted)]">{o.paired ? 'Paired with this phone' : 'Nearby now'}</span>
+                        <span className="block truncate text-[15px] font-semibold">{o.name ?? o.label ?? 'Unnamed device'}</span>
+                        <span className="block text-xs text-[var(--text-muted)]">
+                          {o.paired ? 'Paired with this phone' : `Nearby now${typeof o.rssi === 'number' ? ` · ${o.rssi} dBm` : ''}${o.transport === 'CLASSIC' ? ' · Classic' : ''}`}
+                        </span>
                       </span>
                       <ChevronRight className="h-4 w-4 text-[var(--text-muted)]" />
                     </button>
@@ -487,6 +538,11 @@ function ReportSheet({ open, prefill, onClose, onReported }: {
               </ul>
             ) : (
               <Empty icon={<Bluetooth className="h-6 w-6" />} title="No devices yet">Pair the device first, or search nearby.</Empty>
+            )}
+            {others.length > 0 && (
+              <button type="button" onClick={() => setShowOthers((v) => !v)} className="w-full text-center text-sm font-semibold text-[var(--accent)]">
+                {showOthers ? `Hide ${others.length} device${others.length === 1 ? '' : 's'} without a name` : `Show ${others.length} more device${others.length === 1 ? '' : 's'} without a name`}
+              </button>
             )}
             <Button tone="secondary" className="w-full" busy={busy === 'scan'} icon={<Search className="h-4 w-4" />} onClick={() => void searchNearby()}>
               {busy === 'scan' ? 'Searching…' : native ? 'Search nearby' : 'Choose a device'}
@@ -503,7 +559,9 @@ function ReportSheet({ open, prefill, onClose, onReported }: {
               <button type="button" onClick={() => setSelected(null)} className="text-sm font-semibold text-[var(--accent)]">Change</button>
             </div>
             <Field label="Name for your report" value={label} onChange={setLabel} maxLength={100} placeholder="e.g. My earbuds" />
-            {!selected.name && <Notice tone="warning">This device doesn’t broadcast a name, so other phones can’t recognise it. You can still track it yourself.</Notice>}
+            {!selected.name && (selected.stable !== false
+              ? <Notice tone="info">This device doesn’t broadcast a name. Other phones will recognise it by its Bluetooth address instead (sent only as a one-way hash).</Notice>
+              : <Notice tone="warning">This device uses a rotating private address and no name, so other phones can’t recognise it. You can still track it yourself.</Notice>)}
             <Button size="lg" className="w-full" busy={busy === 'save'} onClick={() => void report()}>Report as lost</Button>
           </>
         )}
@@ -572,11 +630,12 @@ function CaseSheet({ record, onClose, onChanged }: { record: RecoveryDeviceRecor
     try {
       const target = record.deviceIdentifier.trim().toLowerCase();
       if (isNativeAndroidApp()) {
-        const seen = new Set<string>();
-        const collect = (o: { address?: string; id?: string }) => { const id = String(o.address || o.id || '').trim().toLowerCase(); if (id) seen.add(id); };
-        await scanNativeAndroidBle(collect, 5000);
-        if (!seen.has(target)) await scanNativeAndroidClassic(collect, 5000);
-        if (!seen.has(target)) {
+        const wantedName = record.name.trim().toLowerCase();
+        const nearby = await scanEverythingNearby({ durationMs: 8000, includePaired: false, resolveNames: false });
+        const heard = nearby.devices.filter((d) => d.lastSeen > 0);
+        const found = heard.some((d) => d.address.toLowerCase() === target)
+          || (wantedName.length > 3 && heard.some((d) => (d.name ?? '').trim().toLowerCase() === wantedName));
+        if (!found) {
           setMessage({ tone: 'warning', text: 'Not detected nearby. Earbuds must be out of the case or in pairing mode. Nothing was logged.' });
           return;
         }

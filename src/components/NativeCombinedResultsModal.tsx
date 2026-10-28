@@ -22,7 +22,7 @@ export function NativeCombinedResultsModal({
   onClose,
   onSelect,
 }: NativeCombinedResultsModalProps) {
-  const [showUnnamed, setShowUnnamed] = useState(false);
+  const [showUnnamed, setShowUnnamed] = useState(true);
   if (!open) return null;
 
   // Android's own Bluetooth screen hides nameless advertisers (rotating BLE addresses from

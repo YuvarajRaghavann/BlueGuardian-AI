@@ -176,6 +176,13 @@ export class SecureSession {
   private rssiSamples: number[] = [];
   private rssi: number | null = null;
   private closed = false;
+  /** Pings sent while file chunks were queued: their replies wait behind the chunks, so their RTT is load, not jitter. */
+  private readonly loadedPings = new Set<number>();
+  /** Transfers that just ended or were cancelled: frames already in flight for them are expected, not errors. */
+  private readonly endedTransfers = new Set<string>();
+  private lastTickAt = 0;
+  /** Recovery secret derived for THIS session; adopted by both phones whenever either side re-pairs. */
+  private sessionSecret: Uint8Array | null = null;
 
   constructor(options: SessionOptions) {
     this.o = options;
@@ -315,6 +322,7 @@ export class SecureSession {
     this.remoteStatic = keys.remoteStaticKey;
     this.peerId = peerIdForKey(keys.remoteStaticKey);
     this.lastRekeyAt = this.now();
+    this.sessionSecret = hkdfSha256(keys.handshakeHash, utf8('blueguardian-recovery'), concatBytes(this.need(this.ni), this.need(this.nr)), 32);
     const record = this.o.peers.get(this.peerId);
     const known = !!record && record.status === 'trusted' && record.staticKey === toBase64(keys.remoteStaticKey);
     this.repairMode = !!record && record.status === 'revoked';
@@ -360,7 +368,7 @@ export class SecureSession {
     if (this.repairMode && !this.recoveryProofOk) return;
     const peerId = this.need(this.peerId);
     const existing = this.o.peers.get(peerId);
-    const secret = hkdfSha256(this.need(this.handshakeHash), utf8('blueguardian-recovery'), concatBytes(this.need(this.ni), this.need(this.nr)), 32);
+    const secret = this.need(this.sessionSecret);
     const now = this.now();
     const fresh = !existing;
     const record: PeerRecord = {
@@ -472,6 +480,13 @@ export class SecureSession {
         }
         const answer = this.recoveryAnswer(fromBase64(m.c), fromBase64(record.recoverySecret));
         await this.sendControl({ t: 'recover_response', r: toBase64(answer) });
+        // The other phone is re-pairing and will store this session's fresh secret. Store it
+        // too, or the two phones drift apart and the NEXT re-pair fails its proof forever
+        // ("This phone couldn't prove it's the one you paired before").
+        if (this.sessionSecret && record.status === 'trusted') {
+          await this.o.peers.upsert({ ...record, recoverySecret: toBase64(this.sessionSecret), keyEpoch: (record.keyEpoch ?? 0) + 1 });
+          this.o.log.add('recovery_secret_rotated', record.id, { keyEpoch: (record.keyEpoch ?? 0) + 1 });
+        }
         return;
       }
       case 'recover_response': {
@@ -496,8 +511,9 @@ export class SecureSession {
         if (this.phase === 'active') await this.sendControl({ t: 'pong', id: m.id, ts: m.ts });
         return;
       case 'pong': {
+        const loaded = this.loadedPings.delete(m.id);
         const rtt = this.now() - m.ts;
-        if (rtt >= 0 && rtt < 60_000) this.rtts.push(rtt);
+        if (!loaded && rtt >= 0 && rtt < 60_000) this.rtts.push(rtt);
         return;
       }
       case 'trust':
@@ -526,6 +542,7 @@ export class SecureSession {
         return;
       }
       case 'file_cancel': {
+        this.markEnded(m.id);
         const out = this.outgoing.get(m.id);
         if (out) { out.cancelled = m.reason; out.resolveAccept(null, m.reason); out.resolveResult(false, m.reason); }
         const inc = this.incoming.get(m.id);
@@ -618,9 +635,9 @@ export class SecureSession {
       this.o.events?.onTransfer?.({ ...progress });
       for (let index = start; index < manifest.chunks; index++) {
         if (transfer.cancelled || this.closed) throw new Error(transfer.cancelled ?? 'link closed');
-        if (!this.o.engine.authorize(peer, 'file_send')) {
-          await this.sendControl({ t: 'file_cancel', id: manifest.id, reason: 'sender paused: trust dropped below FULL' });
-          throw new Error('paused because trust dropped below FULL; send again later to resume');
+        if (!this.o.engine.authorize(peer, 'file_send') && !(await this.waitForSharing(peer, transfer))) {
+          await this.sendControl({ t: 'file_cancel', id: manifest.id, reason: 'sender paused: connection still being checked' });
+          throw new Error('paused while the connection was checked; send again to resume from where it stopped');
         }
         const offset = index * CHUNK_SIZE;
         const data = await source.read(offset, Math.min(CHUNK_SIZE, manifest.size - offset));
@@ -640,9 +657,38 @@ export class SecureSession {
       progress.reason = error instanceof Error ? error.message : String(error);
     } finally {
       this.outgoing.delete(manifest.id);
+      this.markEnded(manifest.id);
     }
     this.o.events?.onTransfer?.({ ...progress });
     return progress;
+  }
+
+  /**
+   * File sharing paused mid-transfer (trust briefly below FULL): wait for it to come
+   * back rather than failing the transfer. Gives up if the link closes, the transfer is
+   * cancelled, the peer is isolated, or it takes longer than the grace period.
+   */
+  private async waitForSharing(peer: string, transfer: OutgoingTransfer, graceMs = SecureSession.SHARING_GRACE_MS): Promise<boolean> {
+    const deadline = this.now() + graceMs;
+    this.o.events?.onNotice?.('Checking the connection… the transfer continues in a moment.', 'info');
+    while (this.now() < deadline) {
+      if (this.closed || transfer.cancelled) return false;
+      const st = this.o.engine.get(peer);
+      if (!st || st.state !== 'ACTIVE' || st.level === 'ISOLATED') return false;
+      if (this.o.engine.authorize(peer, 'file_send')) return true;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return this.o.engine.authorize(peer, 'file_send');
+  }
+
+  static SHARING_GRACE_MS = 25_000;
+
+  private markEnded(id: string): void {
+    this.endedTransfers.add(id);
+    if (this.endedTransfers.size > 64) {
+      const first = this.endedTransfers.values().next().value;
+      if (first !== undefined) this.endedTransfers.delete(first);
+    }
   }
 
   // ---------------------------------------------------------- file: receiver
@@ -716,11 +762,19 @@ export class SecureSession {
   private async handleChunk(id: string, index: number, data: Uint8Array): Promise<void> {
     const t = this.incoming.get(id);
     const peer = this.peerId ?? 'unknown';
-    if (!t || !t.approved || t.done) { this.protocolErrors += 1; return; }
-    if (!this.o.engine.authorize(peer, 'file_receive')) {
+    if (!t || !t.approved || t.done) {
+      // Chunks already on the air when a transfer was cancelled are expected, not an attack.
+      if (!this.endedTransfers.has(id)) this.protocolErrors += 1;
+      return;
+    }
+    // An approved transfer keeps flowing while the link is merely RESTRICTED (the sender
+    // pauses itself); only an ISOLATED / revoked peer stops it here.
+    const level = this.o.engine.get(peer);
+    if (!level || level.state !== 'ACTIVE' || level.level === 'ISOLATED') {
       this.incoming.delete(id);
-      await this.sendControl({ t: 'file_cancel', id, reason: 'receiver paused: trust dropped below FULL' });
-      this.emitTransfer(t, 'receive', 'cancelled', 'paused because trust dropped; the partial file is kept so it can resume');
+      this.markEnded(id);
+      await this.sendControl({ t: 'file_cancel', id, reason: 'receiver stopped: connection blocked for safety' });
+      this.emitTransfer(t, 'receive', 'cancelled', 'stopped because the connection was blocked; the partial file is kept so it can resume');
       return;
     }
     const expectedLength = Math.min(CHUNK_SIZE, t.manifest.size - index * CHUNK_SIZE);
@@ -739,9 +793,13 @@ export class SecureSession {
 
   private async finishIncoming(id: string): Promise<void> {
     const t = this.incoming.get(id);
-    if (!t || !t.approved) { this.protocolErrors += 1; return; }
+    if (!t || !t.approved) {
+      if (!this.endedTransfers.has(id)) this.protocolErrors += 1;
+      return;
+    }
     t.done = true;
     this.incoming.delete(id);
+    this.markEnded(id);
     const peer = this.peerId ?? 'unknown';
     this.emitTransfer(t, 'receive', 'verifying');
     let failure: string | null = null;
@@ -778,6 +836,21 @@ export class SecureSession {
   async tick(): Promise<TrustDecision | null> {
     if (this.closed || this.phase !== 'active' || !this.peerId) return null;
     const peer = this.peerId;
+    const tickAt = this.now();
+    const gap = this.lastTickAt ? tickAt - this.lastTickAt : 1000;
+    this.lastTickAt = tickAt;
+    if (gap > SecureSession.MAX_TICK_GAP_MS) {
+      // The app was in the background or the WebView was throttled: this window's timings
+      // measure Android's scheduler, not the link. Start a fresh window instead of scoring it.
+      this.framesIn = 0;
+      this.authFailures = 0;
+      this.protocolErrors = 0;
+      this.rtts = [];
+      this.rttHistory = [];
+      for (const id of this.loadedPings) this.loadedPings.delete(id);
+      try { await this.sendPing(); } catch { /* link may have dropped */ }
+      return this.lastDecision;
+    }
     const maxFps = this.o.maxFramesPerSecond ?? 600;
     if (this.framesIn > maxFps) this.protocolErrors += Math.ceil(this.framesIn / maxFps);
     const totalIn = this.framesIn + this.authFailures + this.protocolErrors;
@@ -794,6 +867,7 @@ export class SecureSession {
       pktRate: totalIn,
       pairAttempts: this.pairAttempts,
       errorRate: totalIn ? (this.authFailures + this.protocolErrors) / totalIn : 0,
+      errorCount: this.authFailures + this.protocolErrors,
       rttJitterMs: jitter,
     };
     this.framesIn = 0;
@@ -817,11 +891,26 @@ export class SecureSession {
       }
     }
     try {
-      await this.sendControl({ t: 'ping', id: ++this.pingId, ts: this.now() });
+      await this.sendPing();
     } catch {
       // link may have dropped between checks
     }
     return decision;
+  }
+
+  /** Longest gap between trust windows that still measures the link rather than the OS scheduler. */
+  static MAX_TICK_GAP_MS = 2500;
+
+  private async sendPing(): Promise<void> {
+    const id = ++this.pingId;
+    if (this.transferInFlight()) {
+      this.loadedPings.add(id);
+      if (this.loadedPings.size > 128) {
+        const first = this.loadedPings.values().next().value;
+        if (first !== undefined) this.loadedPings.delete(first);
+      }
+    }
+    await this.sendControl({ t: 'ping', id, ts: this.now() });
   }
 
   /** Automated recovery: rotate keys, revoke the pairing, close, log, require re-pair. */

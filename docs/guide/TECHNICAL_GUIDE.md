@@ -163,7 +163,7 @@ sequenceDiagram
   R->>S: Result
 ```
 
-1. **Receive** — the receiving phone opens a Bluetooth LE data channel (L2CAP connection-oriented channel, Android 10+) and advertises BlueGuardian's service ID with the channel number and a random 4-digit code.
+1. **Receive** — the receiving phone opens a Bluetooth LE data channel (an L2CAP connection-oriented channel on Android 10+, plus a GATT service that works from Android 8 and is the automatic fallback) and advertises BlueGuardian's service ID with the channel number and a random 4-digit code.
 2. **Send** — the other phone scans for that service ID, lists each phone by code, and connects. Frames are length-prefixed, up to 70 KB.
 3. **Handshake** — Noise XX (X25519, ChaCha20-Poly1305, SHA-256). The sender commits to a random value before seeing the receiver's, so an attacker in the middle cannot fish for a matching code.
 4. **Confirm the code** — both screens show a 6-digit code from the handshake. When they match, the peer's key is pinned; next time it reconnects without the code.
@@ -275,4 +275,4 @@ The APK is built entirely in GitHub Actions (`.github/workflows/build-android-sh
 - Signal strength gives a rough distance band, not metres.
 - Community matches are leads based on the device's name; the owner confirms.
 - The BTGuard behaviour model was trained on simulated sessions; its thresholds were tuned for real phones in October 2026 and should be validated with field data.
-- Secure Share needs Android 10+ on both phones.
+- Secure Share works on Android 8+; two Android 10+ phones use the faster L2CAP channel, otherwise the GATT transport is used automatically.

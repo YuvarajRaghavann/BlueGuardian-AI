@@ -277,6 +277,28 @@ describe('Continuous trust binding', () => {
     expect(b.peers.list()[0].status).toBe('revoked');
   });
 
+  it('keeps both phones’ recovery secrets in sync, so a second re-pair still proves itself', async () => {
+    const a = makeSide('A');
+    const b = makeSide('B');
+    await pairFresh(a, b);
+    for (let round = 1; round <= 2; round++) {
+      const record = b.peers.list()[0];
+      await b.peers.upsert({ ...record, status: 'revoked' });
+      const link = connect(a, b);
+      await link.sa.start();
+      await settle();
+      expect(link.events.bVerify?.repair).toBe(true);
+      await link.sa.confirmVerification(true);
+      await link.sb.confirmVerification(true);
+      await settle();
+      expect(link.sb.phase).toBe('active');
+      expect(b.peers.list()[0].status).toBe('trusted');
+      expect(a.peers.list()[0].recoverySecret).toBe(b.peers.list()[0].recoverySecret);
+      await link.sa.close('done', true);
+      await settle();
+    }
+  });
+
   it('keeps a quiet, normal link at FULL', async () => {
     const link = await pairFresh(makeSide('A'), makeSide('B'));
     for (let w = 0; w < 20; w++) {
