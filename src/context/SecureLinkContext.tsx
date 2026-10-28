@@ -154,6 +154,15 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
   const sessionRef = useRef<SecureSession | null>(null);
   const nameRef = useRef(state.localName);
   const noticeId = useRef(0);
+  // Auto-reconnect after a radio drop: the host stays visible with the same code and the
+  // sender finds it again (the address can rotate) and reconnects; the pinned peer is
+  // verified automatically and an interrupted transfer resumes from its last chunk.
+  const roleRef = useRef<'initiator' | 'responder' | null>(null);
+  const wasActiveRef = useRef(false);
+  const lastHostRef = useRef<DiscoveredHost | null>(null);
+  const reconnectAttemptsRef = useRef(0);
+  const hostLingerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectRef = useRef<() => void>(() => undefined);
 
   const patch = useCallback((update: Partial<SecureLinkState> | ((s: SecureLinkState) => Partial<SecureLinkState>)) => {
     setState((s) => ({ ...s, ...(typeof update === 'function' ? update(s) : update) }));
@@ -232,12 +241,40 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
       },
       events: {
         onPhase: (phase, detail) => {
-          patch((s) => ({ phase, mode: phase === 'closed' ? 'idle' : 'session', hostCode: phase === 'closed' ? null : s.hostCode }));
-          if (phase === 'closed') {
-            if (detail && detail !== 'closed by user') notify(`Disconnected (${detail}).`, 'info');
-            refreshPeers();
-            void secureLinkPlugin.stopHosting().catch(() => undefined);
+          if (phase === 'active') {
+            wasActiveRef.current = true;
+            reconnectAttemptsRef.current = 0;
+            if (hostLingerRef.current) { clearTimeout(hostLingerRef.current); hostLingerRef.current = null; }
           }
+          if (phase !== 'closed') {
+            patch((s) => ({ phase, mode: 'session', hostCode: s.hostCode }));
+            return;
+          }
+          refreshPeers();
+          const dropped = Boolean(detail && /^connection lost/.test(detail)) && wasActiveRef.current;
+          wasActiveRef.current = false;
+          if (dropped && role === 'responder') {
+            // Stay visible with the same code for a while so the other phone can come back.
+            patch((s) => ({ phase, mode: 'hosting', hostCode: s.hostCode }));
+            notify('Connection dropped. Waiting for the other phone to reconnect…', 'info');
+            if (hostLingerRef.current) clearTimeout(hostLingerRef.current);
+            hostLingerRef.current = setTimeout(() => {
+              hostLingerRef.current = null;
+              if (sessionRef.current && !sessionRef.current.isClosed) return;
+              void secureLinkPlugin.stopHosting().catch(() => undefined);
+              patch((s) => (s.mode === 'hosting' ? { mode: 'idle', hostCode: null } : {}));
+            }, 45_000);
+            return;
+          }
+          if (dropped && role === 'initiator' && lastHostRef.current && reconnectAttemptsRef.current < 3) {
+            patch({ phase, mode: 'connecting' });
+            notify('Connection dropped. Reconnecting…', 'info');
+            reconnectRef.current();
+            return;
+          }
+          patch({ phase, mode: 'idle', hostCode: null });
+          if (detail && detail !== 'closed by user') notify(`Disconnected (${detail}).`, 'info');
+          void secureLinkPlugin.stopHosting().catch(() => undefined);
         },
         onVerify: (info) => patch({ verify: info }),
         onTrust: (decision) => patch((s) => ({ trust: decision, trustHistory: [...s.trustHistory, Math.round(decision.trust)].slice(-60) })),
@@ -254,6 +291,8 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
       },
     });
     sessionRef.current = session;
+    roleRef.current = role;
+    if (hostLingerRef.current) { clearTimeout(hostLingerRef.current); hostLingerRef.current = null; }
     patch({ phase: 'handshaking', verify: null, trust: null, trustHistory: [], chats: [], offers: [], mode: 'session' });
     return session;
   }, [notify, patch, refreshPeers, refreshQuarantine]);
@@ -311,6 +350,47 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
     };
   }, [createSession, notify, patch, supported]);
 
+  // ------------------------------------------------------ auto-reconnect
+  useEffect(() => {
+    reconnectRef.current = () => {
+      const target = lastHostRef.current;
+      if (!target) return;
+      reconnectAttemptsRef.current += 1;
+      const attempt = reconnectAttemptsRef.current;
+      void (async () => {
+        await new Promise((resolve) => setTimeout(resolve, 800 * attempt));
+        let found: DiscoveredHost | null = null;
+        let handle: PluginListenerHandle | undefined;
+        try {
+          // The host's advertising address can change when it becomes visible again,
+          // so look for its code rather than its old address.
+          const seen = new Promise<DiscoveredHost | null>((resolve) => {
+            const timer = setTimeout(() => resolve(null), 12_000);
+            void secureLinkPlugin.addListener('hostFound', (host) => {
+              if (host.code === target.code) { clearTimeout(timer); resolve(host); }
+            }).then((h) => { handle = h; });
+          });
+          await secureLinkPlugin.discoverHosts({ durationMs: 12_000 });
+          found = await seen;
+        } catch {
+          found = null;
+        } finally {
+          void secureLinkPlugin.stopDiscovery().catch(() => undefined);
+          void handle?.remove().catch(() => undefined);
+        }
+        try {
+          if (!found) throw new Error('not found');
+          lastHostRef.current = found;
+          await secureLinkPlugin.connect({ address: found.address, psm: found.psm });
+        } catch {
+          if (reconnectAttemptsRef.current < 3) { reconnectRef.current(); return; }
+          patch({ mode: 'idle', hosts: [] });
+          notify('Couldn’t reconnect. Make sure the other phone is still on the Receive screen, then connect again.', 'warning');
+        }
+      })();
+    };
+  }, [notify, patch]);
+
   // ----------------------------------------------- continuous trust binding
   useEffect(() => {
     if (state.phase !== 'active') return;
@@ -323,7 +403,7 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
 
   // ----------------------------------------------------------------- actions
   const requireNative = useCallback(() => {
-    if (!supported) throw new Error('Secure Link works in the BlueGuardian Android app (Android 10 or newer).');
+    if (!supported) throw new Error('Secure Share works in the BlueGuardian Android app (Android 8 or newer).');
   }, [supported]);
 
   const actions: SecureLinkActions = useMemo(() => ({
@@ -361,6 +441,8 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
     },
     async connectTo(host: DiscoveredHost) {
       requireNative();
+      lastHostRef.current = host;
+      reconnectAttemptsRef.current = 0;
       patch({ mode: 'connecting' });
       try {
         await secureLinkPlugin.connect({ address: host.address, psm: host.psm });
@@ -393,6 +475,9 @@ export function SecureLinkProvider({ children }: { children: ReactNode }) {
       await sessionRef.current?.respondToOffer(id, accept);
     },
     async disconnect() {
+      lastHostRef.current = null;
+      wasActiveRef.current = false;
+      if (hostLingerRef.current) { clearTimeout(hostLingerRef.current); hostLingerRef.current = null; }
       const session = sessionRef.current;
       if (session && !session.isClosed) await session.close('closed by user', true);
       else await secureLinkPlugin.disconnect().catch(() => undefined);

@@ -167,12 +167,12 @@ export function SecureShare() {
 
       {!link.supported && (
         <Empty icon={<Smartphone className="h-6 w-6" />} title="Available in the Android app">
-          Install BlueGuardian on both phones (Android 10 or newer) to share files securely.
+          Install BlueGuardian on both phones (Android 8 or newer) to share files securely.
         </Empty>
       )}
       {link.initError && <Notice tone="danger">{link.initError}</Notice>}
-      {link.capabilities && !link.capabilities.l2cap && (
-        <Notice tone="warning">Secure Share needs Android 10 or newer.</Notice>
+      {link.capabilities && link.capabilities.secureShare === false && (
+        <Notice tone="warning">Secure Share needs Android 8 or newer with Bluetooth LE.</Notice>
       )}
 
       {/* ------------------------------------------------------------ start */}

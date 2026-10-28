@@ -290,7 +290,7 @@ const manifest = [
   'Combined mode scans BLE first and then classic Bluetooth to avoid concurrent permission prompts and adapter discovery sessions. Device merging uses normalized Android-reported address when available; randomized BLE addresses may remain separate.',
   'The default Phase 6 backend URL is configured at build time as https://blueguardian-backend-phase6.onrender.com/api and can be overridden in Settings. The server CORS allowlist must include the Capacitor WebView origin https://localhost. No owner token or secret is baked into this APK.',
   nativePluginNote,
-  'Secure Link: BLE advertising + L2CAP CoC transport (Android 10+), Noise_XX_25519_ChaChaPoly_SHA256 channel with 6-digit comparison codes, BTGuard trust engine, encrypted file transfer into app-private quarantine, Android Keystore wrapping for identity and peer secrets.',
+  'Secure Link: BLE advertising + L2CAP CoC transport (Android 10+) with GATT transport fallback (Android 8+), Noise_XX_25519_ChaChaPoly_SHA256 channel with 6-digit comparison codes, BTGuard trust engine, encrypted file transfer into app-private quarantine, Android Keystore wrapping for identity and peer secrets.',
   ...hardeningNotes,
   brandingNote,
   ...notes,

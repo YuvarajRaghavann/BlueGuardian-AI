@@ -20,21 +20,52 @@ describe('BTGuard trust engine (TypeScript port)', () => {
     }
   });
 
-  it('drops to RESTRICTED (with key rotation) before ISOLATED, and explains why', () => {
+  it('pauses sharing on one persistent soft signal but never revokes the pairing for it', () => {
     const engine = new TrustEngine();
     const seen: string[] = [];
     const actions: string[] = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 30; i++) {
       const d = engine.process('p', obs({ rttJitterMs: 50 }));
       seen.push(d.level);
       actions.push(...d.actions.map((a) => a.type));
-      if (i === 0) expect(d.reasons.join(' ')).toContain('round-trip jitter');
+      if (i === 0) {
+        expect(d.reasons.join(' ')).toContain('round-trip jitter');
+        expect(d.corroborated).toBe(false);
+      }
     }
-    expect(seen[0]).toBe('RESTRICTED');
-    expect(seen).toContain('ISOLATED');
+    // One noisy window changes nothing; a persistent one pauses file sharing.
+    expect(seen[0]).toBe('FULL');
+    expect(seen[1]).toBe('RESTRICTED');
     expect(actions).toContain('rotate_keys');
-    expect(actions).toContain('recover');
+    expect(seen).not.toContain('ISOLATED');
+    expect(actions).not.toContain('recover');
+    expect(engine.authorize('p', 'chat')).toBe(true);
+    expect(engine.authorize('p', 'file_send')).toBe(false);
+  });
+
+  it('ignores a single bad window (a WebView hiccup or a hand over the antenna)', () => {
+    const engine = new TrustEngine();
+    expect(engine.process('p', obs({ rttJitterMs: 400 })).level).toBe('FULL');
+    for (let i = 0; i < 5; i++) expect(engine.process('p', obs()).level).toBe('FULL');
+  });
+
+  it('isolates at once on hard evidence (repeated authentication failures) and recovers the link', () => {
+    const engine = new TrustEngine();
+    const d = engine.process('p', obs({ pktRate: 40, errorRate: 1, errorCount: 40 }));
+    expect(d.corroborated).toBe(true);
+    expect(d.level).toBe('ISOLATED');
+    expect(d.actions.map((a) => a.type)).toContain('recover');
     expect(engine.authorize('p', 'chat')).toBe(false);
+  });
+
+  it('isolates when two independent methods agree (behaviour + signal)', () => {
+    const engine = new TrustEngine();
+    engine.process('p', obs({ rssiDbm: -50 }));
+    const levels: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      levels.push(engine.process('p', obs({ rttJitterMs: 80, rssiDbm: i % 2 ? -50 : -95 })).level);
+    }
+    expect(levels).toContain('ISOLATED');
   });
 
   it('caps trust when the crypto layer is broken (downgrade)', () => {
@@ -53,7 +84,7 @@ describe('BTGuard trust engine (TypeScript port)', () => {
 
   it('regains trust slowly, one level at a time', () => {
     const engine = new TrustEngine(undefined, { autoRecover: false });
-    for (let i = 0; i < 6; i++) engine.process('p', obs({ errorRate: 0.5 }));
+    for (let i = 0; i < 6; i++) engine.process('p', obs({ pktRate: 10, errorRate: 0.5, errorCount: 5 }));
     expect(engine.get('p')?.level).toBe('ISOLATED');
     const levels: string[] = [];
     for (let i = 0; i < 40; i++) levels.push(engine.process('p', obs()).level);

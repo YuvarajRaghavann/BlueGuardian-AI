@@ -4,6 +4,7 @@ import Device from '../models/Device';
 import RecoveryEncounter from '../models/RecoveryEncounter';
 import { getOwnerIdFromRequest, requireAuth } from '../auth';
 import {
+  ADDRESS_HASH_PATTERN,
   buildAuthorizedRecoveryRecord,
   normalizeRecoveryState,
   RecoveryValidationError,
@@ -72,6 +73,7 @@ router.post('/devices', requireAuth('owner'), asyncHandler(async (req, res) => {
     existing.recoveryEnabled = true;
     if (registration.recoveryFingerprintHash) existing.recoveryFingerprintHash = registration.recoveryFingerprintHash;
     if (registration.recoveryNameHash) existing.recoveryNameHash = registration.recoveryNameHash;
+    if (registration.recoveryAddressHash) existing.recoveryAddressHash = registration.recoveryAddressHash;
     existing.recoveryState = normalizeRecoveryState(registration.recoveryState ?? existing.recoveryState ?? 'lost');
     existing.lastSeen = new Date();
     await existing.save();
@@ -89,6 +91,7 @@ router.post('/devices', requireAuth('owner'), asyncHandler(async (req, res) => {
     recoveryState: normalizeRecoveryState(registration.recoveryState),
     recoveryFingerprintHash: registration.recoveryFingerprintHash,
     recoveryNameHash: registration.recoveryNameHash,
+    recoveryAddressHash: registration.recoveryAddressHash,
     registeredAt: new Date(),
     firstSeen: new Date(),
     lastSeen: new Date(),
@@ -206,14 +209,15 @@ router.post('/devices/:deviceId/encounters', requireAuth('owner'), rateLimit, as
 }));
 
 
-// Community sighting intake. Participants submit only a canonical BLE fingerprint;
-// the API never reveals which owner's case matched. Location is optional and explicit.
+// Community sighting intake. Participants submit only hashed identifiers: a canonical
+// BLE name fingerprint and/or a salted address hash. The API never reveals which owner's
+// case matched. Location is optional and explicit.
 router.post('/community/sightings', requireAuth('participant'), rateLimit, asyncHandler(async (req, res) => {
   const observations = req.body?.observations;
   const shareLocation = req.body?.shareLocation === true;
   const location = req.body?.location;
-  if (!Array.isArray(observations) || observations.length < 1 || observations.length > 30) {
-    throw new RecoveryValidationError('Submit between 1 and 30 nearby BLE observations.');
+  if (!Array.isArray(observations) || observations.length < 1 || observations.length > 60) {
+    throw new RecoveryValidationError('Submit between 1 and 60 nearby Bluetooth observations.');
   }
   if (req.body?.shareLocation !== undefined && typeof req.body.shareLocation !== 'boolean') {
     throw new RecoveryValidationError('shareLocation must be a boolean.');
@@ -229,34 +233,62 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
     location,
   }).location;
 
-  // Each sighting is matched two ways: the exact name + service-UUID fingerprint (stronger
-  // lead) and the advertised name alone. Earbuds advertise different UUID sets in different
-  // packets, and classic-discovery sightings carry none, so exact-only matching almost never
-  // connected a helper's scan to the owner's registration.
+  // Each sighting is matched up to three ways, strongest first:
+  //  1. the device's stable Bluetooth address (hashed on the helper's phone) - works for
+  //     nameless devices and earbuds whose advertised name is generic;
+  //  2. the exact name + service-UUID fingerprint;
+  //  3. the advertised name alone (earbuds advertise different UUID sets in different
+  //     packets, and classic-discovery sightings carry none).
+  const addressHashes = new Set<string>();
   const exactHashes = new Set<string>();
   const nameHashes = new Set<string>();
+  let accepted = 0;
   for (const observation of observations) {
-    const registration = validateRegistrationInput({
-      deviceName: typeof observation?.name === 'string' ? observation.name : '',
-      deviceIdentifier: 'community-observation',
-      recoveryFingerprint: {
-        name: observation?.name,
-        serviceUuids: observation?.serviceUuids,
-      },
-      discoverySource: 'REAL',
-    });
-    const hasServiceUuids = Array.isArray(observation?.serviceUuids) && observation.serviceUuids.length > 0;
-    if (registration.recoveryFingerprintHash && hasServiceUuids) exactHashes.add(registration.recoveryFingerprintHash);
-    if (registration.recoveryNameHash) nameHashes.add(registration.recoveryNameHash);
+    const addressHash = typeof observation?.addressHash === 'string' ? observation.addressHash.trim().toLowerCase() : '';
+    if (observation?.addressHash !== undefined && !ADDRESS_HASH_PATTERN.test(addressHash)) {
+      throw new RecoveryValidationError('addressHash must be a 64-character hex SHA-256 digest.');
+    }
+    const hasName = typeof observation?.name === 'string' && observation.name.trim().length > 0;
+    if (!hasName && !addressHash) {
+      throw new RecoveryValidationError('Each observation needs an advertised name or an address hash.');
+    }
+    if (addressHash) addressHashes.add(addressHash);
+    if (hasName) {
+      const registration = validateRegistrationInput({
+        deviceName: observation.name,
+        deviceIdentifier: 'community-observation',
+        recoveryFingerprint: {
+          name: observation.name,
+          serviceUuids: Array.isArray(observation?.serviceUuids) ? observation.serviceUuids : [],
+        },
+        discoverySource: 'REAL',
+      });
+      const hasServiceUuids = Array.isArray(observation?.serviceUuids) && observation.serviceUuids.length > 0;
+      if (registration.recoveryFingerprintHash && hasServiceUuids) exactHashes.add(registration.recoveryFingerprintHash);
+      if (registration.recoveryNameHash) nameHashes.add(registration.recoveryNameHash);
+    }
+    accepted += 1;
   }
 
   const timeBucket = Math.floor(Date.now() / 60_000);
   const reported = new Set<string>();
-  const candidates: Array<{ hash: string; strong: boolean; filter: Record<string, any> }> = [
-    ...[...exactHashes].map((hash) => ({ hash, strong: true, filter: { recoveryFingerprintHash: hash } })),
+  const candidates: Array<{ hash: string; confidence: number; description: string; filter: Record<string, any> }> = [
+    ...[...addressHashes].map((hash) => ({
+      hash,
+      confidence: 0.7,
+      description: 'Community Bluetooth address match: a nearby phone heard this exact device. Confirm it before marking it found.',
+      filter: { recoveryAddressHash: hash },
+    })),
+    ...[...exactHashes].map((hash) => ({
+      hash,
+      confidence: 0.45,
+      description: 'Community BLE name + service UUID candidate. This is an unverified lead; confirm the device before marking it found.',
+      filter: { recoveryFingerprintHash: hash },
+    })),
     ...[...nameHashes].map((hash) => ({
       hash,
-      strong: false,
+      confidence: 0.2,
+      description: 'Low-confidence community BLE name-only candidate. Advertised names can collide; confirm the physical device before marking it found.',
       filter: { $or: [{ recoveryNameHash: hash }, { recoveryFingerprintHash: hash }] },
     })),
   ];
@@ -269,7 +301,7 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
     for (const device of matches) {
       if (!device.ownerId || !device.deviceId) continue;
       const deviceKey = `${device.ownerId}\u0000${device.deviceId}`;
-      // One report per device per submission; the strong (exact) match is processed first.
+      // One report per device per submission; the strongest match is processed first.
       if (reported.has(deviceKey)) continue;
       reported.add(deviceKey);
       const deduplicationKey = createHash('sha256')
@@ -284,11 +316,9 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
         ownerId: device.ownerId,
         deduplicationKey,
         source: 'REAL',
-        confidence: candidate.strong ? 0.45 : 0.2,
+        confidence: candidate.confidence,
         location: locationPayload,
-        description: candidate.strong
-          ? 'Community BLE name + service UUID candidate. This is an unverified lead; confirm the device before marking it found.'
-          : 'Low-confidence community BLE name-only candidate. Advertised names can collide; confirm the physical device before marking it found.',
+        description: candidate.description,
         simulated: false,
         isTestFixture: false,
         observedAt: new Date(),
@@ -304,7 +334,7 @@ router.post('/community/sightings', requireAuth('participant'), rateLimit, async
   }
 
   // Do not reveal whether any owner/device matched, or return device IDs.
-  return res.status(202).json({ accepted: true, observationsReceived: nameHashes.size });
+  return res.status(202).json({ accepted: true, observationsReceived: accepted });
 }));
 
 export default router;

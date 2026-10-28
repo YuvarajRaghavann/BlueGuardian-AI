@@ -16,7 +16,8 @@ import { myDevices, type KnownDevice } from '../services/myDevices';
 import { intel } from '../intel/store';
 import { classifyAdvert } from '../intel/advert';
 import type { ScanObservation } from '../intel/engine';
-import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
+import { isNativeAndroidApp, scanNativeAndroidBle, scanNativeAndroidClassic, listNativeAndroidPairedDevices, resolveNativeDeviceNames, type NativeBleObservation, type NativeClassicObservation } from '../services/nativeBluetoothService';
+import { classLabel, vendorFromAdvert } from '../intel/vendor';
 
 const DEFAULT_SECURITY_POLICY: SecurityPolicy = {
   confirmBlock: true,
@@ -339,6 +340,11 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const advertisementWatchRef = React.useRef<(() => void) | null>(null);
   const authorizedDeviceRefs = React.useRef<Map<string, BluetoothDeviceInfo>>(new Map());
   const lastAdvertisementUiUpdateRef = React.useRef<Map<string, number>>(new Map());
+  // Latest list for async work that outlives a render (name lookups after a scan).
+  const latestDevicesRef = React.useRef<BluetoothDevice[]>(state.devices);
+  latestDevicesRef.current = state.devices;
+  // Rotating addresses mean a device gets a new address every ~15 min; ask each address once.
+  const nameLookupsTried = React.useRef<Set<string>>(new Set());
   const ownerToken = useOwnerToken();
   const [registryReadyToken, setRegistryReadyToken] = React.useState<string | null>(null);
   const [apiBaseRevision, setApiBaseRevision] = React.useState(0);
@@ -764,14 +770,20 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         serviceData: observation.serviceData,
       })
       : null;
+    // Nameless advertisers (every iPhone, most new phones/watches/earbuds) still say who made
+    // them; show "Apple Bluetooth device" instead of hiding them until a name lookup answers.
+    const maker = transport === 'BLE' && 'manufacturerData' in observation
+      ? vendorFromAdvert(observation.manufacturerData)
+      : 'majorClass' in observation ? classLabel(observation.majorClass) : undefined;
     const device: BluetoothDevice = {
       // In a combined pass, BLE and classic reports sharing the same normalized
       // Android address merge into one record. BLE privacy/random addresses can
       // differ from a device's classic address, so identity is not guaranteed across radios.
       id: 'android-combined:' + address.toLowerCase(),
       name: deviceName,
-      type: inferDeviceType(deviceName, undefined, services),
+      type: inferDeviceType(deviceName, maker, services),
       address,
+      ...(maker ? { manufacturer: maker } : {}),
       rssi: typeof observation.rssi === 'number' ? observation.rssi : undefined,
       trusted: false,
       trustScore: 0,
@@ -1043,9 +1055,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         const identity = String(observation.address || observation.id || '').trim().toLowerCase();
         if (!identity) return;
         observedIdentities.add(identity);
-        scanObservations.push({ address: identity, name: observation.name, rssi: observation.rssi, transport: 'CLASSIC', paired: observation.paired });
+        const radio = observation.leOnly ? 'BLE' : 'CLASSIC';
+        scanObservations.push({ address: identity, name: observation.name, rssi: observation.rssi, transport: radio, paired: observation.paired });
         // Classic results arrive once per device (again only when its name resolves), so no throttle.
-        registerCombinedObservation(observation, 'CLASSIC', combinedTransportHistory);
+        registerCombinedObservation(observation, radio, combinedTransportHistory);
       }, 12000);
 
       const [bleResult, classicResult] = await Promise.all([
@@ -1065,6 +1078,11 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
           console.warn('[BlueGuardian][Intel] Scan analysis failed.', error);
         }
       });
+
+      // Nameless phones/accessories nearby: ask them their name over a short, non-bonding
+      // GATT read (the way nRF Connect does), strongest signal first. Runs after the scan
+      // so it never competes with it; names appear in the list as each device answers.
+      void identifyNamelessDevices();
 
       if (bleError && bleError !== classicError) messages.push(bleError);
       if (classicError) messages.push(classicError);
@@ -1103,6 +1121,40 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     } finally {
       clearInterval(interval);
     }
+  };
+
+  const identifyNamelessDevices = async (): Promise<void> => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const cutoff = Date.now() - 20_000;
+    const candidates = latestDevicesRef.current
+      .filter((d) => d.id.startsWith('android-combined:') && d.address
+        && !normalizeBluetoothName(d.name)
+        && d.connectable !== false
+        && (d.discoveryTransports ?? []).includes('BLE')
+        && new Date(d.lastSeen).getTime() >= cutoff
+        && (d.rssi ?? -127) >= -85
+        && !nameLookupsTried.current.has(String(d.address).toUpperCase()))
+      .sort((a, b) => (b.rssi ?? -127) - (a.rssi ?? -127))
+      .slice(0, 8);
+    if (candidates.length === 0) return;
+    for (const d of candidates) nameLookupsTried.current.add(String(d.address).toUpperCase());
+    await resolveNativeDeviceNames(candidates.map((d) => String(d.address)), (lookup) => {
+      if (!lookup.ok) return;
+      const current = latestDevicesRef.current.find((d) => d.address && d.address.toUpperCase() === lookup.address);
+      if (!current) return;
+      const name = normalizeBluetoothName(lookup.name) ?? normalizeBluetoothName(current.name);
+      const maker = lookup.manufacturer?.trim() || current.manufacturer;
+      const hint = [name, lookup.model].filter(Boolean).join(' ');
+      dispatch({
+        type: 'UPDATE_DEVICE',
+        payload: {
+          ...current,
+          ...(name ? { name } : {}),
+          ...(maker ? { manufacturer: maker } : {}),
+          type: current.type === 'unknown' ? inferDeviceType(hint, maker, current.services) : current.type,
+        },
+      });
+    });
   };
 
   const loadPairedDevices = async (): Promise<number> => {

@@ -199,6 +199,42 @@ describe('recovery API integration', () => {
     expect(store.encounters[0]).toMatchObject({ deviceId: 'AA:BB:CC:DD:EE:01', confidence: 0.2 });
   });
 
+  it('matches a nameless community sighting by its hashed Bluetooth address', async () => {
+    const registered = await fetch(`${origin}/api/recovery/devices`, {
+      method: 'POST',
+      headers: { ...ownerHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: 'AA:BB:CC:DD:EE:02',
+        deviceIdentifier: 'aa:bb:cc:dd:ee:02',
+        deviceName: 'Old speaker',
+        recoveryState: 'lost',
+      }),
+    });
+    expect(registered.status).toBe(201);
+    const { createHash } = await import('node:crypto');
+    const addressHash = createHash('sha256').update('blueguardian-recovery-address-v1:AA:BB:CC:DD:EE:02').digest('hex');
+    const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ observations: [{ addressHash, serviceUuids: [] }], shareLocation: false }),
+    });
+    expect(response.status).toBe(202);
+    expect(JSON.stringify(await response.json())).not.toContain('AA:BB');
+    expect(store.encounters).toHaveLength(1);
+    expect(store.encounters[0]).toMatchObject({ deviceId: 'AA:BB:CC:DD:EE:02', confidence: 0.7 });
+  });
+
+  it('rejects community observations with neither a name nor a valid address hash', async () => {
+    for (const observation of [{ serviceUuids: [] }, { addressHash: 'not-a-hash' }]) {
+      const response = await fetch(`${origin}/api/recovery/community/sightings`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer blueguardian-participant-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ observations: [observation], shareLocation: false }),
+      });
+      expect(response.status).toBe(400);
+    }
+  });
+
   it('stores coordinates only when a community participant explicitly opts in', async () => {
     const { createHash } = await import('node:crypto');
     const fingerprintHash = createHash('sha256')

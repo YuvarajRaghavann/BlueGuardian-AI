@@ -9,6 +9,15 @@
  * The three risks are fused into one trust score every window. Trust is quick
  * to lose and slow to regain; the level (FULL / RESTRICTED / ISOLATED) decides
  * what the peer may do, and a drop triggers key rotation or full recovery.
+ *
+ * Corroboration (field-tested on real phones): a single soft signal (a jittery
+ * WebView, a hand over the antenna) is noise far more often than an attack. So
+ *  - soft evidence from ONE method can pause file sharing (RESTRICTED) but never
+ *    revoke a pairing; isolation needs hard evidence (broken crypto, repeated
+ *    authentication failures, RF-fingerprint / distance mismatch) or two
+ *    independent methods agreeing;
+ *  - a soft dip must persist for `confirmWindows` consecutive windows before it
+ *    moves the score; corroborated evidence acts at once.
  */
 import modelJson from './trustModel.json';
 
@@ -41,6 +50,8 @@ export interface LinkObservation {
   pairAttempts: number;
   errorRate: number;
   rttJitterMs: number;
+  /** Absolute number of failed-authentication / malformed frames this window (hard evidence when repeated). */
+  errorCount?: number;
 }
 
 export interface TrustConfig {
@@ -58,6 +69,12 @@ export interface TrustConfig {
   rssiJumpDb: number;
   probationTrust: number;
   autoRecover: boolean;
+  /** Without hard evidence, instant trust never goes below this (RESTRICTED band, not ISOLATED). */
+  softFloor: number;
+  /** This many bad frames in one window is hard evidence of tampering or injection. */
+  hardErrorCount: number;
+  /** Consecutive low windows needed before a soft-evidence downgrade takes effect. */
+  confirmWindows: number;
 }
 
 export const DEFAULT_TRUST_CONFIG: TrustConfig = {
@@ -75,6 +92,9 @@ export const DEFAULT_TRUST_CONFIG: TrustConfig = {
   rssiJumpDb: 18,
   probationTrust: 55,
   autoRecover: true,
+  softFloor: 50,
+  hardErrorCount: 3,
+  confirmWindows: 2,
 };
 
 export interface TrustModel {
@@ -139,6 +159,8 @@ export interface PeerTrustState {
   cfoSd: number | null;
   rssiBaseline: number | null;
   windows: number;
+  /** Consecutive windows whose score pointed to a lower level. */
+  lowWindows: number;
 }
 
 export interface TrustDecision {
@@ -151,6 +173,8 @@ export interface TrustDecision {
   risks: { crypto: number; proximity: number; distance: number; fingerprint: number; rssiJump: number; ml: number; mlProbability: number; combined: number };
   reasons: string[];
   actions: TrustAction[];
+  /** True when the score rests on hard evidence (or two methods agreeing), not one noisy signal. */
+  corroborated?: boolean;
 }
 
 export type TrustAction =
@@ -187,6 +211,7 @@ export class TrustEngine {
       cfoSd,
       rssiBaseline: null,
       windows: 0,
+      lowWindows: 0,
     };
     this.peers.set(peerId, state);
     return state;
@@ -267,8 +292,22 @@ export class TrustEngine {
     const combined = 1 - (1 - crypto.risk) * (1 - prox.risk) * (1 - c.mlWeight * ml);
     let inst = 100 * (1 - combined);
     if (crypto.risk >= c.cryptoHard) inst = Math.min(inst, c.cryptoCap);
-    const alpha = inst < st.trust ? c.alphaDown : c.alphaUp;
-    st.trust = alpha * inst + (1 - alpha) * st.trust;
+
+    // Corroboration: hard evidence, or two independent methods agreeing.
+    const errorCount = typeof o.errorCount === 'number' ? o.errorCount : Math.round(o.errorRate * o.pktRate);
+    const hard = crypto.risk >= c.cryptoHard || errorCount >= c.hardErrorCount || prox.distance > 0.6 || prox.fingerprint > 0.6;
+    const softMethods = (prox.risk >= 0.3 ? 1 : 0) + (ml >= 0.5 ? 1 : 0);
+    const corroborated = hard || softMethods >= 2;
+    if (!corroborated) inst = Math.max(inst, c.softFloor);
+
+    // A soft dip must persist for confirmWindows consecutive windows before it moves the
+    // smoothed trust at all; corroborated evidence acts at once.
+    const windowBad = inst < c.downThresholds[1];
+    st.lowWindows = windowBad ? st.lowWindows + 1 : 0;
+    if (corroborated || !windowBad || st.lowWindows >= c.confirmWindows) {
+      const alpha = inst < st.trust ? c.alphaDown : c.alphaUp;
+      st.trust = alpha * inst + (1 - alpha) * st.trust;
+    }
 
     const actions: TrustAction[] = [];
     const next = this.nextLevel(st);
@@ -292,8 +331,9 @@ export class TrustEngine {
       level: st.level,
       capabilities: CAPABILITIES[st.level],
       risks: { crypto: crypto.risk, proximity: prox.risk, distance: prox.distance, fingerprint: prox.fingerprint, rssiJump: prox.rssiJump, ml, mlProbability: pMl, combined },
-      reasons: [...crypto.reasons, ...prox.reasons, ...mlReasons],
+      reasons: [...crypto.reasons, ...prox.reasons, ...mlReasons, ...(hard && errorCount >= c.hardErrorCount ? [`${errorCount} frames failed authentication or were malformed in one window`] : [])],
       actions,
+      corroborated,
     };
   }
 
@@ -312,7 +352,7 @@ export class TrustEngine {
     const down: TrustLevel = t < c.downThresholds[0] ? 'ISOLATED' : t < c.downThresholds[1] ? 'RESTRICTED' : 'FULL';
     const up: TrustLevel = t < c.upThresholds[0] ? 'ISOLATED' : t < c.upThresholds[1] ? 'RESTRICTED' : 'FULL';
     const current = LEVEL_RANK[st.level];
-    if (LEVEL_RANK[down] < current) return down; // losing trust is immediate
+    if (LEVEL_RANK[down] < current) return down; // losing trust is immediate (once confirmed above)
     if (LEVEL_RANK[up] > current) return RANK_LEVEL[current + 1]; // regain one step at a time
     return st.level;
   }

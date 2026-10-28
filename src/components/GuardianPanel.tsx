@@ -6,6 +6,7 @@ import { VERDICT_STYLE, type CheckStatus, type GuardianResult } from '../intel/g
 import { inspectionFor, runDeepInspection } from '../intel/guardianStore';
 import { isNativeAndroidApp } from '../services/nativeBluetoothService';
 import { formatDistanceToNow } from 'date-fns';
+import { METHOD_LABEL, type BtguardMethod } from '../intel/btguardScan';
 
 const STATUS: Record<CheckStatus, { icon: typeof Check; color: string }> = {
   pass: { icon: Check, color: 'var(--success)' },
@@ -58,6 +59,8 @@ export function GuardianPanel({ device, result }: { device: BluetoothDevice; res
         </div>
       </motion.div>
 
+      <BtguardBreakdown result={result} />
+
       <ul className="space-y-1.5">
         {ordered.map((c, i) => {
           const s = STATUS[c.status];
@@ -90,5 +93,49 @@ export function GuardianPanel({ device, result }: { device: BluetoothDevice; res
         </div>
       )}
     </section>
+  );
+}
+
+const METHODS: BtguardMethod[] = ['protocol', 'physical', 'behaviour'];
+
+/** BTGuard: the three independent methods behind the verdict, fused into one trust score. */
+function BtguardBreakdown({ result }: { result: GuardianResult }) {
+  const reduce = useReducedMotion();
+  const { btguard } = result;
+  const tone = (risk: number) => (risk >= 0.85 ? 'var(--danger)' : risk >= 0.3 ? 'var(--warning)' : 'var(--success)');
+  return (
+    <div className="rounded-3xl bg-[var(--surface)] p-4">
+      <div className="flex items-baseline justify-between">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">BTGuard score</p>
+        <p className="font-display text-xl font-semibold" style={{ color: tone(1 - btguard.trust / 100) }}>
+          {btguard.trust}<span className="text-xs text-[var(--text-muted)]"> / 100</span>
+        </p>
+      </div>
+      <div className="mt-3 space-y-2.5">
+        {METHODS.map((m, i) => {
+          const score = btguard.methods[m];
+          const safety = Math.round(100 * (1 - score.risk));
+          return (
+            <div key={m}>
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-[var(--text-secondary)]">{METHOD_LABEL[m]}</span>
+                <span className="text-[var(--text-muted)]">{score.reasons[0] ?? 'Nothing unusual'}</span>
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--bg-elevated)]">
+                <motion.div className="h-full rounded-full" style={{ background: tone(score.risk) }}
+                  initial={reduce ? false : { width: 0 }} animate={{ width: `${Math.max(4, safety)}%` }} transition={{ delay: 0.08 * i, duration: 0.5 }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[11px] leading-4 text-[var(--text-muted)]">
+        {btguard.hard
+          ? 'Decided by hard evidence.'
+          : btguard.corroborated
+            ? 'Two independent methods agree.'
+            : 'Unsafe needs hard evidence or two methods agreeing; one weak signal alone is never enough.'}
+      </p>
+    </div>
   );
 }

@@ -24,6 +24,7 @@ import companiesJson from './data/companies.json';
 import servicesJson from './data/services.json';
 import appearanceJson from './data/appearance.json';
 import type { Finding, TrustOpinion } from './engine';
+import { fuseChecks, physicalChecks, type BtguardScore } from './btguardScan';
 
 const COMPANIES = companiesJson as Record<string, string>;
 const SERVICES = servicesJson as Record<string, string>;
@@ -71,6 +72,11 @@ export interface GuardianInput {
   opinion?: TrustOpinion;
   scans?: number;
   inspection?: GattInspection;
+  /** Radio physics (BTGuard method 2). */
+  rssi?: number;
+  txPower?: number;
+  rssiSd?: number;
+  rssiSamples?: number;
 }
 
 export interface GuardianResult {
@@ -79,6 +85,8 @@ export interface GuardianResult {
   checks: GuardianCheck[];
   maker?: string;
   identityVerified: boolean;
+  /** BTGuard three-method fusion behind the verdict (protocol, radio physics, behaviour). */
+  btguard: BtguardScore;
 }
 
 // ---------------------------------------------------------------- parsing
@@ -313,14 +321,20 @@ export function assessDevice(input: GuardianInput): GuardianResult {
     else if (insp.openReads > 0) add({ id: 'deep', status: 'info', title: 'Shares data without pairing', detail: 'Normal for simple gadgets; don\'t store anything private on it.' });
   }
 
+  // 10. Radio physics (BTGuard method 2): signal vs advertised transmit power, stability.
+  for (const c of physicalChecks({ rssi: input.rssi, txPower: input.txPower, rssiSd: input.rssiSd, rssiSamples: input.rssiSamples, paired: input.paired })) add(c);
+
+  // BTGuard fusion of the three methods. Unsafe needs corroboration: hard evidence or two
+  // methods agreeing; a lone weak signal is at most Caution.
+  const btguard = fuseChecks(checks);
   const fails = checks.filter((c) => c.status === 'fail');
   const warns = checks.filter((c) => c.status === 'warn');
-  const verdict: Verdict = fails.length ? 'unsafe' : warns.length ? 'caution'
+  const verdict: Verdict = fails.length && btguard.corroborated ? 'unsafe' : fails.length || warns.length ? 'caution'
     : input.paired || input.trusted || identityVerified || o?.level === 'trusted' || o?.level === 'likely_safe' ? 'safe' : 'clear';
   const summary = fails[0]?.title ?? warns[0]?.title
     ?? (input.paired ? 'Paired with this phone' : identityVerified && maker ? `Verified: ${maker}` : 'No risks found');
 
-  return { verdict, summary, checks, maker, identityVerified };
+  return { verdict, summary, checks, maker, identityVerified, btguard };
 }
 
 export const VERDICT_STYLE: Record<Verdict, { label: string; color: string; rank: number }> = {

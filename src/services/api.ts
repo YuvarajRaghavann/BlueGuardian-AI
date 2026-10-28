@@ -319,7 +319,7 @@ export const api = {
   listEvents: (token: string) => apiFetch(`${BASE()}/events`, { headers: recoveryHeaders(token) }).then(json<Record<string, any>[]>),
   postEvent: (token: string, ev: any) => apiFetch(`${BASE()}/events`, { method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(ev) }).then(json<any>),
   recovery: {
-    submitCommunitySightings: (token: string, payload: { observations: Array<{ name: string; serviceUuids: string[] }>; shareLocation: boolean; location?: { lat: number; lng: number } }) => recoveryFetch(`${BASE()}/recovery/community/sightings`, {
+    submitCommunitySightings: (token: string, payload: { observations: Array<{ name?: string; serviceUuids: string[]; addressHash?: string }>; shareLocation: boolean; location?: { lat: number; lng: number } }) => recoveryFetch(`${BASE()}/recovery/community/sightings`, {
       method: 'POST', headers: recoveryHeaders(token, true), body: JSON.stringify(payload),
     }).then(json<{ accepted: boolean; observationsReceived: number }>),
     listDevices: (token: string) => recoveryFetch(`${BASE()}/recovery/devices`, { headers: recoveryHeaders(token) }).then(json<RecoveryDeviceRecord[]>),

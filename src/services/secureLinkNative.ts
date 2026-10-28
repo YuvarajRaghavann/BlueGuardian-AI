@@ -12,7 +12,12 @@ import { isNativeAndroidApp } from './nativeBluetoothService';
 
 export interface SecureLinkCapabilities {
   sdk: number;
+  /** Fast L2CAP channel (Android 10+). */
   l2cap: boolean;
+  /** GATT transport (Android 8+): used on older phones and when L2CAP fails. */
+  gatt?: boolean;
+  /** This phone can use Secure Share at all. */
+  secureShare?: boolean;
   bluetoothEnabled: boolean;
   advertising: boolean;
   strongBox: boolean;
@@ -32,6 +37,7 @@ export interface LinkStateEvent {
   role?: 'host' | 'client';
   address?: string;
   message?: string;
+  transport?: 'l2cap' | 'gatt';
 }
 
 export interface QuarantineEntry {
@@ -46,11 +52,11 @@ export interface QuarantineEntry {
 
 interface SecureLinkPlugin {
   getCapabilities(): Promise<SecureLinkCapabilities>;
-  startHosting(options: { code: string }): Promise<{ psm: number; code: string }>;
+  startHosting(options: { code: string }): Promise<{ psm: number; code: string; transport?: string }>;
   stopHosting(): Promise<void>;
-  discoverHosts(options: { durationMs: number }): Promise<{ durationMs: number; warning?: string }>;
+  discoverHosts(options: { durationMs: number }): Promise<{ durationMs: number; warning?: string; startDelayMs?: number }>;
   stopDiscovery(): Promise<void>;
-  connect(options: { address: string; psm: number }): Promise<{ connected: boolean }>;
+  connect(options: { address: string; psm: number }): Promise<{ connected: boolean; transport?: 'l2cap' | 'gatt'; mtu?: number }>;
   send(options: { data: string }): Promise<void>;
   disconnect(): Promise<void>;
   keystoreInfo(): Promise<{ available: boolean; strongBox?: boolean; message?: string }>;

@@ -27,7 +27,19 @@ export interface NativeClassicObservation {
   paired?: boolean;
   deviceClass?: number;
   majorClass?: number;
+  /** Found by Android's discovery LE inquiry: an LE device whose name discovery resolved. */
+  leOnly?: boolean;
   observedAt: number;
+}
+
+/** Result of a short, non-bonding GATT read of a nameless device (GAP name, appearance, maker, model). */
+export interface NativeNameLookup {
+  address: string;
+  ok: boolean;
+  name?: string;
+  appearance?: number;
+  manufacturer?: string;
+  model?: string;
 }
 
 interface NativeClassicScanState {
@@ -50,11 +62,13 @@ interface NativeBleScanState {
 }
 
 interface BlueGuardianBluetoothPlugin {
-  startBleScan(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number; warning?: string }>;
+  startBleScan(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number; warning?: string; startDelayMs?: number; reused?: boolean }>;
   stopBleScan(): Promise<{ stopped: boolean }>;
   startClassicDiscovery(options: { durationMs: number }): Promise<{ started: boolean; durationMs: number; warning?: string }>;
   stopClassicDiscovery(): Promise<{ stopped: boolean }>;
   listPairedDevices(): Promise<{ devices: NativeClassicObservation[]; count: number }>;
+  resolveNames(options: { addresses: string[]; timeoutMs?: number }): Promise<{ resolved: number }>;
+  addListener(eventName: 'nameResolved', listenerFunc: (event: NativeNameLookup) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'deviceFound', listenerFunc: (event: NativeBleObservation) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'scanState', listenerFunc: (event: NativeBleScanState) => void): Promise<PluginListenerHandle>;
   addListener(eventName: 'classicDeviceFound', listenerFunc: (event: NativeClassicObservation) => void): Promise<PluginListenerHandle>;
@@ -115,14 +129,15 @@ export async function scanNativeAndroidBle(
 
     // Guard the startup call as well as the scan window. A native permission/bridge
     // call that never settles must not leave the Devices page spinning forever.
+    // (Permission prompts can legitimately take a while, so allow 30 s.)
     const started = await Promise.race([
       nativeBluetooth.startBleScan({ durationMs }),
       new Promise<never>((_resolve, reject) => {
         startupTimeout = setTimeout(() => {
           reject(new Error(
-            'Android BLE scanner did not acknowledge the scan within 10 seconds. Check Nearby Devices permission and native plugin registration.',
+            'Android BLE scanner did not acknowledge the scan within 30 seconds. Check Nearby Devices permission and native plugin registration.',
           ));
-        }, 10000);
+        }, 30000);
       }),
     ]);
     if (startupTimeout) {
@@ -131,13 +146,16 @@ export async function scanNativeAndroidBle(
     }
     onStarted?.();
     const actualDurationMs = Math.min(30000, Math.max(3000, started.durationMs || durationMs));
+    // Android limits apps to 5 scan starts per 30 s; the plugin waits for a free slot
+    // instead of running a scan that would silently return nothing.
+    const startDelayMs = Math.max(0, Math.min(31000, Number(started.startDelayMs) || 0));
     const timeout = new Promise<NativeBleScanState>((resolve) => {
       safetyTimeout = setTimeout(() => resolve({
         state: 'complete',
         devicesFound: observedIds.size,
         durationMs: actualDurationMs,
         message: 'The safety timeout ended the scan window because Android did not send a final scanner event.',
-      }), actualDurationMs + 2500);
+      }), actualDurationMs + startDelayMs + 2500);
     });
     const finalState = await Promise.race([completion, timeout]);
 
@@ -327,3 +345,161 @@ export async function listNativeAndroidPairedDevices(): Promise<NativeClassicObs
   }
 }
 
+/**
+ * Identify nameless devices: a short connection WITHOUT pairing that reads the
+ * GAP Device Name (where iPhones and most new Android phones keep their name),
+ * Appearance and Device Information maker/model, then disconnects.
+ * Results stream through onResult as each device answers.
+ */
+export async function resolveNativeDeviceNames(
+  addresses: string[],
+  onResult: (lookup: NativeNameLookup) => void,
+  timeoutMs = 5000,
+): Promise<number> {
+  if (!isNativeAndroidApp() || addresses.length === 0) return 0;
+  const wanted = new Set(addresses.map((a) => a.toUpperCase()));
+  let listener: PluginListenerHandle | undefined;
+  let guard: ReturnType<typeof setTimeout> | undefined;
+  try {
+    listener = await nativeBluetooth.addListener('nameResolved', (event) => {
+      const address = String(event?.address ?? '').toUpperCase();
+      if (!wanted.has(address)) return;
+      onResult({ ...event, address });
+    });
+    const budget = Math.min(addresses.length, 12) * (timeoutMs + 400) + 3000;
+    const result = await Promise.race([
+      nativeBluetooth.resolveNames({ addresses, timeoutMs }),
+      new Promise<{ resolved: number }>((resolve) => { guard = setTimeout(() => resolve({ resolved: 0 }), budget); }),
+    ]);
+    return result.resolved;
+  } catch {
+    return 0;
+  } finally {
+    if (guard) clearTimeout(guard);
+    try {
+      const removal = listener?.remove();
+      if (removal) void removal.catch(() => undefined);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/** One device heard by any radio during {@link scanEverythingNearby}. */
+export interface NearbyDevice {
+  address: string;
+  name?: string;
+  rssi?: number;
+  serviceUuids: string[];
+  manufacturerData?: Record<string, string>;
+  serviceData?: Record<string, string>;
+  txPower?: number;
+  rawAdvert?: string;
+  addressType?: 'public' | 'random';
+  connectable?: boolean;
+  transports: Array<'BLE' | 'CLASSIC' | 'PAIRED'>;
+  paired: boolean;
+  majorClass?: number;
+  deviceClass?: number;
+  /** Maker/model read from the device itself during name lookup. */
+  maker?: string;
+  model?: string;
+  lastSeen: number;
+}
+
+export interface NearbyScanResult {
+  devices: NearbyDevice[];
+  errors: string[];
+  warning?: string;
+}
+
+/**
+ * Everything Android's own Bluetooth screen would show, and more: a BLE scan and a
+ * classic inquiry running together (old phones, car kits, speakers, earbuds in pairing
+ * mode only answer the inquiry), the system's paired list, and optionally a name lookup
+ * for nameless devices nearby. Used by Find (report + help others) and confirm-nearby.
+ */
+export async function scanEverythingNearby(options: {
+  durationMs?: number;
+  includePaired?: boolean;
+  resolveNames?: boolean;
+  onUpdate?: (devices: NearbyDevice[]) => void;
+} = {}): Promise<NearbyScanResult> {
+  const durationMs = options.durationMs ?? 12000;
+  const map = new Map<string, NearbyDevice>();
+  const errors: string[] = [];
+  let warning: string | undefined;
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const emit = () => {
+    if (!options.onUpdate || pending) return;
+    pending = setTimeout(() => { pending = undefined; options.onUpdate?.(Array.from(map.values())); }, 250);
+  };
+  const upsert = (address: string, patch: Partial<NearbyDevice>, transport: 'BLE' | 'CLASSIC' | 'PAIRED') => {
+    const key = address.trim().toUpperCase();
+    if (!key) return;
+    const prev = map.get(key);
+    const name = patch.name?.trim() || prev?.name;
+    map.set(key, {
+      ...prev,
+      ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),
+      address: key,
+      name: name || undefined,
+      serviceUuids: Array.from(new Set([...(prev?.serviceUuids ?? []), ...(patch.serviceUuids ?? [])])),
+      transports: Array.from(new Set([...(prev?.transports ?? []), transport])),
+      paired: Boolean(prev?.paired || patch.paired),
+      rssi: typeof patch.rssi === 'number' ? patch.rssi : prev?.rssi,
+      lastSeen: Date.now(),
+    });
+    emit();
+  };
+
+  let markStarted: () => void = () => undefined;
+  const bleStarted = new Promise<void>((resolve) => { markStarted = resolve; });
+  const ble = scanNativeAndroidBle((o) => {
+    upsert(o.address || o.id, {
+      name: o.name, rssi: o.rssi, serviceUuids: o.serviceUuids ?? [], manufacturerData: o.manufacturerData,
+      serviceData: o.serviceData, txPower: o.txPower, rawAdvert: o.rawAdvert, addressType: o.addressType, connectable: o.connectable,
+    }, 'BLE');
+  }, durationMs, markStarted).finally(markStarted);
+  // Classic inquiry after BLE has settled the permission prompt, then both run together.
+  await bleStarted;
+  const classic = scanNativeAndroidClassic((o) => {
+    upsert(o.address, { name: o.name, rssi: o.rssi, paired: o.paired, majorClass: o.majorClass, deviceClass: o.deviceClass }, o.leOnly ? 'BLE' : 'CLASSIC');
+  }, durationMs);
+  const paired = options.includePaired === false ? Promise.resolve() : listNativeAndroidPairedDevices().then((list) => {
+    for (const d of list) {
+      const key = d.address.toUpperCase();
+      // Paired devices are "yours"; mark them, but only list them as nearby when a radio heard them.
+      const prev = map.get(key);
+      if (prev) map.set(key, { ...prev, paired: true, name: prev.name || d.name, transports: Array.from(new Set([...prev.transports, 'PAIRED' as const])) });
+      else map.set(key, { address: key, name: d.name, serviceUuids: [], transports: ['PAIRED'], paired: true, lastSeen: 0 });
+    }
+    emit();
+  }).catch(() => undefined);
+
+  const [bleResult, classicResult] = await Promise.all([ble, classic, paired]);
+  if (!bleResult.ok) errors.push(bleResult.error);
+  else warning = bleResult.warning;
+  if (!classicResult.ok) errors.push(classicResult.error);
+  else warning = warning ?? classicResult.warning;
+
+  if (options.resolveNames !== false) {
+    const nameless = Array.from(map.values())
+      .filter((d) => !d.name && d.transports.includes('BLE') && d.connectable !== false && (d.rssi ?? -127) >= -85)
+      .sort((a, b) => (b.rssi ?? -127) - (a.rssi ?? -127))
+      .slice(0, 8)
+      .map((d) => d.address);
+    if (nameless.length) {
+      await resolveNativeDeviceNames(nameless, (r) => {
+        const prev = map.get(r.address);
+        if (!prev || !r.ok) return;
+        map.set(r.address, { ...prev, name: prev.name || r.name || undefined, maker: r.manufacturer ?? prev.maker, model: r.model ?? prev.model });
+        emit();
+      });
+    }
+  }
+  if (pending) { clearTimeout(pending); pending = undefined; }
+  const devices = Array.from(map.values());
+  options.onUpdate?.(devices);
+  return { devices, errors, warning };
+}

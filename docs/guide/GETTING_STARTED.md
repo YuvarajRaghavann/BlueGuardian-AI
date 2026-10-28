@@ -13,7 +13,7 @@ Everything you need to install, run, build and deploy BlueGuardian. For how it w
 
 ## Install the app on a phone
 
-**Requirements:** Android 10 or newer (Secure Share needs Android 10+ on both phones).
+**Requirements:** Android 8 or newer (Secure Share works on Android 8+; Android 10+ phones use a faster channel).
 
 1. Open the latest successful run of **[Build BlueGuardian Android Shell](https://github.com/YuvarajRaghavann/BlueGuardian-AI/actions/workflows/build-android-shell.yml)**.
 2. Under **Artifacts**, download `blueguardian-android-debug-<commit>`.

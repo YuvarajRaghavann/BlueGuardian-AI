@@ -74,3 +74,27 @@ describe('Guardian verdict before connecting', () => {
     expect(assessDevice({ name: 'AirPods', rawAdvert: ADV_APPLE, opinion: opinionFrom(0, 6) }).verdict).toBe('unsafe');
   });
 });
+
+describe('BTGuard three-method fusion before connecting', () => {
+  it('flags a signal stronger than the device transmits (relay or amplifier) as Caution, not Unsafe', () => {
+    const r = assessDevice({ name: 'SoundDrum 1', majorClass: 0x0400, rssi: -20, txPower: -40 + 1 });
+    expect(r.checks.find((c) => c.id === 'physical')?.status).toBe('warn');
+    expect(r.verdict).toBe('caution');
+    expect(r.btguard.methods.physical.risk).toBeGreaterThan(0.3);
+    expect(r.btguard.corroborated).toBe(false);
+  });
+
+  it('accepts a signal consistent with the advertised transmit power', () => {
+    const r = assessDevice({ name: 'SoundDrum 1', majorClass: 0x0400, rssi: -70, txPower: 0 });
+    expect(r.checks.find((c) => c.id === 'physical')?.status).toBe('pass');
+    expect(r.verdict).toBe('clear');
+    expect(r.btguard.trust).toBeGreaterThan(80);
+  });
+
+  it('marks impersonation as hard evidence with a low fused trust score', () => {
+    const r = assessDevice({ name: 'AirPods Pro', rawAdvert: '0201060aff0f00010203040506070809' });
+    expect(r.verdict).toBe('unsafe');
+    expect(r.btguard.hard).toBe(true);
+    expect(r.btguard.trust).toBeLessThan(20);
+  });
+});
