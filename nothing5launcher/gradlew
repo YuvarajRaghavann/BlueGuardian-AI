@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+set -eu
+GRADLE_VERSION="8.13"
+BASE="${GRADLE_USER_HOME:-$HOME/.gradle}/manual-distributions"
+DIST="$BASE/gradle-$GRADLE_VERSION"
+if [ ! -x "$DIST/bin/gradle" ]; then
+  mkdir -p "$BASE"
+  ARCHIVE="$BASE/gradle-$GRADLE_VERSION-bin.zip"
+  if [ ! -f "$ARCHIVE" ]; then
+    curl -fL "https://services.gradle.org/distributions/gradle-$GRADLE_VERSION-bin.zip" -o "$ARCHIVE"
+  fi
+  unzip -q -o "$ARCHIVE" -d "$BASE"
+fi
+exec "$DIST/bin/gradle" "$@"
