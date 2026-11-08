@@ -1,11 +1,11 @@
 package com.community.nothing5.launcher
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Drawable
 import android.os.BatteryManager
 import android.os.Bundle
 import android.provider.Settings
-import android.view.ViewGroup
 import android.widget.ImageView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +16,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -83,26 +84,25 @@ private fun NothingLauncherTheme(content: @Composable () -> Unit) {
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun LauncherHome() {
     val context = LocalContext.current
-    val pm = context.packageManager
-    var apps by remember { mutableStateOf(loadLaunchableApps()) }
+    var apps by remember { mutableStateOf(loadLaunchableApps(context)) }
     var drawer by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
     var selected by remember { mutableStateOf<LaunchableApp?>(null) }
     var now by remember { mutableStateOf(Date()) }
-    val battery = remember {
-        (context.getSystemService(BatteryManager::class.java)
-            ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1)
-    }
+    var battery by remember { mutableIntStateOf(readBattery(context)) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        apps = loadLaunchableApps()
+        apps = loadLaunchableApps(context)
+        battery = readBattery(context)
     }
     LaunchedEffect(Unit) {
         while (true) {
             now = Date()
+            battery = readBattery(context)
             delay(30_000)
         }
     }
@@ -116,9 +116,7 @@ private fun LauncherHome() {
         Modifier.fillMaxSize().background(Void)
             .statusBarsPadding().navigationBarsPadding()
     ) {
-        Column(
-            Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 12.dp)
-        ) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 22.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(
@@ -132,8 +130,10 @@ private fun LauncherHome() {
                         color = Paper, fontSize = 54.sp, fontWeight = FontWeight.Light,
                         letterSpacing = (-2).sp, lineHeight = 56.sp
                     )
-                    Text("MICROGRAPHICS  /  ${battery.takeIf { it >= 0 }?.let { "$it% BATTERY" } ?: "CMF PHONE"}",
-                        color = Dim, fontSize = 9.sp, letterSpacing = 1.7.sp)
+                    Text(
+                        "MICROGRAPHICS  /  ${battery.takeIf { it >= 0 }?.let { "$it% BATTERY" } ?: "CMF PHONE"}",
+                        color = Dim, fontSize = 9.sp, letterSpacing = 1.7.sp
+                    )
                 }
                 IconButton(onClick = {
                     context.startActivity(Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -148,11 +148,16 @@ private fun LauncherHome() {
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(if (drawer) "APPLICATION INDEX" else "YOUR SPACE",
-                        color = Dim, fontSize = 10.sp, letterSpacing = 2.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (drawer) "APPLICATION INDEX" else "YOUR SPACE",
+                        color = Dim, fontSize = 10.sp, letterSpacing = 2.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     Spacer(Modifier.height(4.dp))
-                    Text(if (drawer) "All applications." else "Make room for what matters.",
-                        color = Paper, fontSize = 19.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        if (drawer) "All applications." else "Make room for what matters.",
+                        color = Paper, fontSize = 19.sp, fontWeight = FontWeight.Medium
+                    )
                 }
                 IconButton(onClick = { drawer = !drawer; search = "" }) {
                     Icon(Icons.Rounded.Apps, contentDescription = "Toggle app drawer", tint = Paper)
@@ -167,19 +172,18 @@ private fun LauncherHome() {
             ) { isDrawer ->
                 if (visible.isEmpty()) {
                     Box(Modifier.fillMaxWidth().height(220.dp), contentAlignment = Alignment.Center) {
-                        Text(if (apps.isEmpty()) "No launchable apps found" else "No matches",
-                            color = Dim, fontSize = 13.sp)
+                        Text(if (apps.isEmpty()) "No launchable apps found" else "No matches", color = Dim, fontSize = 13.sp)
                     }
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(4),
-                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                        modifier = Modifier.fillMaxWidth().heightIn(max = if (isDrawer) 560.dp else 250.dp),
                         contentPadding = PaddingValues(bottom = 16.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
                         items(visible, key = { it.packageName }) { app ->
-                            AppTile(app = app, onClick = { launchApp(app) }, onLongPress = { selected = app })
+                            AppTile(app = app, onClick = { launchApp(context, app) }, onLongPress = { selected = app })
                         }
                     }
                 }
@@ -187,8 +191,10 @@ private fun LauncherHome() {
 
             Spacer(Modifier.weight(1f))
             if (!drawer && search.isBlank()) {
-                Text("FAVOURITES  /  RECENTLY USED", color = Dim, fontSize = 9.sp,
-                    letterSpacing = 1.6.sp, modifier = Modifier.padding(bottom = 9.dp))
+                Text(
+                    "FAVOURITES  /  QUICK ACCESS", color = Dim, fontSize = 9.sp,
+                    letterSpacing = 1.6.sp, modifier = Modifier.padding(bottom = 9.dp)
+                )
                 Surface(color = Panel, shape = RoundedCornerShape(23.dp)) {
                     Row(
                         Modifier.fillMaxWidth().height(76.dp).padding(horizontal = 12.dp),
@@ -199,10 +205,7 @@ private fun LauncherHome() {
                             AndroidView(
                                 factory = { ImageView(it).apply { scaleType = ImageView.ScaleType.FIT_CENTER } },
                                 update = { it.setImageDrawable(app.icon) },
-                                modifier = Modifier.size(44.dp).combinedClickable(
-                                    onClick = { launchApp(app) },
-                                    onLongClick = { selected = app }
-                                )
+                                modifier = Modifier.size(44.dp).clickable { launchApp(context, app) }
                             )
                         }
                     }
@@ -238,8 +241,6 @@ private fun LauncherHome() {
         )
     }
 }
-
-private fun LauncherHomeScopePlaceholder() = Unit
 
 @Composable
 private fun SearchBar(value: String, onChange: (String) -> Unit) {
@@ -286,33 +287,31 @@ private fun AppTile(app: LaunchableApp, onClick: () -> Unit, onLongPress: () -> 
     }
 }
 
-private fun loadLaunchableApps(): List<LaunchableApp> {
-    val context = appContext ?: return emptyList()
-    return try {
-        val pm = context.packageManager
-        val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        @Suppress("DEPRECATION")
-        pm.queryIntentActivities(intent, 0)
-            .mapNotNull { info ->
-                val activity = info.activityInfo ?: return@mapNotNull null
-                if (activity.packageName == context.packageName) return@mapNotNull null
-                LaunchableApp(
-                    label = info.loadLabel(pm).toString(),
-                    packageName = activity.packageName,
-                    icon = info.loadIcon(pm)
-                )
-            }
-            .distinctBy { it.packageName }
-            .sortedBy { it.label.lowercase(Locale.getDefault()) }
-    } catch (_: Exception) {
-        emptyList()
-    }
+private fun loadLaunchableApps(context: Context): List<LaunchableApp> = try {
+    val pm = context.packageManager
+    val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+    @Suppress("DEPRECATION")
+    pm.queryIntentActivities(intent, 0)
+        .mapNotNull { info ->
+            val activity = info.activityInfo ?: return@mapNotNull null
+            if (activity.packageName == context.packageName) return@mapNotNull null
+            LaunchableApp(
+                label = info.loadLabel(pm).toString(),
+                packageName = activity.packageName,
+                icon = info.loadIcon(pm)
+            )
+        }
+        .distinctBy { it.packageName }
+        .sortedBy { it.label.lowercase(Locale.getDefault()) }
+} catch (_: Exception) {
+    emptyList()
 }
 
-private var appContext: android.content.Context? = null
+private fun readBattery(context: Context): Int =
+    context.getSystemService(BatteryManager::class.java)
+        ?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
 
-private fun MainActivity.launchApp(app: LaunchableApp) {
-    val launch = packageManager.getLaunchIntentForPackage(app.packageName) ?: return
-    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    startActivity(launch)
+private fun launchApp(context: Context, app: LaunchableApp) {
+    val launchIntent = context.packageManager.getLaunchIntentForPackage(app.packageName) ?: return
+    context.startActivity(launchIntent)
 }
