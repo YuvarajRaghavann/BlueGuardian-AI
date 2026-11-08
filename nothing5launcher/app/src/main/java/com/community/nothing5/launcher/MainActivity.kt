@@ -93,10 +93,11 @@ private fun LauncherHome() {
     var selected by remember { mutableStateOf<LaunchableApp?>(null) }
     var now by remember { mutableStateOf(Date()) }
     var battery by remember { mutableIntStateOf(readBattery(context)) }
-    var favorites by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet())?.toSet() ?: emptySet()) }
-    var appFolders by remember { mutableStateOf(prefs.getStringSet("app_folders", emptySet())?.associate {
-        val p = it.split("|", limit = 2); p[0] to p.getOrElse(1) { "Tools" }
-    } ?: emptyMap()) }
+    var favorites by remember { mutableStateOf<Set<String>>(prefs.getStringSet("favorites", emptySet<String>())?.toSet() ?: emptySet()) }
+    var appFolders by remember { mutableStateOf<Map<String, String>>(prefs.getStringSet("app_folders", emptySet<String>())?.mapNotNull { entry ->
+        val parts = entry.split("|", limit = 2)
+        if (parts.isNotEmpty()) parts[0] to parts.getOrElse(1) { "Tools" } else null
+    }?.toMap() ?: emptyMap()) }
     var use24Hour by remember { mutableStateOf(prefs.getBoolean("clock24", true)) }
     var options by remember { mutableStateOf(false) }
     var folderPicker by remember { mutableStateOf<LaunchableApp?>(null) }
