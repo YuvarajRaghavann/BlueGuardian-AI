@@ -23,3 +23,6 @@ Nothing's official OS 5.0 feature set is built on Android 17. CMF Phone 1 is exc
 ## Planned follow-on modules
 
 Wallpaper-aware tinting, transparent native widgets, selectable clockfaces, folders and batch icon placement, a timer widget, an Away Time dashboard, sticker/Collector-style widgets, custom gesture actions, accessibility testing and performance tuning.
+
+
+Cloud CI uses Android SDK Platform 36; this build is for the CMF Phone 1 Android 16 baseline.
